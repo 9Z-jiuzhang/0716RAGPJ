@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     SECRET_KEY: str = "change-me"
     LOG_LEVEL: str = "INFO"
+    LOG_DIR: str = str(_PROJECT_ROOT / "data" / "logs")
+    LOG_MAX_BYTES: int = 10 * 1024 * 1024
+    LOG_BACKUP_COUNT: int = 5
 
     POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: int = 5432
@@ -57,6 +60,7 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "http://langfuse-server:3000"
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_REDACT_MAX_LEN: int = 500
 
     JWT_SECRET_KEY: str = "change-me"
     JWT_ALGORITHM: str = "HS256"

@@ -143,7 +143,22 @@ async def execute_test_run(
         )
 
     service = HitTestService(db)
+    from app.services.langfuse_service import get_langfuse
+
+    lf = get_langfuse()
+    trace = lf.start_trace(
+        name="hit_test_run",
+        user_id=str(getattr(user, "id", "")),
+        metadata={"case_id": str(request.case_id) if request.case_id else None},
+    )
     run = await service.execute_test_run(request=request)
+    lf.span_retrieval(
+        trace,
+        query=f"hit_test case={request.case_id}",
+        context_summary=f"run_id={getattr(run, 'id', run)}",
+        hit_count=0,
+    )
+    lf.flush()
 
     return BaseResponse(data=run)
 

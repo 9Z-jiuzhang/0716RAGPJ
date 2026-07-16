@@ -26,6 +26,9 @@ build/
 # 数据卷（Docker 挂载目录）
 data/*
 !data/.gitkeep
+!data/logs/
+data/logs/*
+!data/logs/.gitkeep
 
 # 操作系统
 .DS_Store
@@ -45,7 +48,8 @@ node_modules/
 
 # 日志
 *.log
-logs/
+/logs/
+!data/logs/.gitkeep
 
 # Alembic 本地覆盖（如有）
 alembic.ini.local

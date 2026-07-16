@@ -1,26 +1,25 @@
 """FastAPI 应用入口与身份模块初始数据。"""
-import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, text
+from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from .api.helpers import ok, resolve_request_id
 from .api.v1.documents import router as documents_router
 from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.router import api_router
 from .core.config import settings
 from .core.database import SessionLocal, engine
+from .core.logging import setup_logging
+from .core.metrics import metrics_payload
 from .core.security import hash_password
 from .core.seed_data import BUILTIN_PERMISSIONS, BUILTIN_ROLES
+from .middleware.access_log import ObservabilityMiddleware
 from .models import Base, Permission, Role, User
-from .schemas.common import BaseResponse
-from .schemas.monitor import HealthCheckItem, HealthResponse
-
-_APP_STARTED_AT = time.time()
+from .services.langfuse_service import get_langfuse
 
 
 async def _all_permissions(db: AsyncSession) -> list[Permission]:
@@ -81,10 +80,13 @@ async def seed_identity_data() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    setup_logging()
+    get_langfuse()
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     await seed_identity_data()
     yield
+    get_langfuse().flush()
     await engine.dispose()
 
 
@@ -96,34 +98,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(ObservabilityMiddleware)
 app.include_router(api_router)
 app.include_router(knowledge_bases_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 
 
-@app.get(
-    "/api/v1/monitor/health",
-    response_model=BaseResponse,
-    tags=["系统监控"],
-    summary="系统健康检查",
-)
-async def health(request_id: str = Depends(resolve_request_id)) -> BaseResponse:
-    """检查数据库连通性；其余组件待对应模块接入后补充。"""
-    checks: dict[str, HealthCheckItem] = {}
-    overall = "healthy"
-    try:
-        t0 = time.perf_counter()
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        checks["postgres"] = HealthCheckItem(status="healthy", latency_ms=round((time.perf_counter() - t0) * 1000, 2))
-    except Exception:
-        checks["postgres"] = HealthCheckItem(status="unhealthy")
-        overall = "unhealthy"
-
-    body = HealthResponse(
-        status=overall,
-        version=settings.APP_VERSION,
-        uptime_seconds=int(time.time() - _APP_STARTED_AT),
-        checks=checks,
-    )
-    return ok(body, request_id=request_id)
+@app.get("/metrics", tags=["系统监控"], summary="Prometheus 指标端点")
+async def metrics() -> Response:
+    """Prometheus 刮取入口（无 BaseResponse 包装）。"""
+    payload, content_type = metrics_payload()
+    return Response(content=payload, media_type=content_type)

@@ -1,0 +1,36 @@
+{
+  "uid": "rag-alerts",
+  "title": "告警面板",
+  "tags": ["rag", "alerts"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "5xx 错误率（告警候选）",
+      "id": 1,
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "targets": [{"expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "5xx_rps", "refId": "A"}],
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "正式告警规则可在 Prometheus / Grafana Alerting 中配置；本面板用于观察活跃错误趋势。"
+    },
+    {
+      "type": "stat",
+      "title": "进程常驻内存 (bytes)",
+      "id": 2,
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 8},
+      "targets": [{"expr": "process_resident_memory_bytes", "refId": "A"}],
+      "datasource": {"type": "prometheus", "uid": "prometheus"}
+    },
+    {
+      "type": "stat",
+      "title": "CPU 秒累计",
+      "id": 3,
+      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 8},
+      "targets": [{"expr": "rate(process_cpu_seconds_total[5m])", "refId": "A"}],
+      "datasource": {"type": "prometheus", "uid": "prometheus"}
+    }
+  ]
+}

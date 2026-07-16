@@ -1,0 +1,15 @@
+# Prometheus 可选告警规则（基础骨架）
+groups:
+  - name: rag_api
+    rules:
+      - alert: HighHTTPErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(http_requests_total[5m])), 1e-9) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 5xx 错误率过高"
+          description: "近 5 分钟 5xx 占比超过 5%"

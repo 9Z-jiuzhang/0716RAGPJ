@@ -1,0 +1,38 @@
+{
+  "uid": "rag-docs",
+  "title": "文档处理",
+  "tags": ["rag", "documents"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "文档处理状态",
+      "id": 1,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "sum by (status) (rate(doc_process_total[5m]))", "legendFormat": "{{status}}", "refId": "A"}],
+      "datasource": {"type": "prometheus", "uid": "prometheus"}
+    },
+    {
+      "type": "timeseries",
+      "title": "处理耗时",
+      "id": 2,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(doc_process_latency_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(doc_process_latency_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B"}
+      ],
+      "datasource": {"type": "prometheus", "uid": "prometheus"}
+    },
+    {
+      "type": "stat",
+      "title": "向量化队列长度",
+      "id": 3,
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 8},
+      "targets": [{"expr": "vectorize_queue_size", "refId": "A"}],
+      "datasource": {"type": "prometheus", "uid": "prometheus"}
+    }
+  ]
+}

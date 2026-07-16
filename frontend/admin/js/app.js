@@ -673,30 +673,64 @@ async function pageAudit() {
   }
 }
 
-/* ========== 系统监控（Grafana 嵌入占位） ========== */
+/* ========== 系统监控（Grafana 嵌入） ========== */
 async function pageMonitor() {
   if (!requirePerm("system:read", "系统监控")) return;
   let health = { status: "unknown", checks: {} };
+  let stats = null;
   try {
     health = await api.get("/monitor/health");
   } catch {
     /* ignore */
   }
+  try {
+    stats = await api.get("/monitor/stats");
+  } catch (e) {
+    stats = { error: e.message };
+  }
+  const checksHtml = Object.entries(health.checks || {})
+    .map(([k, v]) => {
+      const status = typeof v === "object" ? v.status : v;
+      const latency = typeof v === "object" && v.latency_ms != null ? ` (${v.latency_ms}ms)` : "";
+      return `<li><code>${escapeHtml(k)}</code> = ${escapeHtml(String(status))}${escapeHtml(latency)}</li>`;
+    })
+    .join("");
+  const statsHtml =
+    stats && !stats.error
+      ? `<ul class="list-plain">
+        <li>用户数：${stats.user_count ?? 0}</li>
+        <li>知识库：${stats.kb_count ?? 0}</li>
+        <li>文档数：${stats.doc_count ?? 0}</li>
+        <li>活跃会话：${stats.active_sessions ?? 0}</li>
+        <li>任务队列：${stats.task_queue_size ?? 0}</li>
+      </ul>`
+      : `<p class="text-muted">${escapeHtml(stats?.error || "暂无统计")}</p>`;
   document.getElementById("pageRoot").innerHTML = `
     <div class="card" style="margin-bottom:12px">
       <h3 class="card-title">健康检查</h3>
-      <p>总体状态：<strong>${escapeHtml(health.status)}</strong></p>
-      <p class="text-muted">${Object.entries(health.checks || {})
-        .map(([k, v]) => `${k}=${v}`)
-        .join(" · ")}</p>
+      <p>总体状态：<strong>${escapeHtml(health.status)}</strong>
+        ${health.uptime_seconds != null ? `<span class="text-muted"> · uptime ${health.uptime_seconds}s</span>` : ""}
+      </p>
+      <ul class="list-plain">${checksHtml || "<li class='text-muted'>无组件检查数据</li>"}</ul>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <h3 class="card-title">系统统计</h3>
+      ${statsHtml}
     </div>
     <div class="card">
-      <h3 class="card-title">Grafana 面板嵌入</h3>
-      <p class="text-muted">正式环境将嵌入本地 Grafana（Prometheus 指标）。以下为占位区域，保持布局可落地。</p>
-      <div class="embed-frame">
-        <strong>Grafana 面板占位</strong>
-        <span>正式环境将嵌入本地 Grafana（Prometheus 指标）</span>
-        <span class="text-muted">占位地址：http://localhost:3000</span>
+      <h3 class="card-title">Grafana 面板</h3>
+      <p class="text-muted">经 Nginx 反代嵌入本地 Grafana（Prometheus 数据源）。直连：
+        <a href="http://localhost:8080/grafana/" target="_blank" rel="noopener">http://localhost:8080/grafana/</a>
+        或 <a href="http://localhost:3001/" target="_blank" rel="noopener">:3001</a>
+      </p>
+      <div class="embed-frame" style="padding:0;min-height:640px">
+        <iframe
+          title="Grafana"
+          src="/grafana/d/rag-overview?orgId=1&kiosk"
+          style="width:100%;height:640px;border:0;border-radius:8px;background:#0b1220"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+        ></iframe>
       </div>
     </div>`;
 }

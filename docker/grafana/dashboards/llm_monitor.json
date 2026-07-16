@@ -1,0 +1,27 @@
+{
+  "uid": "rag-llm",
+  "title": "LLM 监控",
+  "tags": ["rag", "llm"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Token 用量趋势",
+      "id": 1,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "sum by (model, direction) (rate(llm_tokens_total[5m]))", "legendFormat": "{{model}}/{{direction}}", "refId": "A"}],
+      "datasource": {"type": "prometheus", "uid": "prometheus"}
+    },
+    {
+      "type": "timeseries",
+      "title": "模型调用分布",
+      "id": 2,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "sum by (component, status) (rate(llm_calls_total[5m]))", "legendFormat": "{{component}}/{{status}}", "refId": "A"}],
+      "datasource": {"type": "prometheus", "uid": "prometheus"}
+    }
+  ]
+}
