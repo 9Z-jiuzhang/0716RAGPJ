@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     """从项目根目录 .env 加载环境变量。"""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
     APP_NAME: str = "AI-KnowledgeBase-RAG"
     APP_VERSION: str = "2.1.0"
     DEBUG: bool = False
@@ -31,10 +32,19 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "change-me"
     MINIO_BUCKET: str = "knowledge-base-docs"
 
+    LLM_PROVIDER: str = "openai"
+    LLM_API_KEY: str = "change-me"
+    LLM_MODEL: str = "gpt-4o"
+    LLM_BASE_URL: str = ""
+
     EMBEDDING_PROVIDER: str = "dashscope"
     EMBEDDING_API_KEY: str = "change-me"
     EMBEDDING_MODEL_NAME: str = "text-embedding-v3"
     EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    RERANK_PROVIDER: str = ""
+    RERANK_API_KEY: str = ""
+    RERANK_MODEL: str = ""
 
     LANGFUSE_HOST: str = "http://langfuse-server:3000"
     LANGFUSE_PUBLIC_KEY: str = ""
@@ -45,20 +55,23 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     CORS_ORIGINS: str = "*"
-    # 快照策略（产品手册 5.8.4）
+
     SNAPSHOT_MAX_COUNT: int = 50
     SNAPSHOT_RETENTION_DAYS: int = 90
 
-    # 对齐 nginx client_max_body_size 100m
     MAX_UPLOAD_BYTES: int = 100 * 1024 * 1024
 
     @property
     def database_url(self) -> str:
-        """返回 SQLAlchemy asyncpg 连接地址。"""
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
+
+    @property
+    def DATABASE_URL(self) -> str:
+        """兼容旧代码的数据库连接地址。"""
+        return self.database_url
 
 
 @lru_cache

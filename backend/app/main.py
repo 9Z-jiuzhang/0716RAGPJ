@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
+from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.router import api_router
 from .core.config import settings
 from .core.database import SessionLocal, engine
@@ -24,10 +25,16 @@ async def seed_identity_data() -> None:
             "snapshot:write": "创建/删除快照",
             "snapshot:restore": "执行快照回退",
             "audit:read": "查看操作审计日志",
+            "kb:read": "查看知识库",
+            "kb:write": "管理知识库",
+            "kb:admin": "知识库管理员",
             "kb:upload": "上传文档到知识库",
+            "kb:vectorize": "知识库重新向量化",
             "doc:read": "查看文档与分段",
             "doc:write": "删除/规范化文档",
             "doc:segment": "分段规则与重分段",
+            "test:read": "查看命中率测试",
+            "test:write": "管理命中率测试",
         }
         existing = {p.code for p in (await db.scalars(select(Permission))).all()}
         for code, name in permissions.items():
@@ -40,7 +47,6 @@ async def seed_identity_data() -> None:
                 roles[name] = Role(name=name, description=description, is_builtin=True)
                 db.add(roles[name])
         await db.flush()
-        # 始终把最新权限集合同步给超级管理员（含文档/快照模块权限）
         roles["超级管理员"].permissions = list((await db.scalars(select(Permission))).all())
         if not await db.scalar(select(User).where(User.username == "admin")):
             db.add(
@@ -73,8 +79,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router)
+app.include_router(knowledge_bases_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/monitor/health", tags=["系统监控"])
 async def health():
     return {"status": "ok", "service": settings.APP_NAME}
+
+
+@app.get("/")
+async def root():
+    return {"message": f"{settings.APP_NAME} API", "version": settings.APP_VERSION}

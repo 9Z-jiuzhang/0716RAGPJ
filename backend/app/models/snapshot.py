@@ -39,6 +39,9 @@ class Snapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     creator_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="创建人"
     )
+    document_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    segment_rules: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
     knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", back_populates="snapshots")
     documents: Mapped[list["SnapshotDocument"]] = relationship(
@@ -69,3 +72,4 @@ class SnapshotDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     snapshot: Mapped[Snapshot] = relationship("Snapshot", back_populates="documents")
+    document = relationship("Document", back_populates="snapshot_documents")

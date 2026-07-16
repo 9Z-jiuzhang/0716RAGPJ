@@ -77,3 +77,22 @@ class NormalizeResult(BaseModel):
     removed_duplicate_blocks: int = 0
     char_count_before: int = 0
     char_count_after: int = 0
+
+
+# kerper 模块占位兼容（实际 5.5 实现见 app.services.document_service）
+class DocumentFilter(BaseModel):
+    filename: str | None = None
+    file_type: str | None = None
+    status: str | None = None
+
+
+class DocumentUploadResponse(BaseModel):
+    id: str
+    filename: str
+    file_type: str
+    file_size: int
+    status: str
+
+
+SegmentRuleUpdate = UpdateSegmentRulesRequest
+ChunkUpdate = UpdateChunkRequest

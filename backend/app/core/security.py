@@ -1,5 +1,6 @@
 """密码哈希和 JWT 双令牌处理。"""
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import HTTPException, status
 from jose import JWTError, jwt
@@ -18,6 +19,11 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed_password: str) -> bool:
     """验证密码，不暴露密码内容。"""
     return password_context.verify(password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    """兼容旧代码的密码哈希函数。"""
+    return hash_password(password)
 
 
 def _token(subject: str, token_type: str, expires: timedelta) -> str:
@@ -43,3 +49,11 @@ def decode_token(token: str, expected_type: str = "access") -> dict:
         return data
     except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录凭证无效或已过期") from exc
+
+
+def decode_token_optional(token: str) -> Optional[dict]:
+    """兼容旧代码的可选解码函数，失败时返回 None。"""
+    try:
+        return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    except JWTError:
+        return None

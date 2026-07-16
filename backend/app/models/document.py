@@ -47,7 +47,9 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="uploaded", nullable=False, index=True, comment="处理状态")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True, comment="失败原因")
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="内容哈希，用于快照差异对比")
-    creator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    creator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
     # 5.5 流水线内部字段（不进入 DocumentResponse）
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="解析原文")
     normalized_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="规范化文本")
@@ -60,6 +62,7 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     chunks: Mapped[list[DocumentChunk]] = relationship(
         "DocumentChunk", back_populates="document", cascade="all, delete-orphan", lazy="selectin"
     )
+    snapshot_documents = relationship("SnapshotDocument", back_populates="document")
 
 
 class DocumentChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -90,7 +93,11 @@ class KbChunkRule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "kb_chunk_rule"
 
     kb_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), unique=True, index=True, nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+        nullable=False,
     )
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=DEFAULT_CHUNK_SIZE)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=DEFAULT_CHUNK_OVERLAP)

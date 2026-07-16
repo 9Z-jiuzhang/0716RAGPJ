@@ -1,9 +1,12 @@
 """知识库与知识库权限模型。"""
 
+from __future__ import annotations
+
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,7 +23,9 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "knowledge_bases"
 
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True, comment="知识库名称")
-    type: Mapped[str] = mapped_column(String(50), nullable=False, comment="类型: technical_doc/product_manual/faq/general")
+    type: Mapped[str] = mapped_column(
+        String(50), nullable=False, comment="类型: technical_doc/product_manual/faq/general"
+    )
     tags: Mapped[list[str]] = mapped_column(
         ARRAY(String), nullable=False, server_default="{}", comment="标签列表"
     )
@@ -32,12 +37,16 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, comment="状态")
     current_index_version: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="当前生效索引版本号")
     creator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    documents: Mapped[list["Document"]] = relationship("Document", back_populates="knowledge_base", lazy="selectin")
-    snapshots: Mapped[list["Snapshot"]] = relationship("Snapshot", back_populates="knowledge_base", lazy="noload")
-    permissions: Mapped[list["KBPermission"]] = relationship(
+    documents: Mapped[list[Document]] = relationship("Document", back_populates="knowledge_base", lazy="selectin")
+    snapshots: Mapped[list[Snapshot]] = relationship("Snapshot", back_populates="knowledge_base", lazy="noload")
+    index_versions = relationship("IndexVersion", back_populates="knowledge_base", cascade="all, delete-orphan")
+    permissions: Mapped[list[KBPermission]] = relationship(
         "KBPermission", back_populates="knowledge_base", cascade="all, delete-orphan", lazy="selectin"
     )
+
+    __table_args__ = (UniqueConstraint("name", "deleted_at", name="uq_kb_name_deleted"),)
 
 
 class KBPermission(Base, UUIDPrimaryKeyMixin, TimestampMixin):

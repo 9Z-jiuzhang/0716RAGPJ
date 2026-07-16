@@ -13,3 +13,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """每个请求独立获取并关闭数据库会话。"""
     async with SessionLocal() as session:
         yield session
+
+
+AsyncSessionLocal = SessionLocal
