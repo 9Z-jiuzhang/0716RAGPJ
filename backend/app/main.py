@@ -1,9 +1,10 @@
-"""FastAPI 应用入口与身份模块初始数据。"""
+"""FastAPI 应用入口：生命周期、种子数据、健康检查与模块路由挂载。"""
 import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,13 +13,17 @@ from .api.helpers import ok, resolve_request_id
 from .api.v1.documents import router as documents_router
 from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.router import api_router
+from .core.chroma import close_chroma, init_chroma
 from .core.config import settings
 from .core.database import SessionLocal, engine
+from .core.redis import close_redis, init_redis, ping_redis
 from .core.security import hash_password
 from .core.seed_data import BUILTIN_PERMISSIONS, BUILTIN_ROLES
 from .models import Base, Permission, Role, User
 from .schemas.common import BaseResponse
 from .schemas.monitor import HealthCheckItem, HealthResponse
+from .services.embedding import embedding_service
+from .services.llm import llm_service
 
 _APP_STARTED_AT = time.time()
 
@@ -81,10 +86,22 @@ async def seed_identity_data() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # 启动：建表、种子数据、Redis / Chroma
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     await seed_identity_data()
+    await init_redis()
+    try:
+        init_chroma()
+    except Exception:
+        # Chroma 暂不可用时不阻断 API 启动（健康检查会标记 degraded）
+        pass
     yield
+    # 关闭：释放 HTTP / Redis / DB
+    await llm_service.aclose()
+    await embedding_service.aclose()
+    await close_redis()
+    close_chroma()
     await engine.dispose()
 
 
@@ -101,6 +118,24 @@ app.include_router(knowledge_bases_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 
 
+@app.get("/", include_in_schema=False)
+async def root():
+    """根路径重定向到 Swagger 文档。"""
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/api", include_in_schema=False)
+async def api_index():
+    """API 入口说明。"""
+    return {
+        "service": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "docs": "/docs",
+        "health": "/api/v1/monitor/health",
+        "qa_ask": "POST /api/v1/qa/ask",
+    }
+
+
 @app.get(
     "/api/v1/monitor/health",
     response_model=BaseResponse,
@@ -108,17 +143,49 @@ app.include_router(documents_router, prefix="/api/v1")
     summary="系统健康检查",
 )
 async def health(request_id: str = Depends(resolve_request_id)) -> BaseResponse:
-    """检查数据库连通性；其余组件待对应模块接入后补充。"""
+    """检查 PostgreSQL / Redis / Chroma 连通性。"""
+    from .core.chroma import ping_chroma
+
     checks: dict[str, HealthCheckItem] = {}
     overall = "healthy"
+
     try:
         t0 = time.perf_counter()
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        checks["postgres"] = HealthCheckItem(status="healthy", latency_ms=round((time.perf_counter() - t0) * 1000, 2))
+        checks["postgres"] = HealthCheckItem(
+            status="healthy", latency_ms=round((time.perf_counter() - t0) * 1000, 2)
+        )
     except Exception:
         checks["postgres"] = HealthCheckItem(status="unhealthy")
         overall = "unhealthy"
+
+    try:
+        t0 = time.perf_counter()
+        redis_ok = await ping_redis()
+        if redis_ok:
+            checks["redis"] = HealthCheckItem(
+                status="healthy", latency_ms=round((time.perf_counter() - t0) * 1000, 2)
+            )
+        else:
+            checks["redis"] = HealthCheckItem(status="unhealthy")
+            overall = "degraded" if overall == "healthy" else overall
+    except Exception:
+        checks["redis"] = HealthCheckItem(status="unhealthy")
+        overall = "degraded" if overall == "healthy" else overall
+
+    try:
+        t0 = time.perf_counter()
+        if ping_chroma():
+            checks["chroma"] = HealthCheckItem(
+                status="healthy", latency_ms=round((time.perf_counter() - t0) * 1000, 2)
+            )
+        else:
+            checks["chroma"] = HealthCheckItem(status="unhealthy")
+            overall = "degraded" if overall == "healthy" else overall
+    except Exception:
+        checks["chroma"] = HealthCheckItem(status="unhealthy")
+        overall = "degraded" if overall == "healthy" else overall
 
     body = HealthResponse(
         status=overall,

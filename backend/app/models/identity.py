@@ -9,12 +9,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
 
-user_roles = Table("user_roles", Base.metadata,
+user_roles = Table(
+    "user_roles",
+    Base.metadata,
     Column("user_id", UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
-    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True))
-role_permissions = Table("role_permissions", Base.metadata,
     Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
-    Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True))
+)
+# permissions.id 为 UUID，关联列必须同类型
+role_permissions = Table(
+    "role_permissions",
+    Base.metadata,
+    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class User(TimestampMixin, Base):

@@ -15,10 +15,29 @@ from .database import get_db
 from .security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
     """解析 access token，并拒绝不存在或被禁用的用户。"""
+    return await _resolve_user_from_token(token, db)
+
+
+async def get_optional_current_user(
+    token: str | None = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """
+    可选认证：无 Token 时返回 None（访客模式）；
+    提供了 Token 则必须有效，否则 401。
+    """
+    if not token:
+        return None
+    return await _resolve_user_from_token(token, db)
+
+
+async def _resolve_user_from_token(token: str, db: AsyncSession) -> User:
+    """从 Bearer Token 解析并加载用户。"""
     payload = decode_token(token)
     user = await db.scalar(select(User).where(User.id == uuid.UUID(payload["sub"])))
     if not user:
