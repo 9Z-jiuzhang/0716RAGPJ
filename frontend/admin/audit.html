@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>审计日志 - AI 知识库 RAG</title>
+  <link rel="stylesheet" href="css/admin.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">AI 知识库 RAG</div>
+      <a href="index.html" data-page="dashboard">仪表盘</a>
+      <a href="users.html" data-page="users">用户管理</a>
+      <a href="roles.html" data-page="roles">角色管理</a>
+      <a href="models.html" data-page="models">大模型管理</a>
+      <a href="knowledge-bases.html" data-page="kb">知识库管理</a>
+      <a href="snapshots.html" data-page="snapshots">快照管理</a>
+      <a href="hit-test.html" data-page="hit">命中率测试</a>
+      <a href="audit.html" data-page="audit">审计日志</a>
+      <a href="monitor.html" data-page="monitor">系统监控</a>
+    </aside>
+    <main class="main">
+      <h1 class="page-title">审计日志</h1>
+      <p class="page-desc">对应产品手册 5.8.5：记录操作者、时间、对象、前后版本、请求标识与结果。</p>
+
+      <div class="toolbar">
+        <input id="action" type="text" placeholder="动作前缀，如 snapshot." />
+        <select id="resourceType">
+          <option value="">全部资源</option>
+          <option value="snapshot">snapshot</option>
+          <option value="kb">kb</option>
+          <option value="doc">doc</option>
+          <option value="user">user</option>
+          <option value="role">role</option>
+        </select>
+        <select id="result">
+          <option value="">全部结果</option>
+          <option value="success">success</option>
+          <option value="failure">failure</option>
+        </select>
+        <button id="btnSearch" type="button">查询</button>
+      </div>
+      <p id="status" class="muted"></p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>动作</th>
+            <th>资源</th>
+            <th>资源 ID</th>
+            <th>结果</th>
+            <th>请求 ID</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+
+      <div id="detail" class="panel" style="display:none">
+        <h3>详情</h3>
+        <pre id="detailBody" style="white-space:pre-wrap;font-size:12px"></pre>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/admin.js"></script>
+  <script>
+    AdminApp.highlightNav("audit");
+
+    function setStatus(msg, isError) {
+      const el = document.getElementById("status");
+      el.textContent = msg || "";
+      el.className = isError ? "error" : "muted";
+    }
+
+    async function loadLogs() {
+      const qs = new URLSearchParams();
+      const action = document.getElementById("action").value.trim();
+      const resourceType = document.getElementById("resourceType").value;
+      const result = document.getElementById("result").value;
+      if (action) qs.set("action", action);
+      if (resourceType) qs.set("resource_type", resourceType);
+      if (result) qs.set("result", result);
+      qs.set("page", "1");
+      qs.set("page_size", "50");
+      setStatus("加载中…");
+      try {
+        const res = await AdminApp.api(`/audit/logs?${qs.toString()}`);
+        const items = (res.data && res.data.items) || [];
+        document.getElementById("tbody").innerHTML = items.map((r) => `
+          <tr>
+            <td>${r.created_at || ""}</td>
+            <td>${r.action}</td>
+            <td>${r.resource_type}</td>
+            <td>${r.resource_id || ""}</td>
+            <td><span class="badge ${r.result === "failure" ? "removed" : "added"}">${r.result}</span></td>
+            <td>${r.request_id || ""}</td>
+            <td><button type="button" data-id="${r.id}">详情</button></td>
+          </tr>
+        `).join("") || `<tr><td colspan="7" class="muted">暂无记录</td></tr>`;
+        setStatus(`共 ${res.data.total || 0} 条`);
+      } catch (e) {
+        setStatus(e.message, true);
+      }
+    }
+
+    document.getElementById("btnSearch").onclick = loadLogs;
+    document.getElementById("tbody").onclick = async (ev) => {
+      const btn = ev.target.closest("button[data-id]");
+      if (!btn) return;
+      try {
+        const res = await AdminApp.api(`/audit/logs/${btn.dataset.id}`);
+        document.getElementById("detail").style.display = "block";
+        document.getElementById("detailBody").textContent = JSON.stringify(res.data, null, 2);
+      } catch (e) {
+        setStatus(e.message, true);
+      }
+    };
+
+    loadLogs();
+  </script>
+</body>
+</html>

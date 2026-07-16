@@ -1,5 +1,23 @@
-"""导出认证域 ORM 模型。"""
-from .base import Base
-from .identity import AuditLog, Permission, Role, User
+"""导出 ORM 模型，供 Alembic / create_all 发现。"""
 
-__all__ = ["Base", "User", "Role", "Permission", "AuditLog"]
+from .base import Base
+from .document import Document, DocumentChunk
+from .identity import AuditLog, Permission, Role, User
+from .index_version import IndexVersion
+from .knowledge_base import KBPermission, KnowledgeBase
+from .snapshot import Snapshot, SnapshotDocument
+
+__all__ = [
+    "Base",
+    "User",
+    "Role",
+    "Permission",
+    "AuditLog",
+    "KnowledgeBase",
+    "KBPermission",
+    "Document",
+    "DocumentChunk",
+    "IndexVersion",
+    "Snapshot",
+    "SnapshotDocument",
+]

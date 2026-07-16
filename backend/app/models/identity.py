@@ -1,9 +1,12 @@
 """认证、角色、权限和审计日志的 ORM 模型。"""
 import uuid
 from datetime import datetime
+from typing import Any, Optional
+
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from .base import Base, TimestampMixin
 
 user_roles = Table("user_roles", Base.metadata,
@@ -45,10 +48,17 @@ class Permission(Base):
 
 
 class AuditLog(TimestampMixin, Base):
+    """操作审计日志（产品手册 5.8.5）。"""
+
     __tablename__ = "audit_logs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String(100), index=True)
-    resource_type: Mapped[str] = mapped_column(String(50))
+    resource_type: Mapped[str] = mapped_column(String(50), index=True)
     resource_id: Mapped[str | None] = mapped_column(String(100))
-    detail: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    result: Mapped[str] = mapped_column(String(20), default="success", nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
