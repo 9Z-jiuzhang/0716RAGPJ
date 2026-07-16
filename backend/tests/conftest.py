@@ -72,6 +72,13 @@ async def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
     monkeypatch.setattr("app.core.redis.init_redis", _init)
     monkeypatch.setattr("app.core.redis.get_redis_client", lambda: client)
     monkeypatch.setattr("app.core.redis.ping_redis", AsyncMock(return_value=True))
+
+    async def _close() -> None:
+        from app.core import redis as redis_module
+
+        redis_module._redis_client = None
+
+    monkeypatch.setattr("app.core.redis.close_redis", _close)
     return client
 
 
@@ -118,8 +125,15 @@ async def client_mocked(fake_redis: FakeRedis, monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest_asyncio.fixture
-async def client():
-    """每个测试独立启动应用 lifespan（需可用的 Postgres）。"""
+async def client(
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[AsyncClient]:
+    """每个测试独立启动应用 lifespan（Postgres 真实；Redis/Chroma 使用替身避免 event loop 冲突）。"""
+    monkeypatch.setattr("app.main.init_chroma", lambda: None)
+    monkeypatch.setattr("app.main.close_chroma", lambda: None)
+    monkeypatch.setattr("app.core.chroma.ping_chroma", lambda: True)
+
     from app.main import app, lifespan
 
     async with lifespan(app):

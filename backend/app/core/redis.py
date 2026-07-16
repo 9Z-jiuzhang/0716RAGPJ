@@ -30,8 +30,14 @@ async def init_redis() -> Redis:
 async def close_redis() -> None:
     """应用关闭时释放 Redis 连接池资源。"""
     global _redis_client
-    if _redis_client is not None:
+    if _redis_client is None:
+        return
+    try:
         await _redis_client.aclose()
+    except RuntimeError:
+        # pytest-asyncio 用例级 event loop 关闭后，aclose 可能触发此错误
+        pass
+    finally:
         _redis_client = None
 
 
