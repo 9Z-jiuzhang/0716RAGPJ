@@ -1,7 +1,6 @@
 """业务服务包。"""
 
 from app.services.audit import AuditService
-from app.services.document import DocumentService
 from app.services.embedding import EmbeddingService, embedding_service, embed_texts, get_embedding_client
 from app.services.index_switch import IndexSwitchService
 from app.services.knowledge_base import KnowledgeBaseService
@@ -19,7 +18,6 @@ except ImportError:  # pragma: no cover
 
 __all__ = [
     "KnowledgeBaseService",
-    "DocumentService",
     "TaskQueueService",
     "IndexSwitchService",
     "SnapshotService",

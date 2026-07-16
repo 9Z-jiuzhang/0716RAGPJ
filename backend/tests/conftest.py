@@ -21,13 +21,23 @@ os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("JWT_SECRET_KEY", "pytest-secret-key-change-me-32bytes!!")
 os.environ.setdefault("LLM_API_KEY", "test-key")
 os.environ.setdefault("EMBEDDING_API_KEY", "test-key")
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+
+# 确保配置单例读取到测试环境变量
+try:
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+except Exception:
+    pass
 
 
 class FakeRedis:
-    """内存 Redis 替身，满足会话记忆与健康检查最小接口。"""
+    """内存 Redis 替身，满足会话记忆、限流与任务队列最小接口。"""
 
     def __init__(self) -> None:
         self._store: dict[str, str] = {}
+        self._lists: dict[str, list[str]] = {}
 
     async def ping(self) -> bool:
         return True
@@ -39,16 +49,30 @@ class FakeRedis:
         self._store[key] = value
         return True
 
+    async def incr(self, key: str) -> int:
+        current = int(self._store.get(key) or "0") + 1
+        self._store[key] = str(current)
+        return current
+
+    async def lpush(self, key: str, *values: str) -> int:
+        bucket = self._lists.setdefault(key, [])
+        for value in reversed(values):
+            bucket.insert(0, value)
+        return len(bucket)
+
     async def delete(self, *keys: str) -> int:
         count = 0
         for key in keys:
             if key in self._store:
                 del self._store[key]
                 count += 1
+            if key in self._lists:
+                del self._lists[key]
+                count += 1
         return count
 
     async def expire(self, key: str, ttl: int) -> bool:  # noqa: ARG002
-        return key in self._store
+        return key in self._store or key in self._lists
 
     async def aclose(self) -> None:
         return None

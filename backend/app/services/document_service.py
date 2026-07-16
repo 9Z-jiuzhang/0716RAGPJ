@@ -169,6 +169,52 @@ async def list_documents_page(
     )
 
 
+async def preview_segment(
+    db: AsyncSession,
+    kb_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    body: UpdateSegmentRulesRequest | None = None,
+) -> "SegmentPreviewResponse":
+    """按规则干跑分段预览，不写库。"""
+    from app.schemas.document import SegmentPreviewChunk, SegmentPreviewResponse
+    from app.services.chunking import split_text
+
+    doc = await get_document_detail(db, kb_id, doc_id)
+    source = (doc.normalized_text or doc.raw_text or "").strip()
+    if not source:
+        raise DocumentError("文档尚无解析文本，无法预览分段", http_status=400)
+
+    patch: dict[str, Any] = {}
+    if body is not None:
+        patch = {
+            "chunk_size": body.chunk_size,
+            "chunk_overlap": body.chunk_overlap,
+        }
+        if body.separators is not None:
+            patch["separators"] = body.separators
+        if body.split_mode is not None:
+            patch["split_mode"] = body.split_mode
+        if body.enable_semantic is not None:
+            patch["enable_semantic"] = body.enable_semantic
+    rules = merge_rules(doc.segment_rules, patch or None)
+    previews = split_text(source, rules)
+    return SegmentPreviewResponse(
+        document_id=str(doc.id),
+        rules=rules,
+        total_chunks=len(previews),
+        chunks=[
+            SegmentPreviewChunk(
+                chunk_index=p.chunk_index,
+                content=p.content,
+                char_count=p.char_count,
+                metadata=p.metadata,
+            )
+            for p in previews
+        ],
+        preview_source="normalized_text" if doc.normalized_text else "raw_text",
+    )
+
+
 async def get_document_detail(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID) -> Document:
     doc = await doc_repo.get_document(db, kb_id, doc_id)
     if not doc:

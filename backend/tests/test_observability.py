@@ -38,6 +38,9 @@ async def test_monitor_stats_requires_auth(client):
     assert payload["code"] == 0
     data = payload["data"]
     assert "user_count" in data
+    assert "qa_trend_7d" in data
+    assert len(data["qa_trend_7d"]) == 7
+    assert "hit_rate_trend_7d" in data
     assert "kb_count" in data
     assert "doc_count" in data
     assert data["user_count"] >= 1

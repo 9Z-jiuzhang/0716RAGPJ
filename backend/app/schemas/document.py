@@ -66,6 +66,23 @@ class UpdateSegmentRulesRequest(BaseModel):
     enable_semantic: bool | None = False
 
 
+class SegmentPreviewChunk(BaseModel):
+    chunk_index: int
+    content: str
+    char_count: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SegmentPreviewResponse(BaseModel):
+    """干跑分段预览：不写库。"""
+
+    document_id: str
+    rules: dict[str, Any]
+    total_chunks: int
+    chunks: list[SegmentPreviewChunk]
+    preview_source: str = Field(description="normalized_text / raw_text")
+
+
 class UpdateChunkRequest(BaseModel):
     content: str | None = None
     is_enabled: bool | None = None

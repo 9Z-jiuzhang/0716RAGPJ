@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,14 +13,16 @@ from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.router import api_router
 from .core.chroma import close_chroma, init_chroma
 from .core.config import settings
-from .core.database import SessionLocal, engine
+from .core.database import SessionLocal, engine, ensure_schema_patches
 from .core.logging import setup_logging
 from .core.metrics import metrics_payload
 from .core.redis import close_redis, init_redis
 from .core.security import hash_password
 from .core.seed_data import BUILTIN_PERMISSIONS, BUILTIN_ROLES
 from .middleware.access_log import ObservabilityMiddleware
+from .middleware.rate_limit import RateLimitMiddleware
 from .models import Base, Permission, Role, User
+from .models.model_config import ModelConfig
 from .services.embedding import embedding_service
 from .services.langfuse_service import get_langfuse
 from .services.llm import llm_service
@@ -82,13 +84,66 @@ async def seed_identity_data() -> None:
         await db.commit()
 
 
+async def seed_model_configs() -> None:
+    """从 .env 登记默认 LLM/Embedding 配置（幂等，不覆盖已有）。"""
+    async with SessionLocal() as db:
+        existing = await db.scalar(select(func.count()).select_from(ModelConfig)) or 0
+        if existing:
+            return
+        defaults = [
+            ModelConfig(
+                name="默认 LLM",
+                model_type="llm",
+                provider=settings.LLM_PROVIDER,
+                model_name=settings.LLM_MODEL,
+                base_url=settings.LLM_BASE_URL or None,
+                is_default=True,
+                is_enabled=True,
+                config={"max_tokens": settings.LLM_MAX_TOKENS},
+                timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
+                api_key_env="LLM_API_KEY",
+            ),
+            ModelConfig(
+                name="默认 Embedding",
+                model_type="embedding",
+                provider=settings.EMBEDDING_PROVIDER,
+                model_name=settings.EMBEDDING_MODEL_NAME,
+                base_url=settings.EMBEDDING_API_BASE or None,
+                is_default=True,
+                is_enabled=True,
+                config={},
+                timeout_seconds=settings.EMBEDDING_TIMEOUT_SECONDS,
+                api_key_env="EMBEDDING_API_KEY",
+            ),
+        ]
+        if settings.RERANK_MODEL:
+            defaults.append(
+                ModelConfig(
+                    name="默认 Rerank",
+                    model_type="rerank",
+                    provider=settings.RERANK_PROVIDER or "custom",
+                    model_name=settings.RERANK_MODEL,
+                    is_default=True,
+                    is_enabled=True,
+                    config={},
+                    timeout_seconds=60,
+                    api_key_env="RERANK_API_KEY",
+                )
+            )
+        for row in defaults:
+            db.add(row)
+        await db.commit()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     setup_logging()
     get_langfuse()
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+    await ensure_schema_patches()
     await seed_identity_data()
+    await seed_model_configs()
     await init_redis()
     try:
         init_chroma()
@@ -112,6 +167,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(ObservabilityMiddleware)
 app.include_router(api_router)
 app.include_router(knowledge_bases_router, prefix="/api/v1")

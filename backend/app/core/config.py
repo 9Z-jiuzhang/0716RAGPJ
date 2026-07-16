@@ -91,6 +91,12 @@ class Settings(BaseSettings):
 
     # ---------- 文档上传 ----------
     MAX_UPLOAD_BYTES: int = 100 * 1024 * 1024
+    VIRUS_SCAN_ENABLED: bool = False
+    CLAMAV_HOST: str = "localhost"
+    CLAMAV_PORT: int = 3310
+
+    # ---------- 限流 ----------
+    RATE_LIMIT_ENABLED: bool = True
 
     # ---------- 智能问答与会话记忆（产品手册 5.6） ----------
     QA_CONTEXT_WINDOW: int = 10

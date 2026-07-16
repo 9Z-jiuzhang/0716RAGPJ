@@ -420,6 +420,54 @@ class HitTestService:
 
         return "\n".join(lines)
 
+    async def compare_strategies(self, request: "CompareTestRequest") -> "CompareTestResponse":
+        """同一用例在多种检索策略下并排对比。"""
+        from app.schemas.hit_tests import (
+            CompareTestResponse,
+            QuestionCompareRow,
+            StrategyCompareItem,
+            TestRunRequest,
+        )
+
+        strategies = list(dict.fromkeys(request.strategies))
+        if len(strategies) < 2:
+            raise ValueError("至少需要两种策略进行对比")
+
+        runs = []
+        for strategy in strategies:
+            run_req = TestRunRequest(
+                case_id=request.case_id,
+                kb_ids=request.kb_ids,
+                doc_ids=request.doc_ids,
+                strategy=strategy,
+                top_k=request.top_k,
+                similarity_threshold=request.similarity_threshold,
+            )
+            runs.append(await self.execute_test_run(run_req))
+
+        # 按问题聚合各策略明细
+        by_question: dict[str, list[StrategyCompareItem]] = {}
+        for run in runs:
+            detail = await self.get_test_run(run.id)
+            if not detail:
+                continue
+            for item in detail["results"]:
+                row = by_question.setdefault(item.question, [])
+                row.append(
+                    StrategyCompareItem(
+                        strategy=item.strategy,
+                        is_hit=item.is_hit,
+                        hit_rank=item.hit_rank,
+                        score=item.score,
+                        elapsed_ms=item.elapsed_ms,
+                    )
+                )
+
+        side_by_side = [
+            QuestionCompareRow(question=q, by_strategy=items) for q, items in by_question.items()
+        ]
+        return CompareTestResponse(case_id=request.case_id, runs=runs, side_by_side=side_by_side)
+
     async def _execute_retrieval(
         self,
         question: str,
@@ -430,29 +478,67 @@ class HitTestService:
         similarity_threshold: float,
     ) -> list[dict]:
         """
-        执行检索（框架阶段占位实现）
-
-        参数:
-            question: 查询问题
-            kb_ids: 知识库 ID 列表
-            doc_ids: 文档 ID 列表（可选过滤）
-            strategy: 检索策略
-            top_k: 返回条数
-            similarity_threshold: 相似度阈值
+        执行检索：复用问答模块 HybridRetriever（vector / fulltext / hybrid）。
 
         返回:
             检索结果列表，每个元素包含 doc_id、chunk_id、content、score 等字段
         """
-        # 框架阶段：返回模拟数据
-        # 实际实现应调用检索服务（如 LangChain、LlamaIndex 等）
+        from sqlalchemy import select
+
+        from app.models.knowledge_base import KnowledgeBase
+        from app.retrieval.hybrid import hybrid_retriever
+        from app.retrieval.types import KBTarget, RetrievalStrategy
+
+        if not kb_ids:
+            return []
+
+        rows = list(
+            (
+                await self.db.scalars(
+                    select(KnowledgeBase).where(
+                        KnowledgeBase.id.in_(kb_ids),
+                        KnowledgeBase.status == "active",
+                    )
+                )
+            ).all()
+        )
+        targets: list[KBTarget] = []
+        for kb in rows:
+            version = (kb.current_index_version or "").strip()
+            if not version:
+                continue
+            targets.append(KBTarget(kb_id=kb.id, name=kb.name, index_version=version))
+
+        if not targets:
+            return []
+
+        strategy_key: RetrievalStrategy = (
+            strategy if strategy in ("vector", "fulltext", "hybrid") else "hybrid"
+        )
+        result = await hybrid_retriever.retrieve(
+            self.db,
+            question,
+            targets,
+            strategy=strategy_key,
+            top_k=top_k,
+            relevance_threshold=similarity_threshold,
+        )
+
+        hits = result.hits
+        if doc_ids:
+            wanted = {str(d) for d in doc_ids}
+            hits = [h for h in hits if h.doc_id in wanted]
+
         return [
             {
-                "doc_id": str(uuid.uuid4()),
-                "chunk_id": str(uuid.uuid4()),
-                "content": f"模拟检索结果内容 - {question}",
-                "score": round(0.7 + (hash(question) % 30) / 100, 2),
+                "doc_id": h.doc_id,
+                "chunk_id": h.chunk_id,
+                "content": (h.content or "")[:800],
+                "score": round(float(h.score), 6),
+                "chunk_index": h.chunk_index,
+                "doc_name": h.doc_name,
             }
-            for _ in range(min(top_k, 3))
+            for h in hits
         ]
 
     def _check_hit(

@@ -13,6 +13,7 @@ from app.schemas.response import ok
 from app.services import document_pipeline, document_service
 from app.utils.exceptions import DocumentError
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import Body
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,24 @@ async def update_segment_rules(
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(document_service.to_document_response(doc).model_dump())
+
+
+@router.post("/{doc_id}/segment-preview")
+async def segment_preview(
+    kb_id: str,
+    doc_id: str,
+    body: UpdateSegmentRulesRequest | None = Body(None),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("doc:segment")),
+):
+    """干跑分段预览（不写库）。【前端：确认重分段前预览】"""
+    try:
+        data = await document_service.preview_segment(
+            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), body
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(data.model_dump())
 
 
 @router.post("/{doc_id}/re-segment", status_code=status.HTTP_202_ACCEPTED)

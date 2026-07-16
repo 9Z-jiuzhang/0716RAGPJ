@@ -6,6 +6,7 @@ from .hit_tests import TestCases, TestQuestions, TestResults, TestRuns
 from .identity import AuditLog, Permission, Role, User
 from .index_version import IndexVersion
 from .knowledge_base import KBPermission, KnowledgeBase
+from .model_config import ModelConfig
 from .qa import QAMessage, QASession
 from .snapshot import Snapshot, SnapshotDocument
 from .vectorize_task import VectorizeTask
@@ -31,4 +32,5 @@ __all__ = [
     "VectorizeTask",
     "QASession",
     "QAMessage",
+    "ModelConfig",
 ]

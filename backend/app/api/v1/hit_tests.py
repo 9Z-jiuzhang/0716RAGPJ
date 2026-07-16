@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.schemas.common import BaseResponse
 from app.schemas.hit_tests import (
+    CompareTestRequest,
     CreateTestCaseRequest,
     TestRunRequest,
     UpdateTestCaseRequest,
@@ -161,6 +162,26 @@ async def execute_test_run(
     lf.flush()
 
     return BaseResponse(data=run)
+
+
+@router.post("/compare", response_model=BaseResponse)
+async def compare_test_strategies(
+    request: CompareTestRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_permission("test:write")),
+) -> BaseResponse:
+    """同一问题集在不同检索策略下并排对比命中率。"""
+    if len(set(request.strategies)) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="strategies 至少包含两种不同策略",
+        )
+    service = HitTestService(db)
+    try:
+        result = await service.compare_strategies(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return BaseResponse(data=result)
 
 
 @router.get("/runs", response_model=BaseResponse)

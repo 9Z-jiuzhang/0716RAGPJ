@@ -155,4 +155,75 @@ class MonitorService:
             doc_count=document_count,
             active_sessions=sessions,
             task_queue_size=queue_size,
+            qa_trend_7d=await self._qa_trend_7d(),
+            hit_rate_trend_7d=await self._hit_rate_trend_7d(),
         )
+
+    async def _qa_trend_7d(self) -> list[int]:
+        """近 7 天每日用户提问数（含今天，按日升序）。"""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models.qa import QAMessage
+
+        today = datetime.now(timezone.utc).date()
+        start = today - timedelta(days=6)
+        try:
+            rows = (
+                await self.db.execute(
+                    select(
+                        func.date(QAMessage.created_at).label("d"),
+                        func.count().label("c"),
+                    )
+                    .where(
+                        QAMessage.role == "user",
+                        QAMessage.created_at >= datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc),
+                    )
+                    .group_by(func.date(QAMessage.created_at))
+                )
+            ).all()
+            counts = {str(r.d): int(r.c) for r in rows}
+        except Exception:
+            logger.warning("qa_trend_7d query failed", exc_info=True)
+            counts = {}
+        out: list[int] = []
+        for i in range(7):
+            day = start + timedelta(days=i)
+            out.append(counts.get(str(day), 0))
+        return out
+
+    async def _hit_rate_trend_7d(self) -> list[float]:
+        """近 7 天每日命中率（completed runs 的 hit_count/total_questions）。"""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models.hit_tests import TestRuns
+
+        today = datetime.now(timezone.utc).date()
+        start = today - timedelta(days=6)
+        try:
+            rows = (
+                await self.db.execute(
+                    select(
+                        func.date(TestRuns.completed_at).label("d"),
+                        func.coalesce(func.sum(TestRuns.hit_count), 0).label("hits"),
+                        func.coalesce(func.sum(TestRuns.total_questions), 0).label("total"),
+                    )
+                    .where(
+                        TestRuns.status == "completed",
+                        TestRuns.completed_at.is_not(None),
+                        TestRuns.completed_at
+                        >= datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc),
+                    )
+                    .group_by(func.date(TestRuns.completed_at))
+                )
+            ).all()
+            rates = {
+                str(r.d): (float(r.hits) / float(r.total) if int(r.total) > 0 else 0.0) for r in rows
+            }
+        except Exception:
+            logger.warning("hit_rate_trend_7d query failed", exc_info=True)
+            rates = {}
+        out: list[float] = []
+        for i in range(7):
+            day = start + timedelta(days=i)
+            out.append(round(rates.get(str(day), 0.0), 4))
+        return out

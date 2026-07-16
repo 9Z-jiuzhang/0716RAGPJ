@@ -39,11 +39,11 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     creator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     deleted_at: Mapped[datetime_type | None] = mapped_column(DateTime, nullable=True)
 
-    documents: Mapped[list[Document]] = relationship("Document", back_populates="knowledge_base", lazy="selectin")
+    documents: Mapped[list[Document]] = relationship("Document", back_populates="knowledge_base", lazy="noload")
     snapshots: Mapped[list[Snapshot]] = relationship("Snapshot", back_populates="knowledge_base", lazy="noload")
-    index_versions = relationship("IndexVersion", back_populates="knowledge_base", cascade="all, delete-orphan")
+    index_versions = relationship("IndexVersion", back_populates="knowledge_base", cascade="all, delete-orphan", lazy="noload")
     permissions: Mapped[list[KBPermission]] = relationship(
-        "KBPermission", back_populates="knowledge_base", cascade="all, delete-orphan", lazy="selectin"
+        "KBPermission", back_populates="knowledge_base", cascade="all, delete-orphan", lazy="noload"
     )
 
     __table_args__ = (UniqueConstraint("name", "deleted_at", name="uq_kb_name_deleted"),)

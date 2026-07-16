@@ -103,3 +103,37 @@ class TestResultResponse(BaseModel):
     strategy: Literal["vector", "fulltext", "hybrid"] = Field(description="检索策略")
     elapsed_ms: int | None = Field(None, description="耗时（毫秒）")
     actual_chunks: list[dict] = Field(description="实际检索到的分段列表")
+
+
+class CompareTestRequest(BaseModel):
+    """多策略对比测试请求"""
+
+    case_id: uuid.UUID = Field(description="用例 ID")
+    kb_ids: list[uuid.UUID] = Field(description="知识库 ID 列表", min_length=1)
+    doc_ids: list[uuid.UUID] | None = Field(None, description="文档 ID 列表")
+    strategies: list[Literal["vector", "fulltext", "hybrid"]] = Field(
+        default_factory=lambda: ["vector", "fulltext", "hybrid"],
+        min_length=2,
+        description="待对比的检索策略列表",
+    )
+    top_k: int = Field(5, ge=1, le=20)
+    similarity_threshold: float = Field(0.5, ge=0, le=1)
+
+
+class StrategyCompareItem(BaseModel):
+    strategy: Literal["vector", "fulltext", "hybrid"]
+    is_hit: bool | None = None
+    hit_rank: int | None = None
+    score: float | None = None
+    elapsed_ms: int | None = None
+
+
+class QuestionCompareRow(BaseModel):
+    question: str
+    by_strategy: list[StrategyCompareItem]
+
+
+class CompareTestResponse(BaseModel):
+    case_id: uuid.UUID
+    runs: list[TestRunResponse]
+    side_by_side: list[QuestionCompareRow]
