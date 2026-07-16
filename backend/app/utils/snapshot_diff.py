@@ -1,6 +1,7 @@
 """快照差异计算（预览与单测共用，避免逻辑漂移）。"""
 
-from typing import Any, Mapping, Optional, Protocol
+from collections.abc import Mapping
+from typing import Any, Protocol
 from uuid import UUID
 
 from app.schemas.snapshot import AffectedDocument
@@ -10,7 +11,7 @@ class _SnapDocLike(Protocol):
     document_id: UUID
     filename: str
     chunk_count: int
-    content_hash: Optional[str]
+    content_hash: str | None
     file_type: str
     doc_metadata: dict[str, Any]
 
@@ -19,7 +20,7 @@ class _DocLike(Protocol):
     id: UUID
     filename: str
     chunk_count: int
-    content_hash: Optional[str]
+    content_hash: str | None
     status: str
     file_type: str
 

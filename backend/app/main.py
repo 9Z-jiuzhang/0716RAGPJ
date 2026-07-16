@@ -1,8 +1,10 @@
 """FastAPI 应用入口与身份模块初始数据。"""
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
+
 from .api.v1.router import api_router
 from .core.config import settings
 from .core.database import SessionLocal, engine
@@ -22,6 +24,10 @@ async def seed_identity_data() -> None:
             "snapshot:write": "创建/删除快照",
             "snapshot:restore": "执行快照回退",
             "audit:read": "查看操作审计日志",
+            "kb:upload": "上传文档到知识库",
+            "doc:read": "查看文档与分段",
+            "doc:write": "删除/规范化文档",
+            "doc:segment": "分段规则与重分段",
         }
         existing = {p.code for p in (await db.scalars(select(Permission))).all()}
         for code, name in permissions.items():
@@ -34,9 +40,18 @@ async def seed_identity_data() -> None:
                 roles[name] = Role(name=name, description=description, is_builtin=True)
                 db.add(roles[name])
         await db.flush()
+        # 始终把最新权限集合同步给超级管理员（含文档/快照模块权限）
         roles["超级管理员"].permissions = list((await db.scalars(select(Permission))).all())
         if not await db.scalar(select(User).where(User.username == "admin")):
-            db.add(User(username="admin", email="admin@example.com", nickname="超级管理员", hashed_password=hash_password("Admin123!"), roles=[roles["超级管理员"]]))
+            db.add(
+                User(
+                    username="admin",
+                    email="admin@example.com",
+                    nickname="超级管理员",
+                    hashed_password=hash_password("Admin123!"),
+                    roles=[roles["超级管理员"]],
+                )
+            )
         await db.commit()
 
 
@@ -50,7 +65,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS.split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(api_router)
 
 

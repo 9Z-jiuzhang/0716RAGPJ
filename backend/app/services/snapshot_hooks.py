@@ -6,7 +6,6 @@
     await take_auto_snapshot(db, kb_id, SnapshotTrigger.AUTO_UPLOAD, user_id, request_id=...)
 """
 
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,10 +21,10 @@ async def take_auto_snapshot(
     trigger: SnapshotTrigger | str,
     creator_id: UUID,
     *,
-    request_id: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
-    name: Optional[str] = None,
+    request_id: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    name: str | None = None,
 ) -> SnapshotResponse:
     """统一自动快照入口，供文档/知识库等写路径接入。"""
     return await SnapshotService(db).create_auto(

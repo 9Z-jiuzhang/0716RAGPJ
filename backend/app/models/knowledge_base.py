@@ -1,7 +1,7 @@
 """知识库与知识库权限模型。"""
 
 import uuid
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -24,13 +24,13 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     tags: Mapped[list[str]] = mapped_column(
         ARRAY(String), nullable=False, server_default="{}", comment="标签列表"
     )
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="描述")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="描述")
     visibility: Mapped[str] = mapped_column(String(20), default="restricted", nullable=False, comment="可见性")
     embedding_model: Mapped[str] = mapped_column(String(100), nullable=False, comment="嵌入模型标识")
     chunk_size: Mapped[int] = mapped_column(Integer, default=500, nullable=False, comment="默认分段大小")
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=50, nullable=False, comment="分段重叠字符数")
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, comment="状态")
-    current_index_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="当前生效索引版本号")
+    current_index_version: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="当前生效索引版本号")
     creator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
 
     documents: Mapped[list["Document"]] = relationship("Document", back_populates="knowledge_base", lazy="selectin")
@@ -54,10 +54,10 @@ class KBPermission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     kb_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, comment="用户级授权"
     )
-    role_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    role_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("roles.id"), nullable=True, comment="角色级授权"
     )
     permission_code: Mapped[str] = mapped_column(String(100), nullable=False, comment="权限标识")

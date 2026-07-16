@@ -1,19 +1,45 @@
-"""认证模块运行配置。"""
+"""应用运行配置。【对齐 .env.example 键名】"""
 from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """从项目根目录 .env 加载环境变量。"""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
     APP_NAME: str = "AI-KnowledgeBase-RAG"
     APP_VERSION: str = "2.1.0"
     DEBUG: bool = False
+    SECRET_KEY: str = "change-me"
+    LOG_LEVEL: str = "INFO"
+
     POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "knowledge_base"
     POSTGRES_USER: str = "kb_user"
     POSTGRES_PASSWORD: str = "change-me"
+
+    REDIS_HOST: str = "redis"
+    REDIS_PORT: int = 6379
+
+    CHROMA_HOST: str = "chroma"
+    CHROMA_PORT: int = 8000
+
+    MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_ACCESS_KEY: str = "change-me"
+    MINIO_SECRET_KEY: str = "change-me"
+    MINIO_BUCKET: str = "knowledge-base-docs"
+
+    EMBEDDING_PROVIDER: str = "dashscope"
+    EMBEDDING_API_KEY: str = "change-me"
+    EMBEDDING_MODEL_NAME: str = "text-embedding-v3"
+    EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    LANGFUSE_HOST: str = "http://langfuse-server:3000"
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+
     JWT_SECRET_KEY: str = "change-me"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
@@ -23,10 +49,16 @@ class Settings(BaseSettings):
     SNAPSHOT_MAX_COUNT: int = 50
     SNAPSHOT_RETENTION_DAYS: int = 90
 
+    # 对齐 nginx client_max_body_size 100m
+    MAX_UPLOAD_BYTES: int = 100 * 1024 * 1024
+
     @property
     def database_url(self) -> str:
         """返回 SQLAlchemy asyncpg 连接地址。"""
-        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        return (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
 
 
 @lru_cache

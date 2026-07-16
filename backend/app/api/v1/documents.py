@@ -1,0 +1,208 @@
+"""文档管理 API。【对齐 docs/API.md §8】前端交互：管理端文档列表/上传/分段预览页调用本模块。"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+
+from app.core.database import get_db
+from app.core.dependencies import require_permission
+from app.models import User
+from app.schemas.document import UpdateChunkRequest, UpdateSegmentRulesRequest
+from app.schemas.response import ok
+from app.services import document_pipeline, document_service
+from app.utils.exceptions import DocumentError
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/knowledge-bases/{kb_id}/documents", tags=["文档管理"])
+
+
+def _uuid(value: str, name: str = "id") -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"无效的 {name}") from exc
+
+
+def _raise_doc_error(exc: DocumentError) -> None:
+    raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+
+
+@router.get("")
+async def list_documents(
+    kb_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    keyword: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("doc:read")),
+):
+    """文档列表（分页+搜索）。【前端：管理端文档表格】"""
+    data = await document_service.list_documents_page(
+        db, _uuid(kb_id, "kb_id"), page=page, page_size=page_size, keyword=keyword
+    )
+    return ok(data.model_dump())
+
+
+@router.post("/upload", status_code=status.HTTP_201_CREATED)
+async def upload_document(
+    kb_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="multipart 字段名 file"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission("kb:upload")),
+):
+    """上传文档并触发解析->清洗->分段->向量化流水线。"""
+    content = await file.read()
+    filename = file.filename or "unnamed"
+    try:
+        doc = await document_service.upload_document(
+            db, kb_id=_uuid(kb_id, "kb_id"), filename=filename, content=content, user=user
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    background_tasks.add_task(document_pipeline.run_upload_pipeline, doc.id, True)
+    return ok(document_service.to_document_response(doc).model_dump(), message="uploaded")
+
+
+@router.get("/{doc_id}")
+async def get_document(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("doc:read")),
+):
+    """文档详情与流水线状态。【前端：状态徽章轮询】"""
+    try:
+        doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(document_service.to_document_response(doc).model_dump())
+
+
+@router.delete("/{doc_id}")
+async def delete_document(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission("doc:write")),
+):
+    """删除文档及关联向量/MinIO 对象。【前端：删除确认对话框】"""
+    try:
+        await document_service.delete_document(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(None, message="deleted")
+
+
+@router.put("/{doc_id}/segment-rules")
+async def update_segment_rules(
+    kb_id: str,
+    doc_id: str,
+    body: UpdateSegmentRulesRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission("doc:segment")),
+):
+    """只改分段规则，不立即重分段。【前端：规则表单保存】"""
+    try:
+        doc = await document_service.update_segment_rules(
+            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), body, user
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(document_service.to_document_response(doc).model_dump())
+
+
+@router.post("/{doc_id}/re-segment", status_code=status.HTTP_202_ACCEPTED)
+async def re_segment(
+    kb_id: str,
+    doc_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission("doc:segment")),
+):
+    """重新分段并向量化（异步 202）。【前端：预览确认后触发】"""
+    try:
+        doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    background_tasks.add_task(document_pipeline.run_resegment_pipeline, doc.id, user.id)
+    return ok({"document_id": str(doc.id), "status": "accepted"}, message="re-segment accepted")
+
+
+@router.post("/{doc_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+async def retry_document(
+    kb_id: str,
+    doc_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission("doc:write")),
+):
+    """error 状态重试流水线（异步 202）。状态机：error -> parsing。"""
+    try:
+        doc = await document_service.prepare_retry(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    background_tasks.add_task(document_pipeline.run_upload_pipeline, doc.id, True)
+    return ok(document_service.to_document_response(doc).model_dump(), message="retry accepted")
+
+
+@router.post("/{doc_id}/normalize")
+async def normalize_document(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission("doc:write")),
+):
+    """文档规范化，返回统计。【前端：规范化按钮】"""
+    try:
+        result = await document_service.normalize_document(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(result.model_dump())
+
+
+@router.get("/{doc_id}/chunks")
+async def list_chunks(
+    kb_id: str,
+    doc_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("doc:read")),
+):
+    """分段预览分页。【前端：分段预览面板】"""
+    try:
+        data = await document_service.list_chunks_page(
+            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), page=page, page_size=page_size
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(data.model_dump())
+
+
+@router.put("/{doc_id}/chunks/{chunk_id}")
+async def update_chunk(
+    kb_id: str,
+    doc_id: str,
+    chunk_id: str,
+    body: UpdateChunkRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission("doc:segment")),
+):
+    """编辑/禁用单个分段。is_enabled=false 不得参与检索。【前端：分段编辑器】"""
+    try:
+        chunk = await document_service.update_chunk(
+            db,
+            _uuid(kb_id, "kb_id"),
+            _uuid(doc_id, "doc_id"),
+            _uuid(chunk_id, "chunk_id"),
+            body,
+            user,
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(document_service.to_chunk_response(chunk).model_dump())

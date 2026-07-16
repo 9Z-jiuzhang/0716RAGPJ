@@ -8,7 +8,8 @@
 5. 全过程写审计日志（含 before/after 版本）
 """
 
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -202,11 +203,11 @@ class SnapshotService:
         *,
         kb: KnowledgeBase,
         name: str,
-        description: Optional[str],
+        description: str | None,
         trigger: str,
         creator_id: UUID,
         run_cleanup: bool = True,
-        exclude_from_cleanup: Optional[set[UUID]] = None,
+        exclude_from_cleanup: set[UUID] | None = None,
     ) -> Snapshot:
         """内部创建快照（手动/自动/保护共用）。"""
         snapshot = Snapshot(
@@ -315,9 +316,9 @@ class SnapshotService:
         kb_id: UUID,
         body: CreateSnapshotRequest,
         creator_id: UUID,
-        request_id: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        request_id: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> SnapshotResponse:
         """管理员手动创建命名快照。"""
         kb = await self._get_kb_or_404(kb_id)
@@ -345,10 +346,10 @@ class SnapshotService:
         kb_id: UUID,
         trigger: SnapshotTrigger | str,
         creator_id: UUID,
-        name: Optional[str] = None,
-        request_id: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        name: str | None = None,
+        request_id: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> SnapshotResponse:
         """变更前自动快照（供文档/权限等写操作调用）。"""
         kb = await self._get_kb_or_404(kb_id)
@@ -398,7 +399,7 @@ class SnapshotService:
         self,
         kb_id: UUID,
         snapshot_id: UUID,
-        document_ids: Optional[list[UUID]] = None,
+        document_ids: list[UUID] | None = None,
     ) -> RollbackPreviewResponse:
         """回退前差异预览。"""
         kb = await self._get_kb_or_404(kb_id)
@@ -451,9 +452,9 @@ class SnapshotService:
         snapshot_id: UUID,
         body: RollbackRequest,
         operator_id: UUID,
-        request_id: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        request_id: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> RollbackResultResponse:
         """执行回退：保护快照 -> 恢复文档/配置 -> 新建 building 索引版本 -> 审计。
 
@@ -595,8 +596,8 @@ class SnapshotService:
         self,
         kb_id: UUID,
         version: str,
-        operator_id: Optional[UUID] = None,
-        request_id: Optional[str] = None,
+        operator_id: UUID | None = None,
+        request_id: str | None = None,
     ) -> str:
         """向量重建完成后原子激活索引版本（供向量化模块调用）。"""
         kb = await self._get_kb_or_404(kb_id)
@@ -639,9 +640,9 @@ class SnapshotService:
         kb_id: UUID,
         snapshot_id: UUID,
         operator_id: UUID,
-        request_id: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        request_id: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> None:
         """删除（软删）不需要的旧快照；禁止手动删除回退保护快照。"""
         await self._get_kb_or_404(kb_id)

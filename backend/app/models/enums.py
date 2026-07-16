@@ -50,7 +50,7 @@ class DocumentStatus(str, Enum):
 
 
 class DocumentFileType(str, Enum):
-    """文档文件类型。"""
+    """文档文件类型。csv/xlsx/pptx 为 P1 预留枚举，上传接口首期拒绝。"""
 
     PDF = "pdf"
     DOCX = "docx"
@@ -60,6 +60,36 @@ class DocumentFileType(str, Enum):
     CSV = "csv"
     XLSX = "xlsx"
     PPTX = "pptx"
+
+
+class SplitMode(str, Enum):
+    """分段模式。"""
+
+    FIXED = "fixed"
+    HEADING = "heading"
+    PARAGRAPH = "paragraph"
+    SLIDING = "sliding"
+
+
+# 上传首期允许
+UPLOAD_ALLOWED_TYPES = frozenset(
+    {
+        DocumentFileType.PDF,
+        DocumentFileType.DOC,
+        DocumentFileType.DOCX,
+        DocumentFileType.TXT,
+        DocumentFileType.MD,
+    }
+)
+# 数据库枚举预留，上传直接拒绝
+UPLOAD_REJECTED_TYPES = frozenset(
+    {DocumentFileType.CSV, DocumentFileType.XLSX, DocumentFileType.PPTX}
+)
+
+DEFAULT_SEPARATORS = ["\n\n", "\n", "。", ".", " "]
+DEFAULT_CHUNK_SIZE = 500
+DEFAULT_CHUNK_OVERLAP = 50
+DEFAULT_SPLIT_MODE = SplitMode.FIXED.value
 
 
 class SnapshotTrigger(str, Enum):

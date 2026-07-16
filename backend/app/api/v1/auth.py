@@ -1,14 +1,23 @@
 """注册、登录、刷新令牌与个人中心接口。"""
-from datetime import datetime, timezone
 import uuid
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from ...core.database import get_db
 from ...core.dependencies import get_current_user
 from ...core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from ...models import Role, User
-from ...schemas.identity import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, UserResponse, UserUpdateRequest
+from ...schemas.identity import (
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
+    UserUpdateRequest,
+)
 
 router = APIRouter(prefix="/auth", tags=["认证与用户中心"])
 

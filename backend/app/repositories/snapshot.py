@@ -1,7 +1,7 @@
 """快照数据访问层。"""
 
+from collections.abc import Sequence
 from datetime import timedelta
-from typing import Optional, Sequence
 from uuid import UUID
 
 from sqlalchemy import and_, func, select, update
@@ -19,7 +19,7 @@ class SnapshotRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_by_id(self, snapshot_id: UUID, kb_id: UUID | None = None) -> Optional[Snapshot]:
+    async def get_by_id(self, snapshot_id: UUID, kb_id: UUID | None = None) -> Snapshot | None:
         """按 ID 查询快照（可限定知识库），含文档列表。"""
         stmt = (
             select(Snapshot)
@@ -78,7 +78,7 @@ class SnapshotRepository:
         kb_id: UUID,
         max_count: int,
         *,
-        exclude_ids: Optional[set[UUID]] = None,
+        exclude_ids: set[UUID] | None = None,
     ) -> int:
         """超出最大数量时软删除最早的活跃快照。
 
@@ -148,7 +148,7 @@ class SnapshotRepository:
         kb_id: UUID,
         retention_days: int,
         *,
-        exclude_ids: Optional[set[UUID]] = None,
+        exclude_ids: set[UUID] | None = None,
     ) -> int:
         """清理超过保留天数的快照（默认不删 rollback_protection）。"""
         cutoff = utcnow() - timedelta(days=retention_days)
