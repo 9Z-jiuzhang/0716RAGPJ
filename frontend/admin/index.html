@@ -1,47 +1,18 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>知识库管理系统</title>
-    <link rel="stylesheet" href="/assets/css/style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 知识库 · 管理端</title>
+  <link rel="stylesheet" href="/assets/css/variables.css" />
+  <link rel="stylesheet" href="/assets/css/base.css" />
+  <link rel="stylesheet" href="/assets/css/components.css" />
+  <link rel="stylesheet" href="/assets/css/layout.css" />
+  <link rel="stylesheet" href="./css/admin.css" />
 </head>
 <body>
-    <div class="app-container">
-        <header class="app-header">
-            <div class="header-brand">
-                <h1>知识库管理</h1>
-            </div>
-            <nav class="header-nav">
-                <a href="/admin" class="nav-item active">知识库列表</a>
-            </nav>
-        </header>
-        <main class="app-main">
-            <div class="page-header"></div>
-            <div class="filters-container"></div>
-            <div class="loader" style="display: none;">加载中...</div>
-            <div class="error-container" style="display: none;"></div>
-            <table class="data-table"></table>
-            <div class="pagination-container"></div>
-            <div class="upload-area"></div>
-            <div class="kb-detail"></div>
-            <div class="tabs-container"></div>
-        </main>
-    </div>
-    <script type="module">
-        const path = window.location.pathname;
-        const parts = path.split('/').filter(p => p);
-        
-        if (parts.length >= 3 && parts[0] === 'admin' && parts[1] === 'knowledge-bases') {
-            const kbId = parts[2];
-            if (parts.length === 3) {
-                import('./js/pages/kb-detail.js').then(m => m.initKBDetailPage(kbId));
-            } else if (parts[3] === 'documents') {
-                import('./js/pages/documents.js').then(m => m.initDocumentsPage(kbId));
-            }
-        } else {
-            import('./js/pages/knowledge-bases.js').then(m => m.initKnowledgeBasesPage());
-        }
-    </script>
+  <div id="demoBanner" class="demo-banner hidden">演示模式：管理端使用模拟数据，便于在后端未完成时验收界面与交互。</div>
+  <div id="app"></div>
+  <script type="module" src="./js/app.js"></script>
 </body>
 </html>

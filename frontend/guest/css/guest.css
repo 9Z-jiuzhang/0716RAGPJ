@@ -1,0 +1,316 @@
+/* ============================================================
+ * 访客端专属样式：问答气泡、引用卡片、上传区
+ * 美化对齐 README-UI美化.md，主色不变
+ * ============================================================ */
+
+/* 问答主区占满内容高度（顶栏布局：顶栏 + 页标题条） */
+.qa-layout {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: calc(100vh - var(--header-height) - 72px);
+  gap: 14px;
+  max-width: 880px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 消息列表可滚动 */
+.qa-messages {
+  overflow-y: auto;
+  padding: 16px 18px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+/* 单条消息行 */
+.msg-row {
+  display: flex;
+  margin-bottom: 16px;
+  animation: msg-in 150ms ease;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg-row.user {
+  justify-content: flex-end;
+}
+
+.msg-row.assistant {
+  justify-content: flex-start;
+}
+
+/* 气泡 */
+.msg-bubble {
+  max-width: min(720px, 85%);
+  padding: 12px 16px;
+  border-radius: var(--radius-bubble);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-row.user .msg-bubble {
+  background: var(--color-primary);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  box-shadow: var(--shadow-btn);
+}
+
+.msg-row.assistant .msg-bubble {
+  background: #F1F3F4;
+  color: var(--color-text);
+  border-bottom-left-radius: 4px;
+}
+
+/* 引用来源区：浅蓝左边线突出「有依据、不编造」 */
+.citations {
+  margin-top: 12px;
+  padding: 10px 12px 10px 14px;
+  border-top: none;
+  border-left: 3px solid var(--color-primary-light);
+  background: var(--color-bg-tint);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.citation-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+  margin-bottom: 6px;
+}
+
+.citation-item {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  font-size: 12px;
+  transition: border-color var(--transition);
+}
+
+.citation-item:first-child {
+  margin-top: 0;
+}
+
+.citation-item:hover {
+  border-color: var(--color-primary-light);
+}
+
+.citation-meta {
+  color: var(--color-primary-dark);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.confidence {
+  margin-top: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: #fff;
+  border-radius: 6px;
+  border: 1px dashed var(--color-border);
+}
+
+/* 流式输出光标感（打字机） */
+.msg-bubble.streaming-cursor::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--color-primary);
+  animation: blink 0.9s step-end infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* 输入区：固定底部感、圆角略大 */
+.qa-composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-bubble);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.qa-composer textarea {
+  min-height: 64px;
+  max-height: 160px;
+  border-color: transparent;
+  background: var(--color-bg);
+}
+
+.qa-composer textarea:focus {
+  background: #fff;
+}
+
+.qa-composer .btn {
+  min-width: 88px;
+  height: 40px;
+}
+
+/* 认证页居中：独立全屏登录（含注册 Tab） */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 16px;
+  background: linear-gradient(180deg, var(--color-bg-tint) 0%, var(--color-bg) 45%);
+}
+
+.auth-page-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--color-primary-dark);
+  cursor: pointer;
+  user-select: none;
+}
+
+.auth-page-brand .logo-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.2);
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 0;
+  margin: -4px -4px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.auth-tab {
+  flex: 1;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.auth-tab.active {
+  color: var(--color-primary);
+  font-weight: 600;
+  border-bottom-color: var(--color-primary);
+}
+
+.auth-lead {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.auth-demo-hint {
+  margin-top: 16px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tint);
+  border-radius: var(--radius);
+  border: 1px dashed var(--color-border);
+}
+
+.auth-demo-hint code {
+  color: var(--color-primary-dark);
+  font-weight: 600;
+}
+
+.auth-wrap {
+  min-height: calc(100vh - 80px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: linear-gradient(180deg, var(--color-bg-tint) 0%, var(--color-bg) 48%);
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  padding: 22px 22px 18px;
+}
+
+.auth-card .card-title {
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+/* 上传面板 */
+.upload-panel {
+  margin-top: 12px;
+}
+
+.upload-drop {
+  border: 2px dashed var(--color-primary-light);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  text-align: center;
+  background: var(--color-bg-tint);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.upload-drop:hover,
+.upload-drop.dragover {
+  background: #E8F0FE;
+  border-color: var(--color-primary);
+}
+
+/* 历史列表项 */
+.history-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.history-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+@media (max-width: 960px) {
+  .msg-bubble {
+    max-width: 92%;
+  }
+
+  .qa-layout {
+    height: calc(100vh - var(--header-height) - 120px);
+    max-width: none;
+  }
+}

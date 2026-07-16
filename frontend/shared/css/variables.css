@@ -1,0 +1,56 @@
+/* ============================================================
+ * 设计令牌：严格对齐产品手册 4.3 前端设计规范
+ * 主色 #1A73E8，辅助色 #4A90D9 / #0D47A1，蓝白配色
+ * 扩展项仅细化层次，不引入新主色系（见 README-UI美化.md）
+ * ============================================================ */
+
+:root {
+  /* 主色调 */
+  --color-primary: #1A73E8;
+  /* 辅助色（偏亮） */
+  --color-primary-light: #4A90D9;
+  /* 辅助色（偏深）——主按钮悬停、统计数字、品牌字 */
+  --color-primary-dark: #0D47A1;
+  /* 页面浅色背景 */
+  --color-bg: #F5F7FA;
+  /* 极淡蓝点缀（上传区、空面板等） */
+  --color-bg-tint: #EEF3FB;
+  /* 行悬停 / 次要选中底 */
+  --color-bg-hover: #F1F5FB;
+  /* 卡片/面板白色 */
+  --color-surface: #FFFFFF;
+  /* 主文字 */
+  --color-text: #202124;
+  /* 次要文字 */
+  --color-text-secondary: #5F6368;
+  /* 边框色 */
+  --color-border: #E0E3E8;
+  /* 成功 */
+  --color-success: #188038;
+  /* 警告 */
+  --color-warning: #F9AB00;
+  /* 危险/错误 */
+  --color-danger: #D93025;
+  /* 输入聚焦环 */
+  --color-focus-ring: rgba(26, 115, 232, 0.15);
+  /* 顶栏高度 */
+  --header-height: 56px;
+  /* 侧栏宽度（已废弃左右布局，保留兼容旧引用） */
+  --sidebar-width: 220px;
+  /* 统一圆角（卡片/输入） */
+  --radius: 8px;
+  /* 气泡圆角 */
+  --radius-bubble: 12px;
+  /* 弹窗圆角 */
+  --radius-modal: 10px;
+  /* 轻阴影（卡片） */
+  --shadow: 0 1px 2px rgba(60, 64, 67, 0.08), 0 1px 3px rgba(60, 64, 67, 0.12);
+  /* 弹窗抬升阴影 */
+  --shadow-modal: 0 8px 28px rgba(32, 33, 36, 0.18);
+  /* 主按钮轻阴影 */
+  --shadow-btn: 0 1px 2px rgba(26, 115, 232, 0.25);
+  /* 过渡 */
+  --transition: 150ms ease;
+  /* 字体 */
+  --font-sans: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}

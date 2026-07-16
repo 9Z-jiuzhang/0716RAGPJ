@@ -1,58 +1,18 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI知识库RAG平台</title>
-    <link rel="stylesheet" href="/assets/css/style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 知识库 · 智能问答</title>
+  <link rel="stylesheet" href="/assets/css/variables.css" />
+  <link rel="stylesheet" href="/assets/css/base.css" />
+  <link rel="stylesheet" href="/assets/css/components.css" />
+  <link rel="stylesheet" href="/assets/css/layout.css" />
+  <link rel="stylesheet" href="./css/guest.css" />
 </head>
 <body>
-    <div class="app-container">
-        <header class="app-header">
-            <div class="header-brand">
-                <h1>AI知识库RAG平台</h1>
-            </div>
-        </header>
-        <main class="app-main">
-            <div class="search-section">
-                <h2>智能问答</h2>
-                <div class="search-box">
-                    <input type="text" id="query-input" placeholder="输入您的问题..." class="search-input">
-                    <button class="btn btn-primary" onclick="handleSearch()">搜索</button>
-                </div>
-            </div>
-            <div class="results-section" id="results"></div>
-        </main>
-    </div>
-    <script>
-        async function handleSearch() {
-            const query = document.getElementById('query-input').value;
-            if (!query) return;
-            
-            const results = document.getElementById('results');
-            results.innerHTML = '<div class="loading-state">正在搜索...</div>';
-            
-            try {
-                const response = await fetch('/api/v1/query', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query })
-                });
-                const data = await response.json();
-                if (data.code === 0) {
-                    results.innerHTML = `
-                        <div class="result-card">
-                            <h3>回答</h3>
-                            <p>${data.data.answer || '暂无结果'}</p>
-                        </div>
-                    `;
-                } else {
-                    results.innerHTML = `<div class="error-state">${data.message}</div>`;
-                }
-            } catch (error) {
-                results.innerHTML = '<div class="error-state">搜索失败，请稍后重试</div>';
-            }
-        }
-    </script>
+  <div id="demoBanner" class="demo-banner hidden">当前为演示模式：后端接口未就绪，页面使用本地模拟数据，交互逻辑与正式环境一致。</div>
+  <div id="app"></div>
+  <script type="module" src="./js/app.js"></script>
 </body>
 </html>

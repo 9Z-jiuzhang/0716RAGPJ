@@ -1,13 +1,22 @@
-from app.models.knowledge_base import KnowledgeBase
-from app.models.kb_permission import KBPermission
-from app.models.document import Document
-from app.models.document_chunk import DocumentChunk
-from app.models.index_version import IndexVersion
-from app.models.snapshot import Snapshot
-from app.models.snapshot_document import SnapshotDocument
-from app.models.audit_log import AuditLog
+"""导出 ORM 模型，供 Alembic / create_all 发现。"""
+
+from .base import Base
+from .document import Document, DocumentChunk
+from .identity import AuditLog, Permission, Role, User
+from .index_version import IndexVersion
+from .knowledge_base import KBPermission, KnowledgeBase
+from .snapshot import Snapshot, SnapshotDocument
+from .snapshot_document import SnapshotDocument as SnapshotDocumentAlias
+from .audit_log import AuditLog as AuditLogAlias
+from .document_chunk import DocumentChunk as DocumentChunkAlias
+from .kb_permission import KBPermission as KBPermissionAlias
 
 __all__ = [
+    "Base",
+    "User",
+    "Role",
+    "Permission",
+    "AuditLog",
     "KnowledgeBase",
     "KBPermission",
     "Document",
@@ -15,5 +24,4 @@ __all__ = [
     "IndexVersion",
     "Snapshot",
     "SnapshotDocument",
-    "AuditLog",
 ]

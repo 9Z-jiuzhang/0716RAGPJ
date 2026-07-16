@@ -1,0 +1,155 @@
+/* ============================================================
+ * 管理端专属：统计卡片、趋势条形图、详情栅格
+ * 美化对齐 README-UI美化.md，主色不变
+ * ============================================================ */
+
+/* 统计卡片栅格 */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.stat-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+
+.stat-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-primary);
+}
+
+.stat-card:hover {
+  border-color: #C5D8F5;
+  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.1);
+}
+
+.stat-card .label {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.stat-card .value {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-primary-dark);
+  line-height: 1.1;
+}
+
+/* 图表卡片并排 */
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.chart-grid .card {
+  min-height: 200px;
+}
+
+/* 简易条形图容器 */
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 140px;
+  padding: 12px 4px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.bar-chart .bar {
+  flex: 1;
+  background: linear-gradient(180deg, var(--color-primary-light), var(--color-primary));
+  border-radius: 4px 4px 0 0;
+  min-height: 4px;
+  position: relative;
+  transition: opacity var(--transition);
+}
+
+.bar-chart .bar:hover {
+  opacity: 0.88;
+}
+
+.bar-chart .bar span {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* 工具条 */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+.toolbar .form-control {
+  max-width: 220px;
+}
+
+/* 详情双栏 */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Grafana 占位框：卡片说明，不伪造图表 */
+.embed-frame {
+  width: 100%;
+  min-height: 420px;
+  border: 1px dashed var(--color-primary-light);
+  border-radius: var(--radius);
+  background: var(--color-bg-tint);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  padding: 24px;
+  text-align: center;
+}
+
+.embed-frame strong {
+  color: var(--color-primary-dark);
+  font-size: 15px;
+}

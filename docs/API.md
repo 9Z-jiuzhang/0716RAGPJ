@@ -376,14 +376,15 @@ Authorization: Bearer <access_token>
 | POST | `.../snapshots` | `snapshot:write` | 手动创建；Body：`name`、`description?` |
 | GET | `.../snapshots/{id}` | `snapshot:read` | 详情（文档列表、配置快照） |
 | POST | `.../snapshots/{id}/preview` | `snapshot:read` | 回退差异预览 |
-| POST | `.../snapshots/{id}/rollback` | `snapshot:restore` | Body：`confirm` **必须为 true** |
-| DELETE | `.../snapshots/{id}` | `snapshot:write` | 删除快照 |
+| POST | `.../snapshots/{id}/rollback` | `snapshot:restore` | Body：`confirm` **必须为 true**；可选 `document_ids` 选择性恢复 |
+| DELETE | `.../snapshots/{id}` | `snapshot:write` | 删除快照（回退保护快照不可手动删除） |
 
 **说明：**
 
 - 快照含元数据、文档版本、分段规则、权限配置等引用；向量本身可不落快照，回退后重建索引
-- 自动触发类型（实现时）：上传/删除/重分段/重向量化/权限变更等
+- 自动触发类型（实现时）：上传/删除/规范化/重分段/重向量化/权限变更等；入口 `take_auto_snapshot`
 - 正式回退前应创建 `rollback_protection` 保护快照
+- 回退后索引版本先为 `building`，向量重建完成后由服务层 `activate_index_version` 原子切换
 
 ---
 
