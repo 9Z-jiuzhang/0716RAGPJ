@@ -15,6 +15,7 @@ router = APIRouter(prefix="/monitor", tags=["系统监控"])
 
 @router.get("/health", response_model=BaseResponse, summary="系统健康检查")
 async def health(request_id: str = Depends(resolve_request_id)) -> BaseResponse:
+    """检查 PostgreSQL / Redis / Chroma / Langfuse 连通性。"""
     body = await MonitorService().health()
     return ok(body, request_id=request_id)
 

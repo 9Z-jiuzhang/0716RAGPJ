@@ -1,5 +1,4 @@
-# FastAPI 后端镜像
-# 业务代码实现后，将 app 目录放入镜像并启动 uvicorn
+# FastAPI 后端镜像（Python 3.10）
 FROM python:3.10-slim
 
 WORKDIR /app
@@ -13,9 +12,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
+# 应用代码与 Alembic 迁移
 COPY backend/app /app/app
+COPY backend/alembic /app/alembic
+COPY backend/alembic.ini /app/alembic.ini
+COPY backend/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 8000
 
-# 注意：框架阶段尚无 app.main，实现后端入口后此命令方可正常启动
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# 开发模式可挂载 backend/app 并追加 --reload
+CMD ["--reload"]

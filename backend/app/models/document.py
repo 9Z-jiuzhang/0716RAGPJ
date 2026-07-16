@@ -1,12 +1,12 @@
-"""文档、分段与知识库分段规则模型。【对齐手册 §5.5 + 快照模块已有结构】"""
+"""文档、分段与知识库分段规则模型。【对齐手册 §5.5 + 5.6 全文检索】"""
 
 from __future__ import annotations
 
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import BigInteger, Boolean, Computed, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSON, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -65,9 +65,22 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 
 class DocumentChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """文档分段表 document_chunks。"""
+    """文档分段表 document_chunks。
+
+    content_tsv 为 STORED 生成列：写入/更新 content 时由 PostgreSQL 自动维护，
+    配合 GIN 索引支撑全文检索（产品手册 5.6）。
+    """
 
     __tablename__ = "document_chunks"
+    __table_args__ = (
+        Index("ix_document_chunks_content_tsv", "content_tsv", postgresql_using="gin"),
+        Index(
+            "ix_document_chunks_content_trgm",
+            "content",
+            postgresql_using="gin",
+            postgresql_ops={"content": "gin_trgm_ops"},
+        ),
+    )
 
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True, nullable=False
@@ -82,6 +95,13 @@ class DocumentChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "metadata", JSON, default=dict, nullable=False, comment="标题层级、页码等元信息"
     )
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, comment="是否参与检索")
+    # 全文检索向量：由 content 自动生成，应用层只读
+    content_tsv: Mapped[Any | None] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('simple', coalesce(content, ''))", persisted=True),
+        nullable=True,
+        comment="全文检索 tsvector（STORED 生成列）",
+    )
 
     document: Mapped[Document] = relationship("Document", back_populates="chunks")
 

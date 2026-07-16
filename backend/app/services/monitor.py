@@ -52,18 +52,22 @@ class MonitorService:
             checks["postgres"] = HealthCheckItem(status="unhealthy")
             overall = "unhealthy"
 
-        # Redis
+        # Redis（优先走 lifespan 初始化的客户端）
         redis_status, redis_latency = await self._check_redis()
         checks["redis"] = HealthCheckItem(status=redis_status, latency_ms=redis_latency)
         if redis_status == "unhealthy" and overall == "healthy":
             overall = "degraded"
 
+        # Chroma
+        chroma_status, chroma_latency = self._check_chroma()
+        checks["chroma"] = HealthCheckItem(status=chroma_status, latency_ms=chroma_latency)
+        if chroma_status == "unhealthy" and overall == "healthy":
+            overall = "degraded"
+
         # Langfuse
         lf_status, lf_latency = await get_langfuse().health_probe()
         checks["langfuse"] = HealthCheckItem(status=lf_status, latency_ms=lf_latency)
-        if lf_status == "unhealthy" and overall == "healthy":
-            overall = "degraded"
-        elif lf_status == "degraded" and overall == "healthy":
+        if lf_status in ("unhealthy", "degraded") and overall == "healthy":
             overall = "degraded"
 
         return HealthResponse(
@@ -75,33 +79,26 @@ class MonitorService:
 
     async def _check_redis(self) -> tuple[str, Optional[float]]:
         try:
-            import redis.asyncio as redis
+            from app.core.redis import ping_redis
 
             t0 = time.perf_counter()
-            client = redis.from_url(settings.redis_url, socket_connect_timeout=2)
-            try:
-                await client.ping()
-            finally:
-                await client.aclose()
-            return "healthy", round((time.perf_counter() - t0) * 1000, 2)
-        except ImportError:
-            # 未安装 redis 包时退化为 TCP 探活
-            import asyncio
-
-            try:
-                t0 = time.perf_counter()
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(settings.REDIS_HOST, settings.REDIS_PORT),
-                    timeout=2.0,
-                )
-                writer.close()
-                await writer.wait_closed()
-                return "healthy", round((time.perf_counter() - t0) * 1000, 2)
-            except Exception:
-                logger.warning("redis TCP probe failed", exc_info=True)
-                return "unhealthy", None
+            ok = await ping_redis()
+            latency = round((time.perf_counter() - t0) * 1000, 2)
+            return ("healthy" if ok else "unhealthy"), latency
         except Exception:
             logger.warning("redis health check failed", exc_info=True)
+            return "unhealthy", None
+
+    def _check_chroma(self) -> tuple[str, Optional[float]]:
+        try:
+            from app.core.chroma import ping_chroma
+
+            t0 = time.perf_counter()
+            ok = ping_chroma()
+            latency = round((time.perf_counter() - t0) * 1000, 2)
+            return ("healthy" if ok else "unhealthy"), latency
+        except Exception:
+            logger.warning("chroma health check failed", exc_info=True)
             return "unhealthy", None
 
     async def stats(self) -> SystemStatsResponse:
@@ -132,8 +129,19 @@ class MonitorService:
         except Exception:
             queue_size = 0
 
-        # 活跃会话：问答模块未落地前固定为 0，指标仍暴露
+        # 活跃会话：统计未关闭的问答会话
         sessions = 0
+        try:
+            from app.models.qa import QASession
+
+            sessions = int(
+                await self.db.scalar(
+                    select(func.count()).select_from(QASession).where(QASession.status == "active")
+                )
+                or 0
+            )
+        except Exception:
+            sessions = 0
 
         users_registered.set(user_count)
         kb_total.set(kb_count)

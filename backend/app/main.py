@@ -1,9 +1,9 @@
-"""FastAPI 应用入口与身份模块初始数据。"""
+"""FastAPI 应用入口：生命周期、种子数据、可观测性与模块路由挂载。"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,15 +11,19 @@ from sqlalchemy.orm import selectinload
 from .api.v1.documents import router as documents_router
 from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.router import api_router
+from .core.chroma import close_chroma, init_chroma
 from .core.config import settings
 from .core.database import SessionLocal, engine
 from .core.logging import setup_logging
 from .core.metrics import metrics_payload
+from .core.redis import close_redis, init_redis
 from .core.security import hash_password
 from .core.seed_data import BUILTIN_PERMISSIONS, BUILTIN_ROLES
 from .middleware.access_log import ObservabilityMiddleware
 from .models import Base, Permission, Role, User
+from .services.embedding import embedding_service
 from .services.langfuse_service import get_langfuse
+from .services.llm import llm_service
 
 
 async def _all_permissions(db: AsyncSession) -> list[Permission]:
@@ -85,8 +89,18 @@ async def lifespan(_: FastAPI):
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     await seed_identity_data()
+    await init_redis()
+    try:
+        init_chroma()
+    except Exception:
+        # Chroma 暂不可用时不阻断 API 启动（健康检查会标记 degraded）
+        pass
     yield
     get_langfuse().flush()
+    await llm_service.aclose()
+    await embedding_service.aclose()
+    await close_redis()
+    close_chroma()
     await engine.dispose()
 
 
@@ -109,3 +123,21 @@ async def metrics() -> Response:
     """Prometheus 刮取入口（无 BaseResponse 包装）。"""
     payload, content_type = metrics_payload()
     return Response(content=payload, media_type=content_type)
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """根路径重定向到 Swagger 文档。"""
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/api", include_in_schema=False)
+async def api_index():
+    """API 入口说明。"""
+    return {
+        "service": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "docs": "/docs",
+        "health": "/api/v1/monitor/health",
+        "qa_ask": "POST /api/v1/qa/ask",
+    }
