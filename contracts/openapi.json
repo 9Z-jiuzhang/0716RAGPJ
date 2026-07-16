@@ -15833,6 +15833,17 @@
           },
           "total_changes": {
             "type": "integer"
+          },
+          "config_changes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "配置差异"
+          },
+          "rebuild_required": {
+            "type": "boolean",
+            "default": true
           }
         }
       },
@@ -15846,6 +15857,15 @@
             "type": "boolean",
             "description": "必须为 true 才执行回退",
             "example": true
+          },
+          "document_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "选择性恢复的文档 ID 列表；省略则整库恢复；不可传空数组",
+            "nullable": true
           }
         }
       },
@@ -16116,6 +16136,48 @@
           },
           "task_queue_size": {
             "type": "integer"
+          }
+        }
+      },
+      "RollbackResultResponse": {
+        "type": "object",
+        "required": [
+          "protection_snapshot_id",
+          "new_index_version",
+          "after_version",
+          "restored_document_count"
+        ],
+        "properties": {
+          "protection_snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "new_index_version": {
+            "type": "string"
+          },
+          "index_status": {
+            "type": "string",
+            "example": "building"
+          },
+          "before_version": {
+            "type": "string",
+            "nullable": true
+          },
+          "after_version": {
+            "type": "string"
+          },
+          "restored_document_count": {
+            "type": "integer"
+          },
+          "selective": {
+            "type": "boolean"
+          },
+          "rebuild_required": {
+            "type": "boolean",
+            "default": true
+          },
+          "message": {
+            "type": "string"
           }
         }
       }
