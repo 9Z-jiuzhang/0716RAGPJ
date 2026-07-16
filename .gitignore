@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# 环境配置（.env.example 需提交）
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 数据卷（Docker 挂载目录）
+data/*
+!data/.gitkeep
+
+# 操作系统
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Node（如前端引入构建工具）
+node_modules/
+
+# 日志
+*.log
+logs/
+
+# Alembic 本地覆盖（如有）
+alembic.ini.local
