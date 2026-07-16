@@ -72,4 +72,3 @@ class SnapshotDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     snapshot: Mapped[Snapshot] = relationship("Snapshot", back_populates="documents")
-    document = relationship("Document", back_populates="snapshot_documents")

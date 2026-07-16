@@ -62,7 +62,6 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     chunks: Mapped[list[DocumentChunk]] = relationship(
         "DocumentChunk", back_populates="document", cascade="all, delete-orphan", lazy="selectin"
     )
-    snapshot_documents = relationship("SnapshotDocument", back_populates="document")
 
 
 class DocumentChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):

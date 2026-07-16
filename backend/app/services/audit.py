@@ -46,7 +46,7 @@ class AuditService:
         )
         return await self.repo.create(entry)
 
-    async def get_detail(self, log_id: int) -> AuditLogResponse:
+    async def get_detail(self, log_id: UUID) -> AuditLogResponse:
         log = await self.repo.get_by_id(log_id)
         if log is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审计日志不存在")

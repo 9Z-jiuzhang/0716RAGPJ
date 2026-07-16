@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime as datetime_type
 from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -37,7 +37,7 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, comment="状态")
     current_index_version: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="当前生效索引版本号")
     creator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime_type | None] = mapped_column(DateTime, nullable=True)
 
     documents: Mapped[list[Document]] = relationship("Document", back_populates="knowledge_base", lazy="selectin")
     snapshots: Mapped[list[Snapshot]] = relationship("Snapshot", back_populates="knowledge_base", lazy="noload")

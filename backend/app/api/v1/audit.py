@@ -67,7 +67,7 @@ async def list_audit_logs(
     description="查看单条审计记录的完整详情（含变更前后 JSON）。",
 )
 async def get_audit_log(
-    log_id: int,
+    log_id: UUID,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_permission("audit:read")),
     request_id: str = Depends(_request_id),
