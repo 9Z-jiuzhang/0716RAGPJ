@@ -13,10 +13,20 @@ from .models import Base, Permission, Role, User
 async def seed_identity_data() -> None:
     """创建内置角色、权限及演示超级管理员；已有数据不会被覆盖。"""
     async with SessionLocal() as db:
-        permissions = {"user:read": "查看用户", "user:write": "管理用户", "role:read": "查看角色", "role:write": "管理角色"}
+        permissions = {
+            "user:read": "查看用户",
+            "user:write": "管理用户",
+            "role:read": "查看角色",
+            "role:write": "管理角色",
+            "snapshot:read": "查看快照历史",
+            "snapshot:write": "创建/删除快照",
+            "snapshot:restore": "执行快照回退",
+            "audit:read": "查看操作审计日志",
+        }
         existing = {p.code for p in (await db.scalars(select(Permission))).all()}
         for code, name in permissions.items():
-            if code not in existing: db.add(Permission(code=code, name=name, description=name))
+            if code not in existing:
+                db.add(Permission(code=code, name=name, description=name))
         await db.flush()
         roles = {r.name: r for r in (await db.scalars(select(Role))).all()}
         for name, description in [("超级管理员", "拥有平台全部管理权限"), ("注册用户", "默认注册角色")]:

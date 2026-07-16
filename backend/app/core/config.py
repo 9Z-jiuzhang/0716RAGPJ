@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     CORS_ORIGINS: str = "*"
+    # 快照策略（产品手册 5.8.4）
+    SNAPSHOT_MAX_COUNT: int = 50
+    SNAPSHOT_RETENTION_DAYS: int = 90
 
     @property
     def database_url(self) -> str:
