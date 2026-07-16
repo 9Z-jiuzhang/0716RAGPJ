@@ -1,11 +1,14 @@
 """认证模块运行配置。"""
 from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """从项目根目录 .env 加载环境变量。"""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
     APP_NAME: str = "AI-KnowledgeBase-RAG"
     APP_VERSION: str = "2.1.0"
     DEBUG: bool = False
@@ -50,6 +53,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     CORS_ORIGINS: str = "*"
 
     LOG_LEVEL: str = "INFO"
@@ -57,10 +61,16 @@ class Settings(BaseSettings):
     SNAPSHOT_MAX_COUNT: int = 50
     SNAPSHOT_RETENTION_DAYS: int = 90
 
+    SNAPSHOT_MAX_COUNT: int = 50
+    SNAPSHOT_RETENTION_DAYS: int = 90
+
     @property
     def database_url(self) -> str:
         """返回 SQLAlchemy asyncpg 连接地址。"""
-        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        return (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
 
     @property
     def DATABASE_URL(self) -> str:

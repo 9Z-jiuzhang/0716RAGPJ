@@ -45,6 +45,7 @@ async def get_current_user_optional(
 
 
 def _permission_codes(user: User) -> set[str]:
+    """获取用户的所有权限标识集合。"""
     return {item.code for role in user.roles if role.is_enabled for item in role.permissions}
 
 
@@ -85,6 +86,8 @@ async def assert_kb_access(db: AsyncSession, user: User, kb_id: uuid.UUID, permi
     if grant is None and permission not in codes:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"无权访问该知识库: {permission}")
     if grant is None and permission in codes:
+        # 拥有全局权限但仍需至少是创建者或有任意 kb 授权；宽松：全局权限放行
+        # 拥有全局 snapshot:* 但仍需至少是创建者或有任意 kb 授权；宽松：全局权限放行
         return kb
     if grant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"无权访问该知识库: {permission}")
