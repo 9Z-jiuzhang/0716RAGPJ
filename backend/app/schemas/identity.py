@@ -2,6 +2,8 @@
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.common import PaginationResponse
+
 
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=50)
@@ -23,6 +25,7 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    expires_in: int = Field(description="access_token 有效秒数")
 
 
 class UserResponse(BaseModel):
@@ -32,6 +35,7 @@ class UserResponse(BaseModel):
     nickname: str | None
     status: str
     roles: list[str]
+    permissions: list[str] = Field(default_factory=list, description="权限标识列表")
     created_at: datetime
     last_login_at: datetime | None
 
@@ -53,6 +57,10 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class UserListResponse(PaginationResponse[UserResponse]):
+    """用户分页列表。"""
+
+
 class RoleRequest(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     description: str | None = None
@@ -61,3 +69,16 @@ class RoleRequest(BaseModel):
 
 class RolePermissionsRequest(BaseModel):
     permission_codes: list[str]
+
+
+class RoleResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    is_builtin: bool
+    is_enabled: bool
+    permissions: list[str]
+
+
+class RoleListResponse(PaginationResponse[RoleResponse]):
+    """角色分页列表。"""

@@ -2,6 +2,8 @@
 
 from typing import Optional, Sequence
 
+from uuid import UUID
+
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +23,7 @@ class AuditRepository:
         await self.db.refresh(log)
         return log
 
-    async def get_by_id(self, log_id: int) -> Optional[AuditLog]:
+    async def get_by_id(self, log_id: UUID) -> Optional[AuditLog]:
         result = await self.db.execute(select(AuditLog).where(AuditLog.id == log_id))
         return result.scalar_one_or_none()
 

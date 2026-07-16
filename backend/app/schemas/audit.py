@@ -24,7 +24,7 @@ class AuditLogFilterParams(PaginationParams):
 class AuditLogListItem(BaseModel):
     """审计日志列表项。"""
 
-    id: int
+    id: UUID
     user_id: Optional[UUID] = None
     action: str
     resource_type: str

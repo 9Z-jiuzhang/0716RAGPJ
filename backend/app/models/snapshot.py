@@ -50,7 +50,6 @@ class Snapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
-    snapshot_documents = relationship("SnapshotDocument", back_populates="snapshot", cascade="all, delete-orphan")
 
 
 class SnapshotDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -73,4 +72,3 @@ class SnapshotDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     snapshot: Mapped[Snapshot] = relationship("Snapshot", back_populates="documents")
-    document = relationship("Document", back_populates="snapshot_documents")

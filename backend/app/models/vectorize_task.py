@@ -3,7 +3,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 from uuid import uuid4
 
-from app.core.database import Base
+from app.models.base import Base
 
 
 class VectorizeTask(Base):

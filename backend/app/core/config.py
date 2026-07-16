@@ -1,14 +1,22 @@
 """认证模块运行配置。"""
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 项目根目录 .env（兼容从 backend/ 或根目录启动）
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_ENV_FILE = _PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
     """从项目根目录 .env 加载环境变量。"""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE) if _ENV_FILE.exists() else ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
     APP_NAME: str = "AI-KnowledgeBase-RAG"
     APP_VERSION: str = "2.1.0"
     DEBUG: bool = False
@@ -61,9 +69,6 @@ class Settings(BaseSettings):
     SNAPSHOT_MAX_COUNT: int = 50
     SNAPSHOT_RETENTION_DAYS: int = 90
 
-    SNAPSHOT_MAX_COUNT: int = 50
-    SNAPSHOT_RETENTION_DAYS: int = 90
-
     @property
     def database_url(self) -> str:
         """返回 SQLAlchemy asyncpg 连接地址。"""
@@ -76,6 +81,10 @@ class Settings(BaseSettings):
     def DATABASE_URL(self) -> str:
         """兼容旧代码的数据库连接地址。"""
         return self.database_url
+
+    @property
+    def redis_url(self) -> str:
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
 
 
 @lru_cache
