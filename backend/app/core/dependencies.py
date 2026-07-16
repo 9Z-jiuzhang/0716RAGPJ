@@ -70,6 +70,7 @@ async def assert_kb_access(db: AsyncSession, user: User, kb_id: uuid.UUID, permi
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"无权访问该知识库: {permission}")
     if grant is None and permission in codes:
         # 拥有全局权限但仍需至少是创建者或有任意 kb 授权；宽松：全局权限放行
+        # 拥有全局 snapshot:* 但仍需至少是创建者或有任意 kb 授权；宽松：全局权限放行
         return kb
     if grant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"无权访问该知识库: {permission}")

@@ -1,0 +1,85 @@
+/* ============================================================
+ * 全局基础样式：重置、排版、通用工具类
+ * ============================================================ */
+
+/* 盒模型统一为 border-box，避免宽高计算偏差 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* 页面默认字体与背景，严格使用手册浅色背景 */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 链接默认使用主色，去掉下划线 */
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+a:hover {
+  color: var(--color-primary-dark);
+}
+
+/* 列表默认去点 */
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 按钮/输入统一继承字体 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* 应用根节点占满视口 */
+#app {
+  min-height: 100vh;
+}
+
+/* 隐藏元素工具类 */
+.hidden {
+  display: none !important;
+}
+
+/* 文本次要色 */
+.text-muted {
+  color: var(--color-text-secondary);
+}
+
+/* 危险文字 */
+.text-danger {
+  color: var(--color-danger);
+}
+
+/* 成功文字 */
+.text-success {
+  color: var(--color-success);
+}

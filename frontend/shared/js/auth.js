@@ -1,0 +1,250 @@
+/**
+ * 认证与本地会话存储
+ * 对齐手册 §3：RBAC + 知识库隔离
+ * 角色细化：访客 / 注册用户 / A·B 部门员工 / 普通管理员 / 超级管理员
+ */
+
+import { toast } from "./utils.js";
+
+const KEY_ACCESS = "rag_access_token";
+const KEY_REFRESH = "rag_refresh_token";
+const KEY_USER = "rag_user";
+const KEY_GUEST = "rag_guest_id";
+
+export function getAccessToken() {
+  return localStorage.getItem(KEY_ACCESS) || "";
+}
+
+export function getRefreshToken() {
+  return localStorage.getItem(KEY_REFRESH) || "";
+}
+
+export function isLoggedIn() {
+  return Boolean(getAccessToken());
+}
+
+export function getUser() {
+  try {
+    return JSON.parse(localStorage.getItem(KEY_USER) || "null");
+  } catch {
+    return null;
+  }
+}
+
+export function saveAuth({ access_token, refresh_token, user }) {
+  if (access_token) localStorage.setItem(KEY_ACCESS, access_token);
+  if (refresh_token) localStorage.setItem(KEY_REFRESH, refresh_token);
+  if (user) localStorage.setItem(KEY_USER, JSON.stringify(normalizeUser(user)));
+}
+
+/** 规范化用户对象，保证 role / roles / permissions 一致 */
+export function normalizeUser(user) {
+  if (!user || typeof user !== "object") return user;
+  const roles = [].concat(user.role || [], user.roles || []).map(String).filter(Boolean);
+  const uniq = [...new Set(roles)];
+  // 若 roles 含 admin/super_admin，role 字段与之对齐，避免展示为 user
+  let role = user.role ? String(user.role) : uniq[0] || "user";
+  if (uniq.includes("super_admin")) role = "super_admin";
+  else if (uniq.includes("admin") && role === "user") role = "admin";
+  return {
+    ...user,
+    role,
+    roles: uniq.length ? uniq : [role],
+    permissions: user.permissions || user.permission_codes || [],
+  };
+}
+
+/**
+ * 合并本地与远端用户资料：昵称邮箱等可更新，角色权限取「更强」一侧，防止被冲成注册用户
+ */
+export function mergeUserProfiles(local, remote) {
+  const a = normalizeUser(local || {});
+  const b = normalizeUser(remote || {});
+  const roleRank = (u) => {
+    const r = new Set([].concat(u.role || [], u.roles || []));
+    if (r.has("super_admin") || u.is_super_admin) return 40;
+    if (r.has("admin")) return 30;
+    if (r.has("staff_dept_a") || r.has("staff_dept_b") || r.has("kb_admin") || r.has("staff")) return 20;
+    if (r.has("user")) return 10;
+    return 0;
+  };
+  const stronger = roleRank(a) >= roleRank(b) ? a : b;
+  const weaker = stronger === a ? b : a;
+  const perms = [...new Set([...(a.permissions || []), ...(b.permissions || [])])];
+  return normalizeUser({
+    ...weaker,
+    ...stronger,
+    nickname: b.nickname || a.nickname,
+    email: b.email || a.email,
+    last_login_at: b.last_login_at || a.last_login_at,
+    role: stronger.role,
+    roles: stronger.roles,
+    permissions: perms.length ? perms : stronger.permissions,
+    department: stronger.department || weaker.department,
+    kb_ids: stronger.kb_ids || weaker.kb_ids,
+    is_super_admin: stronger.is_super_admin || weaker.is_super_admin,
+  });
+}
+
+/** 登录时完整替换会话，避免旧 token 与错误 user 混用 */
+export function replaceAuthSession({ access_token, refresh_token, user }) {
+  clearAuth();
+  if (!access_token || !user) {
+    throw new Error("登录响应缺少 access_token 或 user");
+  }
+  saveAuth({ access_token, refresh_token, user: normalizeUser(user) });
+}
+
+export function clearAuth() {
+  localStorage.removeItem(KEY_ACCESS);
+  localStorage.removeItem(KEY_REFRESH);
+  localStorage.removeItem(KEY_USER);
+}
+
+export function getGuestId() {
+  let id = localStorage.getItem(KEY_GUEST);
+  if (!id) {
+    id = crypto.randomUUID ? crypto.randomUUID() : `guest-${Date.now()}`;
+    localStorage.setItem(KEY_GUEST, id);
+  }
+  return id;
+}
+
+/** 收集用户角色码 */
+function roleSet(user = getUser()) {
+  if (!user) return new Set();
+  return new Set([].concat(user.role || [], user.roles || []).map(String));
+}
+
+function userFlag(key) {
+  const u = getUser();
+  return Boolean(u && u[key]);
+}
+
+/** 超级管理员：手册「系统管理员」全量能力 */
+export function isSuperAdmin() {
+  const user = getUser();
+  if (!user) return false;
+  const roles = roleSet(user);
+  return roles.has("super_admin") || Boolean(user.is_super_admin);
+}
+
+/** 普通或超级管理员（可进管理端控制台） */
+export function isAdminUser() {
+  const user = getUser();
+  if (!user) return false;
+  if (isSuperAdmin()) return true;
+  const roles = roleSet(user);
+  if (roles.has("admin") || roles.has("super_admin")) return true;
+  const r = String(user.role || "");
+  return r === "admin" || r === "super_admin";
+}
+
+/**
+ * 是否具备权限码（前端隐藏用，不能替代后端）
+ * 仅超级管理员默认全放行；普通管理员与员工看 permissions 列表
+ */
+export function hasPermission(code) {
+  const user = getUser();
+  if (!user) return false;
+  if (isSuperAdmin()) return true;
+  const perms = user.permissions || user.permission_codes || [];
+  return perms.includes(code);
+}
+
+/**
+ * 主角色（导航分流）
+ * guest | user | staff | admin
+ */
+export function getPrimaryRole() {
+  if (!isLoggedIn()) return "guest";
+  if (isAdminUser()) return "admin";
+  const roles = roleSet();
+  if (
+    roles.has("kb_admin") ||
+    roles.has("staff") ||
+    roles.has("staff_dept_a") ||
+    roles.has("staff_dept_b") ||
+    roles.has("employee") ||
+    hasPermission("kb:upload")
+  ) {
+    return "staff";
+  }
+  return "user";
+}
+
+/** 部门：A / B / 空（管理员或无部门用户） */
+export function getDepartment() {
+  const user = getUser();
+  if (!user) return "";
+  const d = String(user.department || user.dept || "").toUpperCase();
+  if (d === "A" || d === "B") return d;
+  const roles = roleSet(user);
+  if (roles.has("staff_dept_a")) return "A";
+  if (roles.has("staff_dept_b")) return "B";
+  return "";
+}
+
+/** 展示用角色名 */
+export function getRoleLabel(roleHint) {
+  if (!isLoggedIn()) return "访客";
+  if (isSuperAdmin()) return "超级管理员";
+  if (isAdminUser() || roleHint === "admin") return "普通管理员";
+  const dept = getDepartment();
+  const primary = roleHint || getPrimaryRole();
+  if (primary === "staff") {
+    return dept ? `员工·${dept}部门` : "员工";
+  }
+  return "注册用户";
+}
+
+/** 可访问的知识库 ID；null=管理员不限制；[]=无显式授权（非管理员） */
+export function getAccessibleKbIds() {
+  if (!isLoggedIn()) return [];
+  if (isAdminUser() || isSuperAdmin()) return null;
+  const user = getUser() || {};
+  if (Array.isArray(user.kb_ids) && user.kb_ids.length) return user.kb_ids.slice();
+  // 有部门时由 canAccessKb 按部门判断；无 kb_ids 不再视为「全库放行」
+  return [];
+}
+
+/** 某知识库当前用户是否可操作（上传/维护） */
+export function canAccessKb(kb) {
+  if (!kb) return false;
+  if (isSuperAdmin() || isAdminUser()) return true;
+  if (!isLoggedIn()) return kb.visibility === "public";
+  const ids = getAccessibleKbIds();
+  if (ids === null) return true;
+  if (ids.length && ids.includes(kb.id)) return true;
+  const dept = getDepartment();
+  if (dept && Array.isArray(kb.departments) && kb.departments.includes(dept)) return true;
+  if (dept && kb.department === dept) return true;
+  // 注册用户默认只能碰公开库（问答范围）；上传另受 canUpload 约束
+  if (getPrimaryRole() === "user") return kb.visibility === "public";
+  return false;
+}
+
+/** 是否可上传：员工；管理员在访客端也可上传（便于演示） */
+export function canUpload() {
+  return getPrimaryRole() === "staff" || isAdminUser() || hasPermission("kb:upload");
+}
+
+/** 是否可进管理端：仅管理员；员工在访客端上传，不对管理台做深链开放 */
+export function canAccessAdmin() {
+  return isAdminUser();
+}
+
+/** 登录后落地页：管理员进控制台，其余回问答 */
+export function getPostLoginTarget() {
+  if (isAdminUser()) return { type: "admin", href: "/admin/" };
+  return { type: "hash", path: "/" };
+}
+
+export function requireLogin(loginPath = "/login") {
+  if (!isLoggedIn()) {
+    toast("请先登录", "error");
+    location.hash = `#${loginPath}`;
+    return false;
+  }
+  return true;
+}
