@@ -9,6 +9,10 @@ from .identity import AuditLog, Permission, Role, User
 from .index_version import IndexVersion
 from .knowledge_base import KBPermission, KnowledgeBase
 from .snapshot import Snapshot, SnapshotDocument
+from .snapshot_document import SnapshotDocument as SnapshotDocumentAlias
+from .audit_log import AuditLog as AuditLogAlias
+from .document_chunk import DocumentChunk as DocumentChunkAlias
+from .kb_permission import KBPermission as KBPermissionAlias
 
 __all__ = [
     "Base",

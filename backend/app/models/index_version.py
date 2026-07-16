@@ -3,9 +3,9 @@
 import uuid
 from typing import Any, Optional
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text, Boolean
 from sqlalchemy.dialects.postgresql import JSON, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -22,6 +22,7 @@ class IndexVersion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), index=True, nullable=False
     )
     version: Mapped[str] = mapped_column(String(50), nullable=False, comment="版本号，如 v20260716-001")
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="该版本分段总数")
     status: Mapped[str] = mapped_column(
         String(20), default="building", nullable=False, comment="building/active/obsolete/failed"
@@ -33,3 +34,5 @@ class IndexVersion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     source_snapshot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True, comment="若由快照回退产生，记录来源快照 ID"
     )
+
+    knowledge_base = relationship("KnowledgeBase", back_populates="index_versions")

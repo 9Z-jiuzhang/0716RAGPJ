@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from .api.v1.router import api_router
+from .api.v1.knowledge_bases import router as knowledge_bases_router
+from .api.v1.documents import router as documents_router
 from .core.config import settings
 from .core.database import SessionLocal, engine
 from .core.security import hash_password
@@ -22,6 +24,11 @@ async def seed_identity_data() -> None:
             "snapshot:write": "创建/删除快照",
             "snapshot:restore": "执行快照回退",
             "audit:read": "查看操作审计日志",
+            "kb:read": "查看知识库",
+            "kb:write": "管理知识库",
+            "kb:admin": "知识库管理员",
+            "document:read": "查看文档",
+            "document:write": "管理文档",
         }
         existing = {p.code for p in (await db.scalars(select(Permission))).all()}
         for code, name in permissions.items():
@@ -52,8 +59,15 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(api_router)
+app.include_router(knowledge_bases_router, prefix="/api/v1")
+app.include_router(documents_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/monitor/health", tags=["系统监控"])
 async def health():
     return {"status": "ok", "service": settings.APP_NAME}
+
+
+@app.get("/")
+async def root():
+    return {"message": f"{settings.APP_NAME} API", "version": settings.APP_VERSION}

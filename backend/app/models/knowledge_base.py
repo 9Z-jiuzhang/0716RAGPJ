@@ -35,7 +35,8 @@ class KBPermission(Base):
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text
+from datetime import datetime as datetime_type
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,11 +65,17 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, comment="状态")
     current_index_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="当前生效索引版本号")
     creator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    deleted_at: Mapped[Optional[datetime_type]] = mapped_column(DateTime, nullable=True)
 
     documents: Mapped[list["Document"]] = relationship("Document", back_populates="knowledge_base", lazy="selectin")
     snapshots: Mapped[list["Snapshot"]] = relationship("Snapshot", back_populates="knowledge_base", lazy="noload")
+    index_versions = relationship("IndexVersion", back_populates="knowledge_base", cascade="all, delete-orphan")
     permissions: Mapped[list["KBPermission"]] = relationship(
         "KBPermission", back_populates="knowledge_base", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("name", "deleted_at", name="uq_kb_name_deleted"),
     )
 
 

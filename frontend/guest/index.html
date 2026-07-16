@@ -1,11 +1,9 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <!-- 页面基础元信息 -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI 知识库 · 智能问答</title>
-  <!-- 手册配色与布局样式（经 Nginx /assets 映射到 shared） -->
   <link rel="stylesheet" href="/assets/css/variables.css" />
   <link rel="stylesheet" href="/assets/css/base.css" />
   <link rel="stylesheet" href="/assets/css/components.css" />
@@ -13,11 +11,8 @@
   <link rel="stylesheet" href="./css/guest.css" />
 </head>
 <body>
-  <!-- 演示模式提示条（后端不可用时显示） -->
   <div id="demoBanner" class="demo-banner hidden">当前为演示模式：后端接口未就绪，页面使用本地模拟数据，交互逻辑与正式环境一致。</div>
-  <!-- 应用根节点，由 JS 渲染壳层与页面 -->
   <div id="app"></div>
-  <!-- Toast 容器占位由 utils 动态创建 -->
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>

@@ -2,8 +2,9 @@
 
 import uuid
 from collections.abc import Callable
+from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Header, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,22 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     if user.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户已禁用或待验证")
     return user
+
+
+async def get_current_user_optional(
+    authorization: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """兼容旧代码的可选用户获取函数。"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ")[1]
+    try:
+        payload = decode_token(token)
+        user = await db.scalar(select(User).where(User.id == uuid.UUID(payload["sub"])))
+        return user
+    except Exception:
+        return None
 
 
 def _permission_codes(user: User) -> set[str]:
@@ -92,7 +109,6 @@ def require_kb_access(permission: str) -> Callable:
         if permission in codes:
             await assert_kb_access(db, user, kb_id, permission)
             return user
-        # 仅 KB 级授权
         role_ids = [r.id for r in user.roles if r.is_enabled]
         subject = [KBPermission.user_id == user.id]
         if role_ids:
@@ -111,3 +127,19 @@ def require_kb_access(permission: str) -> Callable:
         return user
 
     return checker
+
+
+def require_permissions(*required_permissions: str):
+    """兼容旧代码的多权限检查装饰器。"""
+    async def dependency(current_user: User = Depends(get_current_user)):
+        codes = _permission_codes(current_user)
+        for permission in required_permissions:
+            if permission not in codes and "*" not in codes and "admin:*" not in codes:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission denied: {permission}")
+        return current_user
+    return dependency
+
+
+def require_kb_permission(permission: str):
+    """兼容旧代码的知识库权限依赖。"""
+    return require_kb_access(permission)

@@ -35,6 +35,7 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     chunks: Mapped[list["DocumentChunk"]] = relationship(
         "DocumentChunk", back_populates="document", cascade="all, delete-orphan", lazy="noload"
     )
+    snapshot_documents = relationship("SnapshotDocument", back_populates="document")
 
 
 class DocumentChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -49,7 +50,6 @@ class DocumentChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, comment="分段序号，从 0 开始")
     content: Mapped[str] = mapped_column(Text, nullable=False, comment="分段文本")
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="字符数")
-    # 避免与 SQLAlchemy MetaData 冲突，列名仍为 metadata
     chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON, default=dict, nullable=False, comment="标题层级、页码等元信息"
     )
