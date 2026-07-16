@@ -1,0 +1,9 @@
+# 仅启动前端静态站（不依赖后端/数据库），用于本地立刻预览 5.1 页面
+services:
+  web:
+    image: nginx:1.25-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
