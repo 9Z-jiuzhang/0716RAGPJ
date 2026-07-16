@@ -4,11 +4,7 @@
 权限: snapshot:read / snapshot:write / snapshot:restore（含知识库范围校验）
 """
 
-from typing import Optional
 from uuid import UUID, uuid4
-
-from fastapi import APIRouter, Depends, Header, Query, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import require_kb_access
@@ -24,6 +20,8 @@ from app.schemas.snapshot import (
     SnapshotResponse,
 )
 from app.services.snapshot import SnapshotService
+from fastapi import APIRouter, Depends, Header, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
     prefix="/knowledge-bases/{kb_id}/snapshots",
@@ -31,11 +29,11 @@ router = APIRouter(
 )
 
 
-def _request_id(x_request_id: Optional[str] = Header(default=None, alias="X-Request-Id")) -> str:
+def _request_id(x_request_id: str | None = Header(default=None, alias="X-Request-Id")) -> str:
     return x_request_id or str(uuid4())
 
 
-def _client_meta(request: Request) -> tuple[Optional[str], Optional[str]]:
+def _client_meta(request: Request) -> tuple[str | None, str | None]:
     """提取客户端 IP 与 User-Agent。"""
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
@@ -123,7 +121,7 @@ async def preview_rollback(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_kb_access("snapshot:read")),
     request_id: str = Depends(_request_id),
-    document_ids: Optional[list[UUID]] = Query(
+    document_ids: list[UUID] | None = Query(
         default=None, description="可选：仅预览指定文档的选择性恢复差异"
     ),
 ) -> BaseResponse:

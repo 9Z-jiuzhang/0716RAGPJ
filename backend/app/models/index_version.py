@@ -1,7 +1,7 @@
 """索引版本模型：发布与回退的原子切换载体。"""
 
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import ForeignKey, Integer, String, Text, Boolean
 from sqlalchemy.dialects.postgresql import JSON, UUID
@@ -30,8 +30,8 @@ class IndexVersion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     config_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, comment="构建时的分段规则、embedding 模型等配置"
     )
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="失败原因")
-    source_snapshot_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, comment="失败原因")
+    source_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, comment="若由快照回退产生，记录来源快照 ID"
     )
 

@@ -1,7 +1,7 @@
 """导出 ORM 模型，供 Alembic / create_all 发现。"""
 
 from .base import Base
-from .document import Document, DocumentChunk
+from .document import Document, DocumentChunk, KbChunkRule
 from .hit_tests import TestCases, TestQuestions, TestResults, TestRuns
 from .identity import AuditLog, Permission, Role, User
 from .index_version import IndexVersion
@@ -23,6 +23,7 @@ __all__ = [
     "TestResults",
     "Document",
     "DocumentChunk",
+    "KbChunkRule",
     "IndexVersion",
     "Snapshot",
     "SnapshotDocument",

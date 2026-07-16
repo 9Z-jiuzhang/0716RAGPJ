@@ -1,7 +1,7 @@
 """认证、角色、权限和审计日志的 ORM 模型。"""
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Table, Text
 from sqlalchemy.dialects.postgresql import JSON, UUID
@@ -59,9 +59,9 @@ class AuditLog(TimestampMixin, Base):
     action: Mapped[str] = mapped_column(String(100), index=True)
     resource_type: Mapped[str] = mapped_column(String(50), index=True)
     resource_id: Mapped[str | None] = mapped_column(String(100))
-    detail: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
-    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     result: Mapped[str] = mapped_column(String(20), default="success", nullable=False)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

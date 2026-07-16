@@ -18,3 +18,4 @@ select = ["E", "F", "W", "I", "N", "UP"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["backend/tests"]
+pythonpath = ["backend"]

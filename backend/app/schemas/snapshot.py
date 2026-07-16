@@ -1,26 +1,25 @@
 """快照相关请求/响应 Schema（产品手册 5.8 / 框架提示词 4.9）。"""
 
 from datetime import datetime
-from typing import Any, List, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
-
 from app.schemas.common import PaginationResponse
+from pydantic import BaseModel, Field, field_validator
 
 
 class CreateSnapshotRequest(BaseModel):
     """手动创建快照请求。"""
 
     name: str = Field(..., min_length=1, max_length=200, description="快照名称", examples=["发布前备份"])
-    description: Optional[str] = Field(default=None, max_length=2000, description="快照说明")
+    description: str | None = Field(default=None, max_length=2000, description="快照说明")
 
 
 class RollbackRequest(BaseModel):
     """回退请求：必须显式 confirm=true。"""
 
     confirm: bool = Field(..., description="二次确认，必须为 true 才能执行回退")
-    document_ids: Optional[List[UUID]] = Field(
+    document_ids: list[UUID] | None = Field(
         default=None,
         description="选择性恢复的文档 ID 列表；为空则恢复整个知识库；不可传空列表",
     )
@@ -34,7 +33,7 @@ class RollbackRequest(BaseModel):
 
     @field_validator("document_ids")
     @classmethod
-    def document_ids_not_empty_list(cls, v: Optional[List[UUID]]) -> Optional[List[UUID]]:
+    def document_ids_not_empty_list(cls, v: list[UUID] | None) -> list[UUID] | None:
         if v is not None and len(v) == 0:
             raise ValueError("document_ids 不可为空列表；整库恢复请省略该字段")
         return v
@@ -47,7 +46,7 @@ class SnapshotDocumentItem(BaseModel):
     filename: str = Field(..., description="文件名")
     file_type: str = Field(..., description="文件类型")
     chunk_count: int = Field(..., description="分段数")
-    content_hash: Optional[str] = Field(default=None, description="内容哈希")
+    content_hash: str | None = Field(default=None, description="内容哈希")
     metadata: dict[str, Any] = Field(default_factory=dict, description="文档元信息")
 
     model_config = {"from_attributes": True}
@@ -59,7 +58,7 @@ class SnapshotListItem(BaseModel):
     id: UUID
     kb_id: UUID
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     trigger: str = Field(..., description="创建方式")
     status: str
     document_count: int = Field(default=0, description="快照包含的文档数")
@@ -74,14 +73,14 @@ class SnapshotResponse(SnapshotListItem):
     """完整快照信息。"""
 
     config_snapshot: dict[str, Any] = Field(default_factory=dict, description="配置快照")
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class SnapshotDetailResponse(SnapshotResponse):
     """快照详情：含文档列表、分段统计、权限配置。"""
 
-    documents: List[SnapshotDocumentItem] = Field(default_factory=list)
-    permission_snapshot: List[dict[str, Any]] = Field(
+    documents: list[SnapshotDocumentItem] = Field(default_factory=list)
+    permission_snapshot: list[dict[str, Any]] = Field(
         default_factory=list, description="快照时的权限配置"
     )
     segment_rules: dict[str, Any] = Field(default_factory=dict, description="分段规则快照")
@@ -95,9 +94,9 @@ class AffectedDocument(BaseModel):
     change_type: Literal["added", "removed", "modified", "unchanged"] = Field(
         ..., description="相对当前状态、回退后将发生的变更类型"
     )
-    current_chunk_count: Optional[int] = Field(default=None, description="当前分段数")
-    snapshot_chunk_count: Optional[int] = Field(default=None, description="快照分段数")
-    detail: Optional[str] = Field(default=None, description="变更说明")
+    current_chunk_count: int | None = Field(default=None, description="当前分段数")
+    snapshot_chunk_count: int | None = Field(default=None, description="快照分段数")
+    detail: str | None = Field(default=None, description="变更说明")
 
 
 class ConfigChangeItem(BaseModel):
@@ -114,8 +113,8 @@ class RollbackPreviewResponse(BaseModel):
     snapshot_id: UUID
     kb_id: UUID
     snapshot_name: str
-    affected_documents: List[AffectedDocument] = Field(default_factory=list)
-    config_changes: List[ConfigChangeItem] = Field(
+    affected_documents: list[AffectedDocument] = Field(default_factory=list)
+    config_changes: list[ConfigChangeItem] = Field(
         default_factory=list, description="分段规则/嵌入模型/权限等配置差异"
     )
     total_changes: int = Field(default=0, description="将发生变更的文档数（不含 unchanged）")
@@ -139,7 +138,7 @@ class RollbackResultResponse(BaseModel):
     protection_snapshot_id: UUID = Field(..., description="回退前保护快照 ID")
     new_index_version: str = Field(..., description="新生成的索引版本号（building，待向量重建后激活）")
     index_status: str = Field(default="building", description="索引版本状态")
-    before_version: Optional[str] = Field(default=None, description="回退前生效索引版本")
+    before_version: str | None = Field(default=None, description="回退前生效索引版本")
     after_version: str = Field(..., description="回退后待激活的索引版本")
     restored_document_count: int = Field(..., description="恢复涉及的文档数")
     selective: bool = Field(default=False, description="是否选择性恢复")

@@ -1,4 +1,4 @@
-"""认证模块运行配置。"""
+"""应用运行配置。【对齐 .env.example 键名】"""
 from functools import lru_cache
 from pathlib import Path
 
@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "2.1.0"
     DEBUG: bool = False
     SECRET_KEY: str = "change-me"
+    LOG_LEVEL: str = "INFO"
 
     POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: int = 5432
@@ -44,16 +45,16 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o"
     LLM_BASE_URL: str = ""
 
-    EMBEDDING_PROVIDER: str = "openai"
+    EMBEDDING_PROVIDER: str = "dashscope"
     EMBEDDING_API_KEY: str = "change-me"
-    EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"
-    EMBEDDING_API_BASE: str = ""
+    EMBEDDING_MODEL_NAME: str = "text-embedding-v3"
+    EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
     RERANK_PROVIDER: str = ""
     RERANK_API_KEY: str = ""
     RERANK_MODEL: str = ""
 
-    LANGFUSE_HOST: str = "http://localhost:3000"
+    LANGFUSE_HOST: str = "http://langfuse-server:3000"
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
 
@@ -61,17 +62,15 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
     CORS_ORIGINS: str = "*"
-
-    LOG_LEVEL: str = "INFO"
 
     SNAPSHOT_MAX_COUNT: int = 50
     SNAPSHOT_RETENTION_DAYS: int = 90
 
+    MAX_UPLOAD_BYTES: int = 100 * 1024 * 1024
+
     @property
     def database_url(self) -> str:
-        """返回 SQLAlchemy asyncpg 连接地址。"""
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"

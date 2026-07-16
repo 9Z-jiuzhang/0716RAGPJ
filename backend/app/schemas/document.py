@@ -1,58 +1,98 @@
-from pydantic import BaseModel, Field, UUID4
-from typing import Optional, List, Dict
+"""文档模块 Pydantic DTO。【对齐 contracts/openapi.json】"""
+
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Any
 
-from app.schemas.enums import DocumentStatus, FileType, SplitMode
-
-
-class DocumentUploadResponse(BaseModel):
-    id: UUID4 = Field(..., description="文档ID")
-    filename: str = Field(..., description="文件名")
-    file_type: FileType = Field(..., description="文件类型")
-    file_size: int = Field(..., description="文件大小")
-    status: DocumentStatus = Field(..., description="处理状态")
+from pydantic import BaseModel, Field
 
 
 class DocumentResponse(BaseModel):
-    id: UUID4 = Field(..., description="唯一标识")
-    kb_id: UUID4 = Field(..., description="所属知识库")
-    filename: str = Field(..., description="原始文件名")
-    file_type: FileType = Field(..., description="文件类型")
-    file_size: int = Field(..., description="文件大小（字节）")
-    file_path: str = Field(..., description="MinIO 对象存储路径")
-    chunk_count: int = Field(..., description="分段数量")
-    status: DocumentStatus = Field(..., description="状态")
-    error_message: Optional[str] = Field(None, description="处理失败原因")
-    creator_id: UUID4 = Field(..., description="上传者用户ID")
-    created_at: datetime = Field(..., description="上传时间")
-    updated_at: datetime = Field(..., description="最后更新时间")
+    id: str
+    kb_id: str
+    filename: str
+    file_type: str
+    file_size: int
+    file_path: str
+    chunk_count: int
+    status: str
+    error_message: str | None = None
+    creator_id: str
+    created_at: datetime
+    updated_at: datetime
 
 
-class SegmentRuleUpdate(BaseModel):
-    chunk_size: int = Field(500, description="每段最大字符数")
-    chunk_overlap: int = Field(50, description="相邻段重叠字符数")
-    separators: List[str] = Field(default=["\n\n", "\n", "。", ".", " "], description="分段分隔符优先级")
-    split_mode: SplitMode = Field(SplitMode.FIXED, description="分段模式")
-    enable_semantic: bool = Field(False, description="是否启用语义分段")
+class DocumentListItem(BaseModel):
+    id: str
+    filename: str
+    file_type: str
+    file_size: int
+    chunk_count: int
+    status: str
+    created_at: datetime
+
+
+class DocumentListResponse(BaseModel):
+    items: list[DocumentListItem]
+    total: int
+    page: int
+    page_size: int
 
 
 class DocumentChunkResponse(BaseModel):
-    id: UUID4 = Field(..., description="分段ID")
-    document_id: UUID4 = Field(..., description="所属文档ID")
-    chunk_index: int = Field(..., description="分段序号")
-    content: str = Field(..., description="分段内容")
-    metadata: Dict = Field(..., description="元数据")
-    is_active: bool = Field(..., description="是否启用")
-    index_version: str = Field(..., description="索引版本")
-    created_at: datetime = Field(..., description="创建时间")
+    id: str
+    document_id: str
+    chunk_index: int
+    content: str
+    char_count: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    is_enabled: bool = True
 
 
-class ChunkUpdate(BaseModel):
-    content: Optional[str] = Field(None, description="分段内容")
-    is_active: Optional[bool] = Field(None, description="是否启用")
+class ChunkListResponse(BaseModel):
+    items: list[DocumentChunkResponse]
+    total: int
+    page: int
+    page_size: int
 
 
+class UpdateSegmentRulesRequest(BaseModel):
+    chunk_size: int = Field(ge=100, le=5000)
+    chunk_overlap: int = Field(ge=0, le=1000)
+    separators: list[str] | None = None
+    split_mode: str | None = None
+    # P2迭代开发，当前仅配置存储，不启用语义切分
+    enable_semantic: bool | None = False
+
+
+class UpdateChunkRequest(BaseModel):
+    content: str | None = None
+    is_enabled: bool | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class NormalizeResult(BaseModel):
+    removed_blank_lines: int = 0
+    removed_duplicate_blocks: int = 0
+    char_count_before: int = 0
+    char_count_after: int = 0
+
+
+# kerper 模块占位兼容（实际 5.5 实现见 app.services.document_service）
 class DocumentFilter(BaseModel):
-    filename: Optional[str] = Field(None, description="按文件名搜索")
-    file_type: Optional[FileType] = Field(None, description="按文件类型筛选")
-    status: Optional[DocumentStatus] = Field(None, description="按状态筛选")
+    filename: str | None = None
+    file_type: str | None = None
+    status: str | None = None
+
+
+class DocumentUploadResponse(BaseModel):
+    id: str
+    filename: str
+    file_type: str
+    file_size: int
+    status: str
+
+
+SegmentRuleUpdate = UpdateSegmentRulesRequest
+ChunkUpdate = UpdateChunkRequest

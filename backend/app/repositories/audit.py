@@ -1,6 +1,6 @@
 """审计日志数据访问层。"""
 
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from uuid import UUID
 
@@ -23,7 +23,7 @@ class AuditRepository:
         await self.db.refresh(log)
         return log
 
-    async def get_by_id(self, log_id: UUID) -> Optional[AuditLog]:
+    async def get_by_id(self, log_id: UUID) -> AuditLog | None:
         result = await self.db.execute(select(AuditLog).where(AuditLog.id == log_id))
         return result.scalar_one_or_none()
 

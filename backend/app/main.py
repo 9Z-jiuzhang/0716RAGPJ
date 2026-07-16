@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .api.helpers import ok, resolve_request_id
-from .api.v1.router import api_router
-from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.documents import router as documents_router
+from .api.v1.knowledge_bases import router as knowledge_bases_router
+from .api.v1.router import api_router
 from .core.config import settings
 from .core.database import SessionLocal, engine
 from .core.security import hash_password

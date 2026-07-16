@@ -1,6 +1,6 @@
 """审计服务：供快照及其他写操作横切调用。"""
 
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -23,14 +23,14 @@ class AuditService:
         *,
         action: str,
         resource_type: str,
-        resource_id: Optional[str] = None,
-        user_id: Optional[UUID] = None,
-        detail: Optional[dict[str, Any]] = None,
-        request_id: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        resource_id: str | None = None,
+        user_id: UUID | None = None,
+        detail: dict[str, Any] | None = None,
+        request_id: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
         result: str = "success",
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> AuditLog:
         entry = AuditLog(
             user_id=user_id,
