@@ -13,7 +13,7 @@ from app.schemas.response import ok
 from app.services import document_pipeline, document_service
 from app.utils.exceptions import DocumentError
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi import Body
+from fastapi import Body, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -129,6 +129,50 @@ async def segment_preview(
     try:
         data = await document_service.preview_segment(
             db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), body
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(data.model_dump())
+
+
+@router.post("/segment-preview-file")
+async def segment_preview_file(
+    kb_id: str,
+    file: UploadFile | None = File(None, description="待预览分段的文档文件；与 doc_id 二选一"),
+    doc_id: str | None = Form(None, description="已上传文档 id；与 file 二选一"),
+    chunk_size: int | None = Form(None, description="可选覆盖：分段长度"),
+    chunk_overlap: int | None = Form(None, description="可选覆盖：重叠长度"),
+    split_mode: str | None = Form(None, description="可选覆盖：分段模式 fixed/heading/paragraph/sliding"),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("doc:segment")),
+):
+    """预校验分段效果：解析待上传文件（或已上传文档）并干跑分段，返回分段文本列表与每段起止下标。
+
+    该接口仅用于向量化"入库前"确认分段效果，不触发向量化、不写向量库、
+    不修改数据库正式文档记录与流水线状态（无持久化副作用）。前端：上传后确认分段效果面板。
+    """
+    rule_overrides: dict[str, object] = {}
+    if chunk_size is not None:
+        rule_overrides["chunk_size"] = chunk_size
+    if chunk_overlap is not None:
+        rule_overrides["chunk_overlap"] = chunk_overlap
+    if split_mode is not None:
+        rule_overrides["split_mode"] = split_mode
+
+    filename: str | None = None
+    content: bytes | None = None
+    if file is not None:
+        content = await file.read()
+        filename = file.filename or "unnamed"
+
+    try:
+        data = await document_service.preview_segment_source(
+            db,
+            _uuid(kb_id, "kb_id"),
+            filename=filename,
+            content=content,
+            doc_id=_uuid(doc_id, "doc_id") if doc_id else None,
+            rule_overrides=rule_overrides or None,
         )
     except DocumentError as exc:
         _raise_doc_error(exc)
