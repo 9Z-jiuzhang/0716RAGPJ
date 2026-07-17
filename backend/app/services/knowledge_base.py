@@ -28,8 +28,10 @@ from app.schemas.knowledge_base import (
     KBPermissionUpdate,
     VectorizeStatusResponse,
 )
+from app.models.enums import SnapshotTrigger
 from app.services.document_pipeline import run_resegment_pipeline
 from app.services.index_switch import IndexSwitchService
+from app.services.snapshot_hooks import take_auto_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +170,14 @@ class KnowledgeBaseService:
         成功后写入新索引版本并原子切换；失败时保留旧版本。
         """
         kb = await self._get_active_kb(kb_id)
+        # 5.8.1：批量重新向量化前自动快照（整库级一次，避免仅依赖逐文档钩子）
+        await take_auto_snapshot(
+            self.db,
+            kb.id,
+            SnapshotTrigger.AUTO_REVECTORIZE,
+            user_id,
+            name=f"kb_revectorize:{kb.name}",
+        )
         docs = list(
             (
                 await self.db.scalars(
@@ -234,6 +244,14 @@ class KnowledgeBaseService:
     async def update_kb_permissions(self, kb_id: str, data: KBPermissionUpdate, user_id: UUID) -> None:
         """全量替换知识库级权限授予。"""
         kb = await self._get_active_kb(kb_id)
+        # 5.8.1：知识库权限变更前自动快照
+        await take_auto_snapshot(
+            self.db,
+            kb.id,
+            SnapshotTrigger.AUTO_PERMISSION,
+            user_id,
+            name=f"permission:{kb.name}",
+        )
         existing = list(
             (await self.db.scalars(select(KBPermission).where(KBPermission.kb_id == kb.id))).all()
         )
@@ -358,7 +376,12 @@ async def _run_kb_revectorize(
         try:
             for doc_id in document_ids:
                 try:
-                    await run_resegment_pipeline(doc_id, user_id=user_id)
+                    await run_resegment_pipeline(
+                        doc_id,
+                        user_id=user_id,
+                        skip_auto_snapshot=True,
+                        index_version=target_version,
+                    )
                     processed += 1
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("re-vectorize failed doc=%s", doc_id)

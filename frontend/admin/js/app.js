@@ -53,6 +53,50 @@ function guard() {
   return true;
 }
 
+/**
+ * 临时联调入口：仅以当前登录人的权限发起只读请求，便于分别验收 5.2 与 5.3。
+ * 项目全部联调完成后，可连同顶部 btnIdentityRoleCheck 按钮一起删除。
+ */
+async function runIdentityRoleCheck() {
+  const button = document.getElementById("btnIdentityRoleCheck");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "联调中…";
+  }
+
+  const checks = [];
+  const verify = async (name, request) => {
+    try {
+      await request();
+      checks.push(`通过：${name}`);
+    } catch (error) {
+      checks.push(`失败：${name}（${error.message || "请求异常"}）`);
+    }
+  };
+
+  if (isDemoMode()) {
+    checks.push("提示：当前为演示模式，以下结果不代表真实后端状态。");
+  }
+  await verify("5.2 当前登录身份", () => api.get("/auth/me"));
+  if (hasPermission("user:read")) {
+    await verify("5.2 用户列表权限", () => api.get("/users?page=1&page_size=1"));
+  } else {
+    checks.push("跳过：5.2 用户列表（当前角色无 user:read 权限）");
+  }
+  if (hasPermission("role:read")) {
+    await verify("5.3 角色列表权限", () => api.get("/roles?page=1&page_size=1"));
+    await verify("5.3 权限清单读取", () => api.get("/roles/permissions"));
+  } else {
+    checks.push("跳过：5.3 角色管理（当前角色无 role:read 权限）");
+  }
+
+  alert(`5.2 / 5.3 联调结果\n\n${checks.join("\n")}`);
+  if (button) {
+    button.disabled = false;
+    button.textContent = "5.2/5.3 联调";
+  }
+}
+
 /** 渲染管理端壳层（顶栏主导 + 全宽内容；右上保留智能对话/退出） */
 function renderShell(title) {
   if (!guard()) return false;
@@ -77,6 +121,7 @@ function renderShell(title) {
         </nav>
         <div class="topnav-actions">
           <span class="text-muted">${roleText}</span>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnIdentityRoleCheck">5.2/5.3 联调</button>
           <a class="btn btn-secondary btn-sm" href="/#/">智能对话</a>
           <button type="button" class="btn btn-text" id="btnLogout">退出</button>
         </div>
@@ -90,6 +135,7 @@ function renderShell(title) {
   document.querySelectorAll("[data-go]").forEach((el) => {
     el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
   });
+  document.getElementById("btnIdentityRoleCheck").onclick = runIdentityRoleCheck;
   document.getElementById("btnLogout").onclick = async () => {
     const ok = await confirmDialog({ title: "退出", message: "确定退出管理端吗？", confirmText: "退出" });
     if (!ok) return;
@@ -173,7 +219,8 @@ async function pageUsers() {
     document.getElementById("pageRoot").innerHTML = `
       <div class="card">
         <div class="toolbar"><strong>用户列表</strong><span class="spacer"></span>
-          <span class="text-muted">${canWrite ? "可启用/禁用与重置密码" : "只读（需超级管理员 user:write）"}</span>
+          <span class="text-muted">${canWrite ? "可新增用户、启用/禁用与变更角色" : "只读（需超级管理员 user:write）"}</span>
+          ${canWrite ? `<button class="btn btn-sm" id="btnNewUser">新增用户</button>` : ""}
           <input class="form-control" id="userKw" style="width:200px;height:32px" placeholder="搜索账号/昵称" />
         </div>
         <div class="table-wrap"><table class="table">
@@ -184,7 +231,7 @@ async function pageUsers() {
                 const st = u.status === "active" ? `<span class="badge badge-success">活跃</span>` : u.status === "disabled" ? `<span class="badge badge-danger">禁用</span>` : `<span class="badge badge-warning">待验证</span>`;
                 const ops = canWrite
                   ? `<button class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
-                    <button class="btn btn-text btn-sm" data-reset="${escapeHtml(u.id)}">重置密码</button>`
+                    <button class="btn btn-text btn-sm" data-role="${escapeHtml(u.id)}">变更角色</button>`
                   : `<span class="text-muted">—</span>`;
                 return `<tr data-id="${escapeHtml(u.id)}">
                   <td>${escapeHtml(u.username)}</td>
@@ -227,26 +274,77 @@ async function pageUsers() {
       };
     });
 
-    // 重置密码
-    document.querySelectorAll("[data-reset]").forEach((btn) => {
+    // 角色变更：管理员只能分配已有角色，密码仍由用户本人管理。
+    document.querySelectorAll("[data-role]").forEach((btn) => {
       btn.onclick = async () => {
-        const id = btn.getAttribute("data-reset");
-        const ok = await confirmDialog({ title: "重置密码", message: "将把密码重置为临时口令 Temp@123456，确定？", confirmText: "重置" });
-        if (!ok) return;
+        const id = btn.getAttribute("data-role");
         try {
-          await api.post(`/users/${id}/reset-password`, { new_password: "Temp@123456" });
-          toast("已重置密码", "success");
+          const roleData = await api.get("/roles?page=1&page_size=100");
+          const choices = (roleData.items || []).map((role) => `${role.id} = ${role.name}`).join("\n");
+          const picked = prompt(`输入要分配的角色 ID（可从下列选择一个）：\n${choices}`);
+          if (!picked) return;
+          await api.put(`/users/${id}/roles`, { role_ids: [picked.trim()] });
+          toast("用户角色已更新", "success");
+          pageUsers();
         } catch (e) {
-          toast(e.message || "演示模式已记录操作", "success");
+          toast(e.message || "角色更新失败", "error");
         }
       };
     });
+
+    const btnNewUser = document.getElementById("btnNewUser");
+    if (btnNewUser) btnNewUser.onclick = async () => {
+      const username = prompt("新用户账号（3-50 位）：");
+      if (!username) return;
+      const email = prompt("新用户邮箱：");
+      const password = prompt("初始密码（至少 8 位）：");
+      if (!email || !password) return;
+      const nickname = prompt("昵称（可留空）：") || username;
+      try {
+        await api.post("/users", { username, email, password, nickname });
+        toast("用户创建成功，已自动分配注册用户角色", "success");
+        pageUsers();
+      } catch (e) {
+        toast(e.message || "用户创建失败", "error");
+      }
+    };
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
 }
 
 /* ========== 角色管理 ========== */
+function openRolePermissionForm({ title, role = null, permissionData, onSave }) {
+  const dialogId = `roleForm-${Date.now()}`;
+  const selected = new Set(role?.permissions || []);
+  document.body.insertAdjacentHTML("beforeend", `
+    <div id="${dialogId}" class="modal-backdrop" style="display:flex">
+      <form class="modal" style="max-width:680px;width:92%">
+        <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
+        <div class="modal-body">
+          <label class="form-label">角色名称</label>
+          <input class="form-control" name="name" value="${escapeHtml(role?.name || "")}" ${role ? "readonly" : "required"} />
+          <label class="form-label" style="margin-top:12px">角色说明</label>
+          <input class="form-control" name="description" value="${escapeHtml(role?.description || "")}" />
+          <p class="text-muted" style="margin-top:14px">功能权限（可不勾选，创建无权限角色）</p>
+          <div class="checkbox-grid">${permissionData.map((item) => `<label><input type="checkbox" name="permission" value="${escapeHtml(item.code)}" ${selected.has(item.code) ? "checked" : ""}> ${escapeHtml(item.name)} <small>${escapeHtml(item.code)}</small></label>`).join("")}</div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>取消</button><button class="btn btn-primary" type="submit">保存</button></div>
+      </form>
+    </div>`);
+  const root = document.getElementById(dialogId);
+  root.querySelector("[data-close]").onclick = () => root.remove();
+  root.querySelector("form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      await onSave({ name: String(form.get("name") || "").trim(), description: String(form.get("description") || "").trim(), permission_codes: form.getAll("permission") });
+      root.remove();
+      pageRoles();
+    } catch (error) { toast(error.message || "保存失败", "error"); }
+  };
+}
+
 async function pageRoles() {
   if (!requirePerm("role:read", "角色管理")) return;
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载角色…</div>`;
@@ -266,11 +364,12 @@ async function pageRoles() {
                 (r) => `<tr>
                   <td>${escapeHtml(r.name)}</td>
                   <td>${escapeHtml(r.description || "")}</td>
-                  <td>${r.builtin ? `<span class="badge">内置</span>` : "-"}</td>
-                  <td>${(r.permission_codes || []).length}</td>
+                  <td>${r.is_builtin ? `<span class="badge">内置</span>` : "-"}</td>
+                  <td>${(r.permissions || []).length}</td>
                   <td>
                     <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
-                    ${!r.builtin && hasPermission("role:write") ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
+                    ${hasPermission("role:write") ? `<button class="btn btn-text btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
+                    ${!r.is_builtin && hasPermission("role:write") ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
                   </td>
                 </tr>`
               )
@@ -282,22 +381,23 @@ async function pageRoles() {
     const btnNew = document.getElementById("btnNewRole");
     if (btnNew) {
       btnNew.onclick = async () => {
-        const name = prompt("角色名称");
-        if (!name) return;
-        try {
-          await api.post("/roles", { name, description: "", permission_codes: ["qa:ask"] });
-          toast("已创建", "success");
-          pageRoles();
-        } catch (e) {
-          toast(e.message || "创建失败（演示可忽略）", "error");
-        }
+        const permissionData = await api.get("/roles/permissions");
+        openRolePermissionForm({ title: "新建角色", permissionData, onSave: async (data) => { await api.post("/roles", data); toast("角色创建成功", "success"); } });
       };
     }
 
     document.querySelectorAll("[data-view]").forEach((btn) => {
       btn.onclick = () => {
         const r = items.find((x) => x.id === btn.getAttribute("data-view"));
-        alert((r?.permission_codes || []).join("\n") || "无");
+        alert((r?.permissions || []).join("\n") || "无");
+      };
+    });
+
+    document.querySelectorAll("[data-edit-perms]").forEach((btn) => {
+      btn.onclick = async () => {
+        const role = items.find((item) => item.id === btn.getAttribute("data-edit-perms"));
+        const permissionData = await api.get("/roles/permissions");
+        openRolePermissionForm({ title: `配置“${role.name}”权限`, role, permissionData, onSave: async (data) => { await api.put(`/roles/${role.id}/permissions`, { permission_codes: data.permission_codes }); toast("角色权限已更新", "success"); } });
       };
     });
 
@@ -410,7 +510,7 @@ async function pageKbList() {
         try {
           const kb = await api.post("/knowledge-bases", {
             name,
-            type: "通用知识",
+            type: "general",
             visibility: "restricted",
             description: "",
             tags: [],
@@ -430,58 +530,137 @@ async function pageKbList() {
 /* ========== 知识库详情 ========== */
 async function pageKbDetail(id) {
   if (!requirePerm("kb:read", "知识库详情")) return;
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载详情…</div>`;
-  try {
-    const k = await api.get(`/knowledge-bases/${id}`);
-    document.getElementById("pageRoot").innerHTML = `
-      <div class="toolbar">
-        <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases">返回列表</button>
-        <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/documents">文档管理</button>
-        <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/snapshots">快照管理</button>
-        ${hasPermission("kb:vectorize") ? `<button class="btn btn-secondary btn-sm" id="btnRevec">重新向量化</button>` : ""}
-      </div>
-      <div class="detail-grid">
-        <div class="card">
-          <h3 class="card-title">${escapeHtml(k.name)}</h3>
-          <p>${escapeHtml(k.description || "无简介")}</p>
-          <p class="text-muted">类型：${escapeHtml(k.type)} · 标签：${escapeHtml((k.tags || []).join(", ") || "-")}</p>
-          <p>可见性：${escapeHtml(k.visibility)} · 状态：${escapeHtml(k.status)}</p>
-          <p>Embedding：${escapeHtml(k.embedding_model)} · 索引版本：${escapeHtml(k.current_index_version)}</p>
-          <p>分段：size=${escapeHtml(k.chunk_size)} overlap=${escapeHtml(k.chunk_overlap)}</p>
+  const canWrite = hasPermission("kb:write");
+
+  async function render() {
+    document.getElementById("pageRoot").innerHTML = `<div class="loading">加载详情…</div>`;
+    try {
+      const k = await api.get(`/knowledge-bases/${id}`);
+      document.getElementById("pageRoot").innerHTML = `
+        <div class="toolbar">
+          <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases">返回列表</button>
+          <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/documents">文档管理</button>
+          <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/snapshots">快照管理</button>
+          ${canWrite ? `<button class="btn btn-sm" id="btnEditKb">编辑</button>` : ""}
+          ${canWrite ? `<button class="btn btn-danger btn-sm" id="btnDeleteKb">删除</button>` : ""}
+          ${hasPermission("kb:vectorize") ? `<button class="btn btn-secondary btn-sm" id="btnRevec">重新向量化</button>` : ""}
         </div>
-        <div class="card">
-          <h3 class="card-title">概览</h3>
-          <div class="stat-grid">
-            <div class="stat-card"><div class="label">文档数</div><div class="value">${k.doc_count ?? 0}</div></div>
-            <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
+        <div class="detail-grid">
+          <div class="card">
+            <h3 class="card-title">${escapeHtml(k.name)}</h3>
+            <p>${escapeHtml(k.description || "无简介")}</p>
+            <p class="text-muted">类型：${escapeHtml(k.type)} · 标签：${escapeHtml((k.tags || []).join(", ") || "-")}</p>
+            <p>可见性：${escapeHtml(k.visibility)} · 状态：${escapeHtml(k.status)}</p>
+            <p>Embedding：${escapeHtml(k.embedding_model)} · 索引版本：${escapeHtml(k.current_index_version)}</p>
+            <p>分段：size=${escapeHtml(k.chunk_size)} overlap=${escapeHtml(k.chunk_overlap)}</p>
           </div>
-          <p class="text-muted">创建：${formatDateTime(k.created_at)}<br/>更新：${formatDateTime(k.updated_at)}</p>
-          <h4>权限配置说明</h4>
-          <p class="text-muted">可为用户/角色配置只读、上传、维护、回退等资源级权限；变更将记审计日志。前端隐藏菜单不能替代后端鉴权。</p>
-        </div>
-      </div>`;
-    document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
-    const btnRevec = document.getElementById("btnRevec");
-    if (btnRevec) {
-      btnRevec.onclick = async () => {
-        const ok = await confirmDialog({
-          title: "重新向量化",
-          message: "将创建变更快照并后台重建索引，期间在线问答不中断。确定开始？",
-          confirmText: "开始",
-          danger: false,
-        });
-        if (!ok) return;
-        try {
-          await api.post(`/knowledge-bases/${id}/re-vectorize`, {});
-          toast("已提交向量化任务", "success");
-        } catch (e) {
-          toast(e.message || "已模拟提交任务", "success");
-        }
-      };
+          <div class="card">
+            <h3 class="card-title">概览</h3>
+            <div class="stat-grid">
+              <div class="stat-card"><div class="label">文档数</div><div class="value">${k.doc_count ?? 0}</div></div>
+              <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
+            </div>
+            <p class="text-muted">创建：${formatDateTime(k.created_at)}<br/>更新：${formatDateTime(k.updated_at)}</p>
+            <h4>权限配置说明</h4>
+            <p class="text-muted">可为用户/角色配置只读、上传、维护、回退等资源级权限；变更将记审计日志。前端隐藏菜单不能替代后端鉴权。</p>
+          </div>
+        </div>`;
+
+      document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
+
+      const btnEdit = document.getElementById("btnEditKb");
+      if (btnEdit) {
+        btnEdit.onclick = async () => {
+          const result = await openWideModal({
+            title: "编辑知识库",
+            bodyHtml: `
+              <label class="text-muted">名称</label>
+              <input class="form-control" id="editName" maxlength="200" value="${escapeHtml(k.name)}" style="margin:6px 0 12px" />
+              <label class="text-muted">类型</label>
+              <select class="form-control" id="editType" style="margin:6px 0 12px">
+                <option value="technical" ${k.type === "technical" ? "selected" : ""}>技术文档</option>
+                <option value="product" ${k.type === "product" ? "selected" : ""}>产品手册</option>
+                <option value="faq" ${k.type === "faq" ? "selected" : ""}>FAQ</option>
+                <option value="general" ${k.type === "general" ? "selected" : ""}>通用知识</option>
+              </select>
+              <label class="text-muted">可见性</label>
+              <select class="form-control" id="editVisibility" style="margin:6px 0 12px">
+                <option value="public" ${k.visibility === "public" ? "selected" : ""}>公开</option>
+                <option value="restricted" ${k.visibility === "restricted" ? "selected" : ""}>受限</option>
+              </select>
+              <label class="text-muted">标签（逗号分隔）</label>
+              <input class="form-control" id="editTags" maxlength="500" value="${escapeHtml((k.tags || []).join(", "))}" style="margin:6px 0 12px" />
+              <label class="text-muted">描述</label>
+              <textarea class="form-control" id="editDesc" rows="3" maxlength="2000" style="margin:6px 0">${escapeHtml(k.description || "")}</textarea>`,
+            actionsHtml: `
+              <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+              <button type="button" class="btn" data-act="ok">保存</button>`,
+          });
+          if (!result) return;
+          const name = result.root.querySelector("#editName")?.value?.trim();
+          const type = result.root.querySelector("#editType")?.value;
+          const visibility = result.root.querySelector("#editVisibility")?.value;
+          const tags = result.root.querySelector("#editTags")?.value?.split(",").map((t) => t.trim()).filter(Boolean) || [];
+          const description = result.root.querySelector("#editDesc")?.value?.trim() || undefined;
+          result.root.remove();
+          if (!name) {
+            toast("请填写名称", "error");
+            return;
+          }
+          try {
+            await api.put(`/knowledge-bases/${id}`, { name, type, visibility, tags, description });
+            toast("已更新", "success");
+            await render();
+          } catch (e) {
+            toast(e.message || "更新失败", "error");
+          }
+        };
+      }
+
+      const btnDelete = document.getElementById("btnDeleteKb");
+      if (btnDelete) {
+        btnDelete.onclick = async () => {
+          const ok = await confirmDialog({
+            title: "删除知识库",
+            message: `确定删除知识库「${escapeHtml(k.name)}」吗？删除后将无法恢复。`,
+            confirmText: "删除",
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            await api.delete(`/knowledge-bases/${id}`);
+            toast("已删除", "success");
+            navigate("/admin/knowledge-bases");
+          } catch (e) {
+            toast(e.message || "删除失败", "error");
+          }
+        };
+      }
+
+      const btnRevec = document.getElementById("btnRevec");
+      if (btnRevec) {
+        btnRevec.onclick = async () => {
+          const ok = await confirmDialog({
+            title: "重新向量化",
+            message: "将创建变更快照并后台重建索引，期间在线问答不中断。确定开始？",
+            confirmText: "开始",
+            danger: false,
+          });
+          if (!ok) return;
+          try {
+            await api.post(`/knowledge-bases/${id}/re-vectorize`, {});
+            toast("已提交向量化任务", "success");
+          } catch (e) {
+            toast(e.message || "已模拟提交任务", "success");
+          }
+        };
+      }
+    } catch (e) {
+      document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
     }
-  } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
+
+  await render();
 }
 
 /* ========== 文档管理 ========== */
@@ -557,6 +736,7 @@ const SNAPSHOT_TRIGGER_LABELS = {
   auto_resegment: "重分段前自动",
   auto_revectorize: "重向量化前自动",
   auto_permission: "权限变更前自动",
+  auto_segment_rules: "分段规则变更前自动",
   auto_normalize: "规范化前自动",
   rollback_protection: "回退保护",
 };
@@ -630,7 +810,8 @@ async function pageSnapshots(kbId) {
         <span class="spacer"></span>
         ${
           canWrite
-            ? `<button class="btn btn-sm" id="btnCreateSnap">手动创建快照</button>`
+            ? `<button class="btn btn-sm" id="btnCreateSnap">手动创建快照</button>
+               <button class="btn btn-secondary btn-sm" id="btnCleanupSnap">策略清理</button>`
             : `<span class="text-muted">只读（创建/删除需 snapshot:write）</span>`
         }
       </div>
@@ -712,6 +893,28 @@ async function pageSnapshots(kbId) {
           await renderList();
         } catch (e) {
           toast(e.message || "创建失败", "error");
+        }
+      };
+    }
+
+    const btnCleanup = document.getElementById("btnCleanupSnap");
+    if (btnCleanup) {
+      btnCleanup.onclick = async () => {
+        const ok = await confirmDialog({
+          title: "策略清理快照",
+          message: "将按默认策略清理：超过 90 天的快照，以及超出 50 条上限的最早非保护快照。确定继续？",
+          confirmText: "开始清理",
+        });
+        if (!ok) return;
+        try {
+          const res = await api.post(`/knowledge-bases/${kbId}/snapshots/cleanup`, {});
+          toast(
+            `清理完成：过期 ${res?.expired_deleted ?? 0}，超额 ${res?.excess_deleted ?? 0}，剩余 ${res?.active_remaining ?? "-"}`,
+            "success"
+          );
+          await renderList();
+        } catch (e) {
+          toast(e.message || "清理失败", "error");
         }
       };
     }
@@ -961,7 +1164,9 @@ async function pageHitTest() {
 const AUDIT_ACTION_LABELS = {
   "snapshot.create": "创建快照",
   "snapshot.auto_create": "自动创建快照",
+  "snapshot.cleanup": "策略清理快照",
   "snapshot.rollback": "回退快照",
+  "snapshot.rollback_rebuild": "回退重建索引",
   "snapshot.delete": "删除快照",
   "snapshot.index_activate": "激活索引版本",
   "kb.create": "创建知识库",

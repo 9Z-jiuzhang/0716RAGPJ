@@ -141,8 +141,21 @@ class RollbackResultResponse(BaseModel):
     before_version: str | None = Field(default=None, description="回退前生效索引版本")
     after_version: str = Field(..., description="回退后待激活的索引版本")
     restored_document_count: int = Field(..., description="恢复涉及的文档数")
+    restored_document_ids: list[UUID] = Field(
+        default_factory=list, description="已恢复文档 ID，供异步重建索引使用"
+    )
     selective: bool = Field(default=False, description="是否选择性恢复")
     rebuild_required: bool = Field(default=True, description="是否仍需向量化模块重建并激活索引")
     message: str = Field(
         default="文档与配置已按快照恢复；索引版本处于 building，待向量重建后原子激活"
     )
+
+
+class SnapshotCleanupResponse(BaseModel):
+    """快照策略清理结果（5.8.4）。"""
+
+    expired_deleted: int = Field(default=0, description="按保留天数清理数量")
+    excess_deleted: int = Field(default=0, description="按最大数量清理数量")
+    retention_days: int
+    max_count: int
+    active_remaining: int = Field(default=0, description="清理后仍活跃的快照数（含保护）")

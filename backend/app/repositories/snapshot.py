@@ -37,28 +37,57 @@ class SnapshotRepository:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[Sequence[Snapshot], int]:
-        """按时间倒序列出知识库快照。"""
+        """按时间倒序列出知识库快照（列表不加载 documents，依赖汇总列）。"""
         filters = and_(Snapshot.kb_id == kb_id, Snapshot.status == "active")
         count_result = await self.db.execute(select(func.count()).select_from(Snapshot).where(filters))
         total = int(count_result.scalar_one())
 
         stmt = (
             select(Snapshot)
-            .options(selectinload(Snapshot.documents))
             .where(filters)
             .order_by(Snapshot.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
         result = await self.db.execute(stmt)
-        return result.scalars().all(), total
+        items = list(result.scalars().all())
+        await self._repair_legacy_counters(items)
+        return items, total
 
-    async def count_active(self, kb_id: UUID) -> int:
-        """统计知识库下活跃快照数量。"""
-        result = await self.db.execute(
-            select(func.count()).select_from(Snapshot).where(
-                Snapshot.kb_id == kb_id, Snapshot.status == "active"
+    async def _repair_legacy_counters(self, items: Sequence[Snapshot]) -> None:
+        """旧快照 document_count/chunk_count 可能为 0：按 snapshot_documents 回填并持久化。"""
+        need_ids = [s.id for s in items if (s.document_count or 0) == 0]
+        if not need_ids:
+            return
+        rows = (
+            await self.db.execute(
+                select(
+                    SnapshotDocument.snapshot_id,
+                    func.count(SnapshotDocument.id),
+                    func.coalesce(func.sum(SnapshotDocument.chunk_count), 0),
+                )
+                .where(SnapshotDocument.snapshot_id.in_(need_ids))
+                .group_by(SnapshotDocument.snapshot_id)
             )
+        ).all()
+        stats = {row[0]: (int(row[1]), int(row[2])) for row in rows}
+        for snap in items:
+            if snap.id not in stats:
+                continue
+            doc_count, chunk_count = stats[snap.id]
+            if doc_count <= 0:
+                continue
+            snap.document_count = doc_count
+            snap.chunk_count = chunk_count
+        await self.db.flush()
+
+    async def count_active(self, kb_id: UUID, *, exclude_protection: bool = False) -> int:
+        """统计知识库下活跃快照数量。"""
+        conditions = [Snapshot.kb_id == kb_id, Snapshot.status == "active"]
+        if exclude_protection:
+            conditions.append(Snapshot.trigger != SnapshotTrigger.ROLLBACK_PROTECTION.value)
+        result = await self.db.execute(
+            select(func.count()).select_from(Snapshot).where(and_(*conditions))
         )
         return int(result.scalar_one())
 
@@ -82,34 +111,20 @@ class SnapshotRepository:
     ) -> int:
         """超出最大数量时软删除最早的活跃快照。
 
-        优先删除非 rollback_protection；保护类快照尽量保留。
-        exclude_ids 用于保护「正在回退的目标快照」等。
+        配额只统计非 rollback_protection；保护快照不占 50 条上限，也不被超额清理。
         """
-        active_count = await self.count_active(kb_id)
+        active_count = await self.count_active(kb_id, exclude_protection=True)
         if active_count <= max_count:
             return 0
 
         excess = active_count - max_count
         exclude_ids = exclude_ids or set()
-        deleted = 0
-
-        # 第一轮：只删非保护快照
-        deleted += await self._delete_oldest(
+        return await self._delete_oldest(
             kb_id,
             limit=excess,
             exclude_ids=exclude_ids,
             only_non_protection=True,
         )
-        remaining = excess - deleted
-        if remaining > 0:
-            # 第二轮：配额仍不足时才删保护快照
-            deleted += await self._delete_oldest(
-                kb_id,
-                limit=remaining,
-                exclude_ids=exclude_ids,
-                only_non_protection=False,
-            )
-        return deleted
 
     async def _delete_oldest(
         self,
@@ -150,13 +165,15 @@ class SnapshotRepository:
         *,
         exclude_ids: set[UUID] | None = None,
     ) -> int:
-        """清理超过保留天数的快照（默认不删 rollback_protection）。"""
+        """清理超过保留天数的快照。
+
+        「始终创建」指回退时必拍保护快照；超过保留期的保护快照仍按天数清理，避免无限堆积。
+        """
         cutoff = utcnow() - timedelta(days=retention_days)
         conditions = [
             Snapshot.kb_id == kb_id,
             Snapshot.status == "active",
             Snapshot.created_at < cutoff,
-            Snapshot.trigger != SnapshotTrigger.ROLLBACK_PROTECTION.value,
         ]
         if exclude_ids:
             conditions.append(Snapshot.id.notin_(exclude_ids))
