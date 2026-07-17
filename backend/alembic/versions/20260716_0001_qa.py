@@ -106,11 +106,13 @@ def upgrade() -> None:
         columns = {c["name"] for c in inspector.get_columns("document_chunks")}
         if "content_tsv" not in columns:
             # STORED 生成列：content 变更时自动刷新，无需应用层维护
-            op.execute("""
+            op.execute(
+                """
                 ALTER TABLE document_chunks
                 ADD COLUMN content_tsv tsvector
                 GENERATED ALWAYS AS (to_tsvector('simple', coalesce(content, ''))) STORED
-                """)
+                """
+            )
         existing_indexes = {idx["name"] for idx in inspector.get_indexes("document_chunks")}
         if "ix_document_chunks_content_tsv" not in existing_indexes:
             op.execute("CREATE INDEX ix_document_chunks_content_tsv ON document_chunks USING GIN (content_tsv)")
