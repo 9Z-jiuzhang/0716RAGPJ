@@ -25,7 +25,9 @@ from app.schemas.document import (
     DocumentListItem,
     DocumentListResponse,
     DocumentResponse,
+    FileSegmentPreviewResponse,
     NormalizeResult,
+    SegmentPreviewOffsetChunk,
     UpdateChunkRequest,
     UpdateSegmentRulesRequest,
 )
@@ -212,6 +214,116 @@ async def preview_segment(
             for p in previews
         ],
         preview_source="normalized_text" if doc.normalized_text else "raw_text",
+    )
+
+
+def _locate_chunk_offsets(source: str, previews: list) -> list[tuple[int, int]]:
+    """按顺序在解析文本中定位每段的起止下标（start 含 / end 不含）。
+
+    分段内容经过 strip，可能与源文本存在细微空白差异，采用"从上一段起点后继续检索"的
+    尽力匹配策略以兼容 overlap 重叠场景；无法命中时退化为按字符数顺延，保证下标单调可用。
+    """
+    offsets: list[tuple[int, int]] = []
+    cursor = 0
+    for preview in previews:
+        content = preview.content
+        idx = source.find(content, cursor)
+        if idx < 0:
+            idx = source.find(content)
+        if idx < 0:
+            start = cursor
+            end = start + preview.char_count
+        else:
+            start = idx
+            end = idx + len(content)
+            cursor = idx + 1
+        offsets.append((start, end))
+    return offsets
+
+
+async def preview_segment_source(
+    db: AsyncSession,
+    kb_id: uuid.UUID,
+    *,
+    filename: str | None = None,
+    content: bytes | None = None,
+    doc_id: uuid.UUID | None = None,
+    rule_overrides: dict[str, Any] | None = None,
+) -> FileSegmentPreviewResponse:
+    """预校验分段效果：复用既有解析/规范化/分段逻辑做干跑，返回分段文本列表与每段起止下标。
+
+    该接口仅用于上传或向量化"入库前"确认分段效果：只解析 + 干跑 split_text，
+    不写向量库、不落库、不修改任何正式文档记录与流水线状态机（无持久化副作用）。
+    传入 file(filename+content) 或已上传 doc_id 二选一。
+    """
+    from app.services import parsers
+    from app.services.chunking import split_text
+    from app.utils.exceptions import DocumentError
+
+    kb = await doc_repo.get_knowledge_base(db, kb_id)
+    if not kb:
+        raise DocumentNotFoundError(f"knowledge_base:{kb_id}")
+
+    resolved_doc_id: str | None = None
+    if doc_id is not None:
+        doc = await get_document_detail(db, kb_id, doc_id)
+        resolved_doc_id = str(doc.id)
+        resolved_filename = doc.filename
+        file_type = doc.file_type
+        source = (doc.normalized_text or doc.raw_text or "").strip()
+        if not source and doc.file_path:
+            raw = parsers.extract_text(doc.filename, storage.download_bytes(doc.file_path), doc.file_type)
+            source, _stats = normalize_text(raw)
+        preview_source = "normalized_text" if doc.normalized_text else "raw_text"
+        base_rules = doc.segment_rules
+    elif content is not None and filename is not None:
+        file_type = _validate_upload(filename, content)
+        resolved_filename = filename
+        raw = parsers.extract_text(filename, content, file_type)
+        source, _stats = normalize_text(raw)
+        preview_source = "normalized_text"
+        kb_rule = await doc_repo.get_kb_rule(db, kb_id)
+        base_rules = merge_rules(
+            default_rules(),
+            {
+                "chunk_size": getattr(kb_rule, "chunk_size", None),
+                "chunk_overlap": getattr(kb_rule, "chunk_overlap", None),
+                "separators": getattr(kb_rule, "separators", None),
+                "split_mode": getattr(kb_rule, "split_mode", None),
+                # P2迭代开发，当前仅配置存储，不启用语义切分
+                "enable_semantic": getattr(kb_rule, "enable_semantic", None),
+            },
+        )
+    else:
+        raise DocumentError("file 与 doc_id 至少提供其一", http_status=400)
+
+    source = (source or "").strip()
+    if not source:
+        raise DocumentError("文档无可预览文本，无法分段", http_status=400)
+
+    rules = merge_rules(base_rules, rule_overrides or None)
+    previews = split_text(source, rules)
+    offsets = _locate_chunk_offsets(source, previews)
+    return FileSegmentPreviewResponse(
+        kb_id=str(kb_id),
+        document_id=resolved_doc_id,
+        filename=resolved_filename,
+        file_type=file_type,
+        rules=rules,
+        total_chunks=len(previews),
+        total_chars=len(source),
+        chunks=[
+            SegmentPreviewOffsetChunk(
+                chunk_index=preview.chunk_index,
+                content=preview.content,
+                char_count=preview.char_count,
+                start=start,
+                end=end,
+                metadata=preview.metadata,
+            )
+            for preview, (start, end) in zip(previews, offsets)
+        ],
+        preview_source=preview_source,
     )
 
 

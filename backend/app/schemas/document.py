@@ -83,6 +83,34 @@ class SegmentPreviewResponse(BaseModel):
     preview_source: str = Field(description="normalized_text / raw_text")
 
 
+class SegmentPreviewOffsetChunk(BaseModel):
+    """带起止下标的预览分段。start 含、end 不含，均相对解析后的预览源文本。"""
+
+    chunk_index: int
+    content: str
+    char_count: int
+    start: int = Field(description="该分段在解析文本中的起始下标（含）")
+    end: int = Field(description="该分段在解析文本中的结束下标（不含）")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class FileSegmentPreviewResponse(BaseModel):
+    """预校验分段效果：支持待解析文件或已上传文档 id 干跑分段。
+
+    仅返回分段结果，不触发向量化、不写向量库、不修改数据库正式文档记录。
+    """
+
+    kb_id: str
+    document_id: str | None = Field(default=None, description="按已上传文档预览时回填，按文件预览时为 None")
+    filename: str
+    file_type: str
+    rules: dict[str, Any]
+    total_chunks: int
+    total_chars: int = Field(description="解析后预览源文本总字符数")
+    chunks: list[SegmentPreviewOffsetChunk]
+    preview_source: str = Field(description="normalized_text / raw_text")
+
+
 class UpdateChunkRequest(BaseModel):
     content: str | None = None
     is_enabled: bool | None = None

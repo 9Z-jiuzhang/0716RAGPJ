@@ -93,6 +93,11 @@ async def replace_chunks(db: AsyncSession, document: Document, chunks: list[Docu
     await db.refresh(document, attribute_names=["chunks"])
 
 
+async def get_kb_rule(db: AsyncSession, kb_id: uuid.UUID) -> KbChunkRule | None:
+    """只读获取知识库分段规则；不存在也不创建，供分段预览等无副作用场景使用。"""
+    return await db.scalar(select(KbChunkRule).where(KbChunkRule.kb_id == kb_id))
+
+
 async def get_or_create_kb_rule(db: AsyncSession, kb_id: uuid.UUID) -> KbChunkRule:
     rule = await db.scalar(select(KbChunkRule).where(KbChunkRule.kb_id == kb_id))
     if rule:

@@ -156,3 +156,74 @@ async def test_prepare_retry_only_from_error():
         doc = await prepare_retry(db, err.kb_id, err.id, user)
         assert doc.status == DocumentStatus.PARSING.value
         db.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_segment_preview_file_returns_offsets_without_persistence():
+    """按文件预览分段：返回每段起止下标，且不写库、不提交、不落向量。"""
+    from app.services.document_service import preview_segment_source
+
+    db = AsyncMock()
+    text = "第一段内容。\n\n第二段内容更长一些用于验证切分效果。\n\n第三段结尾。"
+    content = text.encode("utf-8")
+
+    with (
+        patch("app.repositories.document.get_knowledge_base", AsyncMock(return_value=MagicMock())),
+        patch("app.repositories.document.get_kb_rule", AsyncMock(return_value=None)),
+    ):
+        resp = await preview_segment_source(
+            db,
+            uuid4(),
+            filename="note.txt",
+            content=content,
+            rule_overrides={"chunk_size": 200, "chunk_overlap": 0, "split_mode": "paragraph"},
+        )
+
+    assert resp.document_id is None
+    assert resp.file_type == "txt"
+    assert resp.preview_source == "normalized_text"
+    assert resp.total_chunks == len(resp.chunks) >= 1
+    prev_start = -1
+    for c in resp.chunks:
+        assert 0 <= c.start <= c.end <= resp.total_chars
+        assert c.char_count == len(c.content)
+        assert c.start >= prev_start
+        prev_start = c.start
+    db.add.assert_not_called()
+    db.commit.assert_not_called()
+    db.flush.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_segment_preview_by_doc_id_uses_existing_text():
+    """按已上传文档 id 预览：复用既有 normalized_text，不触发提交。"""
+    from app.services.document_service import preview_segment_source
+
+    db = AsyncMock()
+    doc = DummyDoc(DocumentStatus.READY.value)
+    doc.file_type = "txt"
+    doc.raw_text = None
+    doc.normalized_text = "标题段落。\n\n正文内容第一段。\n\n正文内容第二段收尾。"
+    doc.segment_rules = {"chunk_size": 100, "chunk_overlap": 0, "split_mode": "paragraph"}
+
+    with (
+        patch("app.repositories.document.get_knowledge_base", AsyncMock(return_value=MagicMock())),
+        patch("app.services.document_service.get_document_detail", AsyncMock(return_value=doc)),
+    ):
+        resp = await preview_segment_source(db, doc.kb_id, doc_id=doc.id)
+
+    assert resp.document_id == str(doc.id)
+    assert resp.preview_source == "normalized_text"
+    assert resp.total_chunks >= 1
+    db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_segment_preview_requires_file_or_doc_id():
+    """file 与 doc_id 均缺失时报 DocumentError。"""
+    from app.services.document_service import preview_segment_source
+
+    db = AsyncMock()
+    with patch("app.repositories.document.get_knowledge_base", AsyncMock(return_value=MagicMock())):
+        with pytest.raises(DocumentError):
+            await preview_segment_source(db, uuid4())
