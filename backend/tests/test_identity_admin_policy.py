@@ -25,7 +25,8 @@ async def test_admin_can_create_user_but_cannot_reset_password(client):
 
     # 管理员不得再通过 API 重置任何用户密码。
     reset = await client.post(f"/api/v1/users/{user['id']}/reset-password", headers=headers, json={"new_password": "OtherPass1!"})
-    assert reset.status_code == 405
+    # 接口已被移除，FastAPI 应返回 404，而不是仍保留路由后拒绝方法的 405。
+    assert reset.status_code == 404
 
 
 @pytest.mark.asyncio
