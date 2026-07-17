@@ -410,7 +410,7 @@ async function pageKbList() {
         try {
           const kb = await api.post("/knowledge-bases", {
             name,
-            type: "通用知识",
+            type: "general",
             visibility: "restricted",
             description: "",
             tags: [],
@@ -430,58 +430,137 @@ async function pageKbList() {
 /* ========== 知识库详情 ========== */
 async function pageKbDetail(id) {
   if (!requirePerm("kb:read", "知识库详情")) return;
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载详情…</div>`;
-  try {
-    const k = await api.get(`/knowledge-bases/${id}`);
-    document.getElementById("pageRoot").innerHTML = `
-      <div class="toolbar">
-        <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases">返回列表</button>
-        <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/documents">文档管理</button>
-        <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/snapshots">快照管理</button>
-        ${hasPermission("kb:vectorize") ? `<button class="btn btn-secondary btn-sm" id="btnRevec">重新向量化</button>` : ""}
-      </div>
-      <div class="detail-grid">
-        <div class="card">
-          <h3 class="card-title">${escapeHtml(k.name)}</h3>
-          <p>${escapeHtml(k.description || "无简介")}</p>
-          <p class="text-muted">类型：${escapeHtml(k.type)} · 标签：${escapeHtml((k.tags || []).join(", ") || "-")}</p>
-          <p>可见性：${escapeHtml(k.visibility)} · 状态：${escapeHtml(k.status)}</p>
-          <p>Embedding：${escapeHtml(k.embedding_model)} · 索引版本：${escapeHtml(k.current_index_version)}</p>
-          <p>分段：size=${escapeHtml(k.chunk_size)} overlap=${escapeHtml(k.chunk_overlap)}</p>
+  const canWrite = hasPermission("kb:write");
+
+  async function render() {
+    document.getElementById("pageRoot").innerHTML = `<div class="loading">加载详情…</div>`;
+    try {
+      const k = await api.get(`/knowledge-bases/${id}`);
+      document.getElementById("pageRoot").innerHTML = `
+        <div class="toolbar">
+          <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases">返回列表</button>
+          <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/documents">文档管理</button>
+          <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/snapshots">快照管理</button>
+          ${canWrite ? `<button class="btn btn-sm" id="btnEditKb">编辑</button>` : ""}
+          ${canWrite ? `<button class="btn btn-danger btn-sm" id="btnDeleteKb">删除</button>` : ""}
+          ${hasPermission("kb:vectorize") ? `<button class="btn btn-secondary btn-sm" id="btnRevec">重新向量化</button>` : ""}
         </div>
-        <div class="card">
-          <h3 class="card-title">概览</h3>
-          <div class="stat-grid">
-            <div class="stat-card"><div class="label">文档数</div><div class="value">${k.doc_count ?? 0}</div></div>
-            <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
+        <div class="detail-grid">
+          <div class="card">
+            <h3 class="card-title">${escapeHtml(k.name)}</h3>
+            <p>${escapeHtml(k.description || "无简介")}</p>
+            <p class="text-muted">类型：${escapeHtml(k.type)} · 标签：${escapeHtml((k.tags || []).join(", ") || "-")}</p>
+            <p>可见性：${escapeHtml(k.visibility)} · 状态：${escapeHtml(k.status)}</p>
+            <p>Embedding：${escapeHtml(k.embedding_model)} · 索引版本：${escapeHtml(k.current_index_version)}</p>
+            <p>分段：size=${escapeHtml(k.chunk_size)} overlap=${escapeHtml(k.chunk_overlap)}</p>
           </div>
-          <p class="text-muted">创建：${formatDateTime(k.created_at)}<br/>更新：${formatDateTime(k.updated_at)}</p>
-          <h4>权限配置说明</h4>
-          <p class="text-muted">可为用户/角色配置只读、上传、维护、回退等资源级权限；变更将记审计日志。前端隐藏菜单不能替代后端鉴权。</p>
-        </div>
-      </div>`;
-    document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
-    const btnRevec = document.getElementById("btnRevec");
-    if (btnRevec) {
-      btnRevec.onclick = async () => {
-        const ok = await confirmDialog({
-          title: "重新向量化",
-          message: "将创建变更快照并后台重建索引，期间在线问答不中断。确定开始？",
-          confirmText: "开始",
-          danger: false,
-        });
-        if (!ok) return;
-        try {
-          await api.post(`/knowledge-bases/${id}/re-vectorize`, {});
-          toast("已提交向量化任务", "success");
-        } catch (e) {
-          toast(e.message || "已模拟提交任务", "success");
-        }
-      };
+          <div class="card">
+            <h3 class="card-title">概览</h3>
+            <div class="stat-grid">
+              <div class="stat-card"><div class="label">文档数</div><div class="value">${k.doc_count ?? 0}</div></div>
+              <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
+            </div>
+            <p class="text-muted">创建：${formatDateTime(k.created_at)}<br/>更新：${formatDateTime(k.updated_at)}</p>
+            <h4>权限配置说明</h4>
+            <p class="text-muted">可为用户/角色配置只读、上传、维护、回退等资源级权限；变更将记审计日志。前端隐藏菜单不能替代后端鉴权。</p>
+          </div>
+        </div>`;
+
+      document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
+
+      const btnEdit = document.getElementById("btnEditKb");
+      if (btnEdit) {
+        btnEdit.onclick = async () => {
+          const result = await openWideModal({
+            title: "编辑知识库",
+            bodyHtml: `
+              <label class="text-muted">名称</label>
+              <input class="form-control" id="editName" maxlength="200" value="${escapeHtml(k.name)}" style="margin:6px 0 12px" />
+              <label class="text-muted">类型</label>
+              <select class="form-control" id="editType" style="margin:6px 0 12px">
+                <option value="technical" ${k.type === "technical" ? "selected" : ""}>技术文档</option>
+                <option value="product" ${k.type === "product" ? "selected" : ""}>产品手册</option>
+                <option value="faq" ${k.type === "faq" ? "selected" : ""}>FAQ</option>
+                <option value="general" ${k.type === "general" ? "selected" : ""}>通用知识</option>
+              </select>
+              <label class="text-muted">可见性</label>
+              <select class="form-control" id="editVisibility" style="margin:6px 0 12px">
+                <option value="public" ${k.visibility === "public" ? "selected" : ""}>公开</option>
+                <option value="restricted" ${k.visibility === "restricted" ? "selected" : ""}>受限</option>
+              </select>
+              <label class="text-muted">标签（逗号分隔）</label>
+              <input class="form-control" id="editTags" maxlength="500" value="${escapeHtml((k.tags || []).join(", "))}" style="margin:6px 0 12px" />
+              <label class="text-muted">描述</label>
+              <textarea class="form-control" id="editDesc" rows="3" maxlength="2000" style="margin:6px 0">${escapeHtml(k.description || "")}</textarea>`,
+            actionsHtml: `
+              <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+              <button type="button" class="btn" data-act="ok">保存</button>`,
+          });
+          if (!result) return;
+          const name = result.root.querySelector("#editName")?.value?.trim();
+          const type = result.root.querySelector("#editType")?.value;
+          const visibility = result.root.querySelector("#editVisibility")?.value;
+          const tags = result.root.querySelector("#editTags")?.value?.split(",").map((t) => t.trim()).filter(Boolean) || [];
+          const description = result.root.querySelector("#editDesc")?.value?.trim() || undefined;
+          result.root.remove();
+          if (!name) {
+            toast("请填写名称", "error");
+            return;
+          }
+          try {
+            await api.put(`/knowledge-bases/${id}`, { name, type, visibility, tags, description });
+            toast("已更新", "success");
+            await render();
+          } catch (e) {
+            toast(e.message || "更新失败", "error");
+          }
+        };
+      }
+
+      const btnDelete = document.getElementById("btnDeleteKb");
+      if (btnDelete) {
+        btnDelete.onclick = async () => {
+          const ok = await confirmDialog({
+            title: "删除知识库",
+            message: `确定删除知识库「${escapeHtml(k.name)}」吗？删除后将无法恢复。`,
+            confirmText: "删除",
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            await api.delete(`/knowledge-bases/${id}`);
+            toast("已删除", "success");
+            navigate("/admin/knowledge-bases");
+          } catch (e) {
+            toast(e.message || "删除失败", "error");
+          }
+        };
+      }
+
+      const btnRevec = document.getElementById("btnRevec");
+      if (btnRevec) {
+        btnRevec.onclick = async () => {
+          const ok = await confirmDialog({
+            title: "重新向量化",
+            message: "将创建变更快照并后台重建索引，期间在线问答不中断。确定开始？",
+            confirmText: "开始",
+            danger: false,
+          });
+          if (!ok) return;
+          try {
+            await api.post(`/knowledge-bases/${id}/re-vectorize`, {});
+            toast("已提交向量化任务", "success");
+          } catch (e) {
+            toast(e.message || "已模拟提交任务", "success");
+          }
+        };
+      }
+    } catch (e) {
+      document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
     }
-  } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
+
+  await render();
 }
 
 /* ========== 文档管理 ========== */
