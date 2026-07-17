@@ -8,11 +8,12 @@
   <link rel="stylesheet" href="/assets/css/base.css" />
   <link rel="stylesheet" href="/assets/css/components.css" />
   <link rel="stylesheet" href="/assets/css/layout.css" />
-  <link rel="stylesheet" href="./css/guest.css" />
+  <!-- 使用绝对路径，避免无尾斜杠 URL 下相对路径解析到错误目录 -->
+  <link rel="stylesheet" href="/css/guest.css" />
 </head>
 <body>
   <div id="demoBanner" class="demo-banner hidden">当前为演示模式：后端接口未就绪，页面使用本地模拟数据，交互逻辑与正式环境一致。</div>
   <div id="app"></div>
-  <script type="module" src="./js/app.js"></script>
+  <script type="module" src="/js/app.js"></script>
 </body>
 </html>

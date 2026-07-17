@@ -10,7 +10,8 @@ const BASE_URL = '/api/v1';
  * @returns {string} Bearer Token
  */
 function getToken() {
-  return localStorage.getItem('access_token');
+  // 与 shared/auth.js 的会话键保持一致
+  return localStorage.getItem('rag_access_token');
 }
 
 /**

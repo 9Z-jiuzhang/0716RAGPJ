@@ -5,7 +5,7 @@
   const API_BASE = localStorage.getItem("api_base") || "http://localhost:8000/api/v1";
 
   function getToken() {
-    return localStorage.getItem("access_token") || "";
+    return localStorage.getItem("rag_access_token") || "";
   }
 
   async function api(path, options = {}) {

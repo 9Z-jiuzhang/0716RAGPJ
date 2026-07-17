@@ -508,7 +508,7 @@ function pageAuth(initialTab = "login") {
 function renderLoginForm(panel) {
   panel.innerHTML = `
     <p class="text-muted auth-lead">不同角色登录后看到的入口不同：访客仅问答，员工可上传，管理员进控制台。</p>
-    <div class="form-group"><label>用户名</label><input class="form-control" id="loginUser" autocomplete="username" placeholder="admin / staff / user" /></div>
+    <div class="form-group"><label>用户名</label><input class="form-control" id="loginUser" type="text" autocomplete="username" placeholder="admin / staff / user" /></div>
     <div class="form-group"><label>密码</label><input class="form-control" id="loginPass" type="password" autocomplete="current-password" placeholder="演示模式任意密码" /></div>
     <button class="btn" id="btnDoLogin" style="width:100%">登录</button>
   `;
