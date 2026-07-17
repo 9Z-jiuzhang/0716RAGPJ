@@ -73,6 +73,171 @@
   border-bottom-left-radius: 4px;
 }
 
+/* 模型推理过程：默认折叠 */
+.model-reasoning {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #e8eaed;
+  border: 1px solid var(--color-border, #dadce0);
+  white-space: normal;
+}
+
+.model-reasoning > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #5f6368;
+  user-select: none;
+  list-style: none;
+}
+
+.model-reasoning > summary::-webkit-details-marker {
+  display: none;
+}
+
+.model-reasoning > summary::before {
+  content: "▶ ";
+  font-size: 10px;
+}
+
+.model-reasoning[open] > summary::before {
+  content: "▼ ";
+}
+
+.model-reasoning-body {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #3c4043;
+  background: #f8f9fa;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.msg-answer {
+  white-space: pre-wrap;
+}
+
+/* 右侧推理流程面板：默认可折叠 */
+.qa-layout {
+  max-width: 1100px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 1fr;
+  align-items: stretch;
+}
+
+.qa-chat-column {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 14px;
+  min-width: 0;
+}
+
+.reasoning-panel {
+  width: 280px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px;
+  position: relative;
+  transition: width 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
+}
+
+.reasoning-panel.collapsed {
+  width: 36px;
+  padding: 8px 4px;
+  overflow: hidden;
+}
+
+.reasoning-panel.collapsed .reasoning-header,
+.reasoning-panel.collapsed .reasoning-steps {
+  display: none;
+}
+
+.reasoning-panel.collapsed > .reasoning-toggle {
+  display: block;
+  margin: 0 auto;
+}
+
+.reasoning-panel:not(.collapsed) > .reasoning-toggle:first-child {
+  display: none;
+}
+
+.reasoning-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.reasoning-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.reasoning-toggle {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.reasoning-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+.reasoning-empty {
+  font-size: 13px;
+  color: #80868b;
+  line-height: 1.5;
+}
+
+.reasoning-step {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+
+.reasoning-step-content {
+  font-size: 13px;
+}
+
+.reasoning-step-time {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #80868b;
+}
+
+@media (max-width: 1024px) {
+  .qa-layout {
+    grid-template-columns: 1fr;
+    max-width: 880px;
+  }
+
+  .reasoning-panel {
+    display: none;
+  }
+
+  .reasoning-panel.visible {
+    display: block;
+    width: 100%;
+  }
+}
+
 /* 引用来源区：浅蓝左边线突出「有依据、不编造」 */
 .citations {
   margin-top: 12px;

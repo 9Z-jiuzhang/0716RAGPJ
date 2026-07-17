@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     QA_RELEVANCE_THRESHOLD: float = 0.3
     QA_RRF_K: int = 60
     QA_GUEST_SESSION_TTL_MINUTES: int = 30
+    # 检索无命中时：先声明知识库未找到依据，再调用 LLM 给出「参考答案」（不伪造 KB 引用）
+    QA_FALLBACK_LLM_ENABLED: bool = True
+    # 可选：无命中时附加轻量联网检索结果，供参考答案提示词使用（无 API Key，默认关闭）
+    QA_FALLBACK_WEB_SEARCH_ENABLED: bool = False
 
     @property
     def database_url(self) -> str:

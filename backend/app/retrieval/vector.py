@@ -37,17 +37,21 @@ class VectorRetriever:
         try:
             query_embedding = await embedding_service.embed_query(query)
         except EmbeddingServiceError as exc:
-            logger.error("向量检索失败：Embedding 错误 — %s", exc)
-            raise
+            logger.warning("向量检索跳过：Embedding 不可用 — %s", exc)
+            return []
 
-        kb_targets = [(t.kb_id, t.index_version) for t in targets]
-        # 每库多取一些候选，合并后再截断，提升跨库召回质量
-        per_kb_k = max(top_k, min(top_k * 2, 20))
-        raw_hits = await chroma_store.aquery_multi_kb(
-            kb_targets=kb_targets,
-            query_embedding=query_embedding,
-            top_k=per_kb_k,
-        )
+        try:
+            kb_targets = [(t.kb_id, t.index_version) for t in targets]
+            # 每库多取一些候选，合并后再截断，提升跨库召回质量
+            per_kb_k = max(top_k, min(top_k * 2, 20))
+            raw_hits = await chroma_store.aquery_multi_kb(
+                kb_targets=kb_targets,
+                query_embedding=query_embedding,
+                top_k=per_kb_k,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("向量检索跳过：Chroma 查询失败 — %s", exc)
+            return []
 
         # 用 targets 补全可能缺失的 doc_name（Chroma metadata 应已含 doc_name）
         name_map = {str(t.kb_id): t.name for t in targets}

@@ -161,6 +161,8 @@ class FulltextRetriever:
         hits: list[RetrievalHit] = []
         for row in rows:
             sim_score = float(row.sim_score or 0.0)
+            # 中文 similarity 往往偏低；既已 ILIKE 命中，抬到可过默认阈值的底分
+            score = max(sim_score, 0.55)
             hits.append(
                 RetrievalHit(
                     chunk_id=str(row.id),
@@ -169,7 +171,7 @@ class FulltextRetriever:
                     kb_id=str(row.kb_id),
                     chunk_index=int(row.chunk_index),
                     content=row.content or "",
-                    score=max(0.0, min(1.0, sim_score)),
+                    score=max(0.0, min(1.0, score)),
                     source="fulltext",
                     raw_score=sim_score,
                     metadata={"channel": "trgm"},
@@ -186,6 +188,12 @@ class FulltextRetriever:
         top_k: int,
     ) -> list[RetrievalHit]:
         """无 pg_trgm 时的 ILIKE 降级路径。"""
+        tokens = self._extract_tokens(query)
+        like_filters = [DocumentChunk.content.ilike(f"%{query}%")]
+        for tok in tokens:
+            if tok != query:
+                like_filters.append(DocumentChunk.content.ilike(f"%{tok}%"))
+
         stmt = (
             select(
                 DocumentChunk.id,
@@ -199,7 +207,7 @@ class FulltextRetriever:
             .where(
                 DocumentChunk.is_enabled.is_(True),
                 DocumentChunk.kb_id.in_(list(kb_ids)),
-                DocumentChunk.content.ilike(f"%{query}%"),
+                or_(*like_filters),
             )
             .limit(top_k)
         )
@@ -212,7 +220,7 @@ class FulltextRetriever:
         # 无真实分数时按命中顺序递减赋分，保证排序稳定
         hits: list[RetrievalHit] = []
         for i, row in enumerate(rows):
-            score = max(0.1, 1.0 - i * 0.05)
+            score = max(0.55, 1.0 - i * 0.05)
             hits.append(
                 RetrievalHit(
                     chunk_id=str(row.id),
