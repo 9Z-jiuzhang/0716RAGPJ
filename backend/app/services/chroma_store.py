@@ -15,8 +15,9 @@ import asyncio
 import logging
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from typing import TYPE_CHECKING, Any
 
 from app.core.chroma import get_chroma_client
 
@@ -53,10 +54,7 @@ def collection_name_for(kb_id: uuid.UUID | str, index_version: str) -> str:
     version 中的非常规字符会被替换为下划线。
     """
     kb_part = str(kb_id).replace("-", "")
-    ver_part = (
-        re.sub(r"[^a-zA-Z0-9._-]", "_", (index_version or "default").strip())
-        or "default"
-    )
+    ver_part = re.sub(r"[^a-zA-Z0-9._-]", "_", (index_version or "default").strip()) or "default"
     name = f"kb_{kb_part}_{ver_part}"
     # 截断过长名称，保留可读前缀
     if len(name) > 63:
@@ -81,9 +79,7 @@ def distance_to_score(distance: float) -> float:
 class ChromaVectorStore:
     """面向知识库索引版本的向量读写门面。"""
 
-    def get_or_create_collection(
-        self, kb_id: uuid.UUID | str, index_version: str
-    ) -> Collection:
+    def get_or_create_collection(self, kb_id: uuid.UUID | str, index_version: str) -> Collection:
         """获取或创建指定知识库版本的集合。"""
         client = get_chroma_client()
         name = collection_name_for(kb_id, index_version)
@@ -99,9 +95,7 @@ class ChromaVectorStore:
         except Exception as exc:
             raise ChromaStoreError(f"无法获取/创建集合 {name}: {exc}") from exc
 
-    def get_collection(
-        self, kb_id: uuid.UUID | str, index_version: str
-    ) -> Optional[Collection]:
+    def get_collection(self, kb_id: uuid.UUID | str, index_version: str) -> Collection | None:
         """获取已存在集合；不存在时返回 None（检索时不应自动建空集）。"""
         client = get_chroma_client()
         name = collection_name_for(kb_id, index_version)
@@ -168,7 +162,7 @@ class ChromaVectorStore:
         index_version: str,
         query_embedding: Sequence[float],
         top_k: int = 5,
-        where: Optional[dict[str, Any]] = None,
+        where: dict[str, Any] | None = None,
     ) -> list[VectorHit]:
         """
         同步向量检索：按余弦相似度返回 Top-K。
@@ -200,7 +194,7 @@ class ChromaVectorStore:
         index_version: str,
         query_embedding: Sequence[float],
         top_k: int = 5,
-        where: Optional[dict[str, Any]] = None,
+        where: dict[str, Any] | None = None,
     ) -> list[VectorHit]:
         """异步包装：在线程池执行同步 Chroma query。"""
         return await asyncio.to_thread(
@@ -291,9 +285,7 @@ class ChromaVectorStore:
         hits: list[VectorHit] = []
         for i, chunk_id in enumerate(ids):
             meta = metas[i] if i < len(metas) and metas[i] else {}
-            distance = (
-                float(dists[i]) if i < len(dists) and dists[i] is not None else 1.0
-            )
+            distance = float(dists[i]) if i < len(dists) and dists[i] is not None else 1.0
             content = docs[i] if i < len(docs) and docs[i] is not None else ""
             chunk_index_raw = meta.get("chunk_index", 0)
             try:

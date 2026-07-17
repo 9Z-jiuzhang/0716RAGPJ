@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
 RetrievalStrategy = Literal["vector", "fulltext", "hybrid"]
@@ -54,7 +54,7 @@ class RetrievalResult:
     hits: list[RetrievalHit]
     strategy: RetrievalStrategy
     query: str
-    rewritten_query: Optional[str] = None
+    rewritten_query: str | None = None
     authorized_kb_ids: list[str] = field(default_factory=list)
     vector_count: int = 0
     fulltext_count: int = 0

@@ -3,7 +3,6 @@
 from uuid import uuid4
 
 import pytest
-
 from app.services.security_scan import MalwareDetectedError, virus_scan
 
 
@@ -49,7 +48,7 @@ async def test_segment_preview_requires_text(client):
 
     name = f"preview-kb-{uuid4().hex[:8]}"
     created = await client.post(
-        "/api/v1/knowledge-bases/",
+        "/api/v1/knowledge-bases",
         headers=headers,
         json={
             "name": name,
@@ -59,7 +58,7 @@ async def test_segment_preview_requires_text(client):
             "embedding_model": "text-embedding-v3",
         },
     )
-    assert created.status_code == 200, created.text
+    assert created.status_code == 201, created.text
     kb_id = created.json()["data"]["id"]
 
     # 不存在的文档

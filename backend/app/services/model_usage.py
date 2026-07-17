@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -31,7 +31,7 @@ def _enabled() -> bool:
     return bool(settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY)
 
 
-async def _fetch_raw_daily(days: int) -> tuple[list[dict[str, Any]], Optional[str]]:
+async def _fetch_raw_daily(days: int) -> tuple[list[dict[str, Any]], str | None]:
     """拉取（或复用缓存）Langfuse 原始每日指标。
 
     返回 (raw_days_data, notice)。命中新鲜缓存直接返回；
@@ -81,9 +81,7 @@ async def _fetch_raw_daily(days: int) -> tuple[list[dict[str, Any]], Optional[st
     if resp.status_code >= 400:
         if cached:
             return cached["raw"], f"Langfuse 返回 HTTP {resp.status_code}，展示缓存数据"
-        raise ModelUsageError(
-            f"Langfuse 用量查询失败 HTTP {resp.status_code}: {resp.text[:300]}"
-        )
+        raise ModelUsageError(f"Langfuse 用量查询失败 HTTP {resp.status_code}: {resp.text[:300]}")
 
     raw = resp.json().get("data") or []
     _CACHE[days] = {"at": now, "raw": raw, "fetched": now_dt.isoformat()}
@@ -93,7 +91,7 @@ async def _fetch_raw_daily(days: int) -> tuple[list[dict[str, Any]], Optional[st
 async def fetch_daily_metrics(
     *,
     days: int = 30,
-    model: Optional[str] = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """拉取近 N 天的模型用量，按模型聚合。
 

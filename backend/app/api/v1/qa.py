@@ -13,13 +13,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID, uuid4
-
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.responses import StreamingResponse
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_optional_current_user
@@ -30,19 +25,19 @@ from app.models.knowledge_base import KnowledgeBase
 from app.models.qa import QAMessage, QASession
 from app.schemas.common import BaseResponse
 from app.schemas.qa import AskRequest, FeedbackRequest, RenameSessionRequest
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import StreamingResponse
 
 router = APIRouter(prefix="/qa", tags=["智能问答"])
 
 
-def _request_id(
-    x_request_id: Optional[str] = Header(default=None, alias="X-Request-Id")
-) -> str:
+def _request_id(x_request_id: str | None = Header(default=None, alias="X-Request-Id")) -> str:
     return x_request_id or str(uuid4())
 
 
-def _guest_id(
-    x_guest_id: Optional[str] = Header(default=None, alias="X-Guest-Id")
-) -> Optional[str]:
+def _guest_id(x_guest_id: str | None = Header(default=None, alias="X-Guest-Id")) -> str | None:
     """访客匿名标识，由前端 localStorage 生成并在 Header 透传。"""
     if not x_guest_id:
         return None
@@ -68,15 +63,11 @@ async def _get_owned_session(
     return session
 
 
-async def _kb_name_map(
-    db: AsyncSession, kb_ids: Optional[list[UUID]]
-) -> dict[str, str]:
+async def _kb_name_map(db: AsyncSession, kb_ids: list[UUID] | None) -> dict[str, str]:
     """批量解析知识库名称。"""
     if not kb_ids:
         return {}
-    rows = (
-        await db.scalars(select(KnowledgeBase).where(KnowledgeBase.id.in_(kb_ids)))
-    ).all()
+    rows = (await db.scalars(select(KnowledgeBase).where(KnowledgeBase.id.in_(kb_ids)))).all()
     return {str(kb.id): kb.name for kb in rows}
 
 
@@ -133,8 +124,8 @@ def _normalize_sse_payload(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 async def ask_question(
     body: AskRequest,
     db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_optional_current_user),
-    guest_id: Optional[str] = Depends(_guest_id),
+    user: User | None = Depends(get_optional_current_user),
+    guest_id: str | None = Depends(_guest_id),
     request_id: str = Depends(_request_id),
 ) -> StreamingResponse:
     """执行问答流水线并以 SSE 推送结果。"""
@@ -189,11 +180,7 @@ async def list_sessions(
     items: list[dict[str, Any]] = []
     for session in rows:
         name_map = await _kb_name_map(db, session.kb_ids)
-        kb_names = [
-            name_map.get(str(kid), "")
-            for kid in (session.kb_ids or [])
-            if name_map.get(str(kid))
-        ]
+        kb_names = [name_map.get(str(kid), "") for kid in (session.kb_ids or []) if name_map.get(str(kid))]
         items.append(_session_to_dict(session, kb_names))
 
     return BaseResponse(
@@ -207,9 +194,7 @@ async def list_sessions(
     )
 
 
-@router.get(
-    "/sessions/{session_id}", response_model=BaseResponse, summary="会话消息历史"
-)
+@router.get("/sessions/{session_id}", response_model=BaseResponse, summary="会话消息历史")
 async def get_session_messages(
     session_id: UUID,
     page: int = Query(1, ge=1),
@@ -259,11 +244,7 @@ async def rename_session(
     await db.refresh(session)
 
     name_map = await _kb_name_map(db, session.kb_ids)
-    kb_names = [
-        name_map.get(str(kid), "")
-        for kid in (session.kb_ids or [])
-        if name_map.get(str(kid))
-    ]
+    kb_names = [name_map.get(str(kid), "") for kid in (session.kb_ids or []) if name_map.get(str(kid))]
     return BaseResponse(data=_session_to_dict(session, kb_names), request_id=request_id)
 
 

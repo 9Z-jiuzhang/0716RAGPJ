@@ -23,9 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter(prefix="/audit", tags=["审计日志"])
 
 
-def _request_id(
-    x_request_id: str | None = Header(default=None, alias="X-Request-Id")
-) -> str:
+def _request_id(x_request_id: str | None = Header(default=None, alias="X-Request-Id")) -> str:
     return x_request_id or str(uuid4())
 
 

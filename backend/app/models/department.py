@@ -20,12 +20,8 @@ class Department(TimestampMixin, Base):
 
     __tablename__ = "departments"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    code: Mapped[str] = mapped_column(
-        String(50), unique=True, index=True, comment="部门编码，如 A / B / HR"
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True, comment="部门编码，如 A / B / HR")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="部门名称")
     description: Mapped[str | None] = mapped_column(Text, comment="部门介绍")
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

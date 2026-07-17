@@ -14,8 +14,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
+    op.execute("""
         CREATE TABLE IF NOT EXISTS model_configs (
           id UUID PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
@@ -31,8 +30,7 @@ def upgrade() -> None:
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-        """
-    )
+        """)
     op.execute("CREATE INDEX IF NOT EXISTS ix_model_configs_model_type ON model_configs (model_type)")
 
 

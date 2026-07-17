@@ -51,50 +51,26 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
         nullable=False,
     )
-    filename: Mapped[str] = mapped_column(
-        String(500), nullable=False, comment="原始文件名"
-    )
-    file_type: Mapped[str] = mapped_column(
-        String(20), nullable=False, index=True, comment="文件类型"
-    )
-    file_size: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, comment="文件大小（字节）"
-    )
-    file_path: Mapped[str] = mapped_column(
-        String(1000), nullable=False, comment="MinIO 对象路径"
-    )
-    chunk_count: Mapped[int] = mapped_column(
-        Integer, default=0, nullable=False, comment="分段数量"
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), default="uploaded", nullable=False, index=True, comment="处理状态"
-    )
-    error_message: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="失败原因"
-    )
-    content_hash: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, comment="内容哈希，用于快照差异对比"
-    )
+    filename: Mapped[str] = mapped_column(String(500), nullable=False, comment="原始文件名")
+    file_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True, comment="文件类型")
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="文件大小（字节）")
+    file_path: Mapped[str] = mapped_column(String(1000), nullable=False, comment="MinIO 对象路径")
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="分段数量")
+    status: Mapped[str] = mapped_column(String(20), default="uploaded", nullable=False, index=True, comment="处理状态")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, comment="失败原因")
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="内容哈希，用于快照差异对比")
     creator_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
     # 5.5 流水线内部字段（不进入 DocumentResponse）
-    raw_text: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="解析原文"
-    )
-    normalized_text: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="规范化文本"
-    )
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="解析原文")
+    normalized_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="规范化文本")
     segment_rules: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=_default_segment_rules, comment="文档级分段规则"
     )
-    index_version: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, comment="当前索引版本标记"
-    )
+    index_version: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="当前索引版本标记")
 
-    knowledge_base: Mapped[KnowledgeBase] = relationship(
-        "KnowledgeBase", back_populates="documents"
-    )
+    knowledge_base: Mapped[KnowledgeBase] = relationship("KnowledgeBase", back_populates="documents")
     chunks: Mapped[list[DocumentChunk]] = relationship(
         "DocumentChunk",
         back_populates="document",
@@ -134,17 +110,13 @@ class DocumentChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
         nullable=False,
     )
-    chunk_index: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="分段序号，从 0 开始"
-    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, comment="分段序号，从 0 开始")
     content: Mapped[str] = mapped_column(Text, nullable=False, comment="分段文本")
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="字符数")
     chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON, default=dict, nullable=False, comment="标题层级、页码等元信息"
     )
-    is_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=True, nullable=False, comment="是否参与检索"
-    )
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, comment="是否参与检索")
     # 全文检索向量：由 content 自动生成，应用层只读
     content_tsv: Mapped[Any | None] = mapped_column(
         TSVECTOR,
@@ -168,19 +140,9 @@ class KbChunkRule(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
         nullable=False,
     )
-    chunk_size: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=DEFAULT_CHUNK_SIZE
-    )
-    chunk_overlap: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=DEFAULT_CHUNK_OVERLAP
-    )
-    separators: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=lambda: list(DEFAULT_SEPARATORS)
-    )
-    split_mode: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=DEFAULT_SPLIT_MODE
-    )
+    chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=DEFAULT_CHUNK_SIZE)
+    chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=DEFAULT_CHUNK_OVERLAP)
+    separators: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=lambda: list(DEFAULT_SEPARATORS))
+    split_mode: Mapped[str] = mapped_column(String(32), nullable=False, default=DEFAULT_SPLIT_MODE)
     # P2迭代开发，当前仅配置存储，不启用语义切分
-    enable_semantic: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    enable_semantic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

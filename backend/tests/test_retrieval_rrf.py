@@ -70,4 +70,3 @@ def test_threshold_soft_fallback_keeps_hits() -> None:
     assert filtered == []
     fallback = hits[:2]
     assert len(fallback) == 2
-

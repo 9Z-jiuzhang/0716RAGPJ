@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from app.memory.models import ContextMessage
 from app.services.llm import LLMServiceError, llm_service
@@ -31,7 +31,7 @@ class ConversationSummarizer:
     async def summarize(
         self,
         *,
-        existing_summary: Optional[str],
+        existing_summary: str | None,
         messages: Sequence[ContextMessage],
     ) -> str:
         """
@@ -70,16 +70,14 @@ class ConversationSummarizer:
         """将消息列表格式化为可读对话文本。"""
         lines: list[str] = []
         for msg in messages:
-            role_label = {"user": "用户", "assistant": "助手", "system": "系统"}.get(
-                msg.role, msg.role
-            )
+            role_label = {"user": "用户", "assistant": "助手", "system": "系统"}.get(msg.role, msg.role)
             content = (msg.content or "").strip()
             if content:
                 lines.append(f"{role_label}：{content}")
         return "\n".join(lines)
 
     @staticmethod
-    def _build_user_prompt(existing_summary: Optional[str], dialog_text: str) -> str:
+    def _build_user_prompt(existing_summary: str | None, dialog_text: str) -> str:
         parts: list[str] = []
         if existing_summary and existing_summary.strip():
             parts.append(f"【已有摘要】\n{existing_summary.strip()}")
@@ -88,7 +86,7 @@ class ConversationSummarizer:
         return "\n\n".join(parts)
 
     @staticmethod
-    def _fallback_summary(existing_summary: Optional[str], dialog_text: str) -> str:
+    def _fallback_summary(existing_summary: str | None, dialog_text: str) -> str:
         """LLM 返回空时的确定性降级摘要。"""
         snippet = dialog_text[:400] + ("..." if len(dialog_text) > 400 else "")
         if existing_summary and existing_summary.strip():

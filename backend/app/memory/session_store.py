@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,11 +49,7 @@ class SessionStore:
         return f"qa:guest:{guest_id}"
 
     def _ttl_seconds(self, *, is_guest: bool) -> int:
-        minutes = (
-            settings.QA_GUEST_SESSION_TTL_MINUTES
-            if is_guest
-            else settings.QA_SESSION_TTL_MINUTES
-        )
+        minutes = settings.QA_GUEST_SESSION_TTL_MINUTES if is_guest else settings.QA_SESSION_TTL_MINUTES
         return max(60, int(minutes) * 60)
 
     @property
@@ -66,8 +61,8 @@ class SessionStore:
         self,
         session_id: uuid.UUID,
         *,
-        user_id: Optional[uuid.UUID] = None,
-        guest_id: Optional[str] = None,
+        user_id: uuid.UUID | None = None,
+        guest_id: str | None = None,
     ) -> None:
         """写入会话归属元数据，供后续请求校验隔离。"""
         redis = get_redis_client()
@@ -78,13 +73,11 @@ class SessionStore:
         is_guest = guest_id is not None and user_id is None
         ttl = self._ttl_seconds(is_guest=is_guest)
         sid = str(session_id)
-        await redis.set(
-            self._meta_key(sid), json.dumps(meta, ensure_ascii=False), ex=ttl
-        )
+        await redis.set(self._meta_key(sid), json.dumps(meta, ensure_ascii=False), ex=ttl)
         if guest_id:
             await redis.set(self._guest_key(guest_id), sid, ex=ttl)
 
-    async def get_guest_session_id(self, guest_id: str) -> Optional[str]:
+    async def get_guest_session_id(self, guest_id: str) -> str | None:
         """获取访客当前绑定的 session_id。"""
         redis = get_redis_client()
         value = await redis.get(self._guest_key(guest_id))
@@ -94,8 +87,8 @@ class SessionStore:
         self,
         session_id: uuid.UUID,
         *,
-        user_id: Optional[uuid.UUID] = None,
-        guest_id: Optional[str] = None,
+        user_id: uuid.UUID | None = None,
+        guest_id: str | None = None,
     ) -> None:
         """
         校验当前身份有权访问该会话。
@@ -124,7 +117,7 @@ class SessionStore:
         self,
         session_id: uuid.UUID,
         *,
-        pg_summary: Optional[str] = None,
+        pg_summary: str | None = None,
     ) -> SessionMemory:
         """从 Redis 加载热记忆；摘要优先 Redis，缺失时回退 PG 字段。"""
         redis = get_redis_client()
@@ -138,9 +131,7 @@ class SessionStore:
         if context_raw:
             try:
                 items = json.loads(context_raw)
-                messages = [
-                    ContextMessage.from_dict(x) for x in items if isinstance(x, dict)
-                ]
+                messages = [ContextMessage.from_dict(x) for x in items if isinstance(x, dict)]
             except json.JSONDecodeError:
                 logger.warning("会话 %s context JSON 损坏，已忽略", sid)
 
@@ -180,8 +171,8 @@ class SessionStore:
         user_message: ContextMessage,
         assistant_message: ContextMessage,
         is_guest: bool = False,
-        db: Optional[AsyncSession] = None,
-        pg_session: Optional[QASession] = None,
+        db: AsyncSession | None = None,
+        pg_session: QASession | None = None,
     ) -> SessionMemory:
         """
         追加一轮对话到热上下文，并在超窗时触发摘要压缩。
@@ -248,9 +239,7 @@ class SessionStore:
         )
         await self._refresh_ttl(sid, is_guest=is_guest, guest_id=None)
 
-    async def delete_session_cache(
-        self, session_id: uuid.UUID, *, guest_id: Optional[str] = None
-    ) -> None:
+    async def delete_session_cache(self, session_id: uuid.UUID, *, guest_id: str | None = None) -> None:
         """删除会话全部 Redis 键（用户删除会话或访客过期清理）。"""
         redis = get_redis_client()
         sid = str(session_id)
@@ -267,7 +256,7 @@ class SessionStore:
         session_id: str,
         *,
         is_guest: bool,
-        guest_id: Optional[str],
+        guest_id: str | None,
     ) -> None:
         """续期 context/summary/meta（及访客映射）TTL。"""
         redis = get_redis_client()
@@ -286,7 +275,7 @@ class SessionStore:
         session_id: uuid.UUID,
         *,
         is_guest: bool = False,
-        guest_id: Optional[str] = None,
+        guest_id: str | None = None,
     ) -> None:
         """请求开始时续期，防止活跃会话被误过期。"""
         await self._refresh_ttl(str(session_id), is_guest=is_guest, guest_id=guest_id)

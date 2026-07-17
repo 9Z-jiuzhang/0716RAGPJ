@@ -12,12 +12,8 @@ class TestQuestion(BaseModel):
     """测试问题"""
 
     question: str = Field(description="问题文本")
-    expected_doc_ids: list[uuid.UUID] | None = Field(
-        None, description="期望命中的文档 ID 列表"
-    )
-    expected_chunk_ids: list[uuid.UUID] | None = Field(
-        None, description="期望命中的分段 ID 列表"
-    )
+    expected_doc_ids: list[uuid.UUID] | None = Field(None, description="期望命中的文档 ID 列表")
+    expected_chunk_ids: list[uuid.UUID] | None = Field(None, description="期望命中的分段 ID 列表")
 
 
 class CreateTestCaseRequest(BaseModel):
@@ -56,19 +52,13 @@ class TestCaseListResponse(PaginationResponse[TestCaseResponse]):
 class TestRunRequest(BaseModel):
     """执行测试请求"""
 
-    case_id: uuid.UUID | None = Field(
-        None, description="用例 ID，不传则使用 questions 做单题/临时测试"
-    )
+    case_id: uuid.UUID | None = Field(None, description="用例 ID，不传则使用 questions 做单题/临时测试")
     kb_ids: list[uuid.UUID] = Field(description="知识库 ID 列表", min_length=1)
-    doc_ids: list[uuid.UUID] | None = Field(
-        None, description="文档 ID 列表（可选过滤）"
-    )
+    doc_ids: list[uuid.UUID] | None = Field(None, description="文档 ID 列表（可选过滤）")
     strategy: Literal["vector", "fulltext", "hybrid"] = Field(description="检索策略")
     top_k: int = Field(5, description="返回条数", ge=1, le=20)
     similarity_threshold: float = Field(0.5, description="相似度阈值", ge=0, le=1)
-    questions: list[str] | None = Field(
-        None, description="临时问题列表（仅当 case_id 为空时使用）"
-    )
+    questions: list[str] | None = Field(None, description="临时问题列表（仅当 case_id 为空时使用）")
 
 
 class TestRunResponse(BaseModel):
@@ -82,9 +72,7 @@ class TestRunResponse(BaseModel):
     status: Literal["running", "completed", "failed"] = Field(description="状态")
     total_questions: int = Field(description="总问题数")
     hit_count: int = Field(description="命中数")
-    hit_rate: float | None = Field(
-        None, description="命中率 = hit_count / total_questions"
-    )
+    hit_rate: float | None = Field(None, description="命中率 = hit_count / total_questions")
     recall_at_k: float | None = Field(None, description="Recall@K")
     mrr: float | None = Field(None, description="Mean Reciprocal Rank")
     avg_elapsed_ms: float | None = Field(None, description="平均耗时（毫秒）")

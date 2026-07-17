@@ -40,13 +40,13 @@ from app.services.normalize import normalize_text
 from app.services.observability import record_metric, write_audit
 from app.services.parsers import detect_file_type
 from app.services.security_scan import validate_encoding_safe, virus_scan_placeholder
+from app.services.snapshot_hooks import take_auto_snapshot
 from app.utils.exceptions import (
     DocumentError,
     DocumentNotFoundError,
     FileTooLargeError,
     UnsupportedFileTypeError,
 )
-from app.services.snapshot_hooks import take_auto_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +109,7 @@ async def upload_document(
     if not kb:
         raise DocumentNotFoundError(f"knowledge_base:{kb_id}")
     file_type = _validate_upload(filename, content)
-    await take_auto_snapshot(
-        db, kb_id, SnapshotTrigger.AUTO_UPLOAD, user.id, name=f"upload:{filename}"
-    )
+    await take_auto_snapshot(db, kb_id, SnapshotTrigger.AUTO_UPLOAD, user.id, name=f"upload:{filename}")
     kb_rule = await doc_repo.get_or_create_kb_rule(db, kb_id)
     rules = merge_rules(
         default_rules(),
@@ -164,9 +162,7 @@ async def list_documents_page(
     page_size: int,
     keyword: str | None,
 ) -> DocumentListResponse:
-    items, total = await doc_repo.list_documents(
-        db, kb_id, page=page, page_size=page_size, keyword=keyword
-    )
+    items, total = await doc_repo.list_documents(db, kb_id, page=page, page_size=page_size, keyword=keyword)
     return DocumentListResponse(
         items=[
             DocumentListItem(
@@ -191,7 +187,7 @@ async def preview_segment(
     kb_id: uuid.UUID,
     doc_id: uuid.UUID,
     body: UpdateSegmentRulesRequest | None = None,
-) -> "SegmentPreviewResponse":
+) -> SegmentPreviewResponse:
     """按规则干跑分段预览，不写库。"""
     from app.schemas.document import SegmentPreviewChunk, SegmentPreviewResponse
     from app.services.chunking import split_text
@@ -287,9 +283,7 @@ async def preview_segment_source(
         file_type = doc.file_type
         source = (doc.normalized_text or doc.raw_text or "").strip()
         if not source and doc.file_path:
-            raw = parsers.extract_text(
-                doc.filename, storage.download_bytes(doc.file_path), doc.file_type
-            )
+            raw = parsers.extract_text(doc.filename, storage.download_bytes(doc.file_path), doc.file_type)
             source, _stats = normalize_text(raw)
         preview_source = "normalized_text" if doc.normalized_text else "raw_text"
         base_rules = doc.segment_rules
@@ -344,9 +338,7 @@ async def preview_segment_source(
     )
 
 
-async def get_document_detail(
-    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID
-) -> Document:
+async def get_document_detail(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID) -> Document:
     doc = await doc_repo.get_document(db, kb_id, doc_id)
     if not doc:
         raise DocumentNotFoundError(str(doc_id))
@@ -401,13 +393,9 @@ async def get_document_content_preview(
     )
 
 
-async def delete_document(
-    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User
-) -> None:
+async def delete_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User) -> None:
     doc = await get_document_detail(db, kb_id, doc_id)
-    await take_auto_snapshot(
-        db, kb_id, SnapshotTrigger.AUTO_DELETE, user.id, name=f"delete:{doc.filename}"
-    )
+    await take_auto_snapshot(db, kb_id, SnapshotTrigger.AUTO_DELETE, user.id, name=f"delete:{doc.filename}")
     file_path = doc.file_path
     vector_store.delete_document_vectors(kb_id, doc_id)
     await db.delete(doc)
@@ -478,9 +466,7 @@ async def update_segment_rules(
     return doc
 
 
-async def normalize_document(
-    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User
-) -> NormalizeResult:
+async def normalize_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User) -> NormalizeResult:
     doc = await get_document_detail(db, kb_id, doc_id)
     await take_auto_snapshot(
         db,
@@ -524,9 +510,7 @@ async def list_chunks_page(
     page_size: int,
 ) -> ChunkListResponse:
     await get_document_detail(db, kb_id, doc_id)
-    items, total = await doc_repo.list_chunks(
-        db, doc_id, page=page, page_size=page_size
-    )
+    items, total = await doc_repo.list_chunks(db, doc_id, page=page, page_size=page_size)
     return ChunkListResponse(
         items=[to_chunk_response(c) for c in items],
         total=total,
@@ -569,17 +553,13 @@ async def update_chunk(
     return chunk
 
 
-async def prepare_retry(
-    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User
-) -> Document:
+async def prepare_retry(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User) -> Document:
     """error 状态重试：合法流转到 parsing，由后台流水线重新执行。【对齐状态机】"""
     doc = await get_document_detail(db, kb_id, doc_id)
     if doc.status != DocumentStatus.ERROR.value:
         from app.utils.exceptions import DocumentError
 
-        raise DocumentError(
-            f"仅 error 状态可重试，当前为 {doc.status}", http_status=409
-        )
+        raise DocumentError(f"仅 error 状态可重试，当前为 {doc.status}", http_status=409)
     apply_status(doc, DocumentStatus.PARSING.value)
     await write_audit(
         db,

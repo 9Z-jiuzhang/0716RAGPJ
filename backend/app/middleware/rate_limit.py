@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict, deque
-from typing import Deque
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -26,7 +25,7 @@ _DEFAULT_RULES: list[tuple[str, int, int]] = [
 
 class _MemoryLimiter:
     def __init__(self) -> None:
-        self._buckets: dict[str, Deque[float]] = defaultdict(deque)
+        self._buckets: dict[str, deque[float]] = defaultdict(deque)
 
     def allow(self, key: str, limit: int, window: int) -> bool:
         now = time.time()
@@ -57,9 +56,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         identity = self._client_key(request)
-        allowed = await self._allow(
-            f"rl:{identity}:{path.split('?')[0]}:{window}", limit, window
-        )
+        allowed = await self._allow(f"rl:{identity}:{path.split('?')[0]}:{window}", limit, window)
         if not allowed:
             return JSONResponse(
                 status_code=429,

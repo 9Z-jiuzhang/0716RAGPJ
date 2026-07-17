@@ -2,9 +2,8 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
-
 from app.schemas.common import PaginationResponse
+from pydantic import BaseModel, EmailStr, Field
 
 
 class RegisterRequest(BaseModel):
@@ -49,6 +48,7 @@ class UserUpdateRequest(BaseModel):
     nickname: str | None = Field(default=None, max_length=100)
     email: EmailStr | None = None
     department: str | None = Field(default=None, max_length=50)
+
 
 class UserStatusRequest(BaseModel):
     status: str = Field(pattern="^(active|disabled|pending)$")

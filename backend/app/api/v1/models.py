@@ -2,9 +2,6 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.core.exceptions import APIException
@@ -19,6 +16,8 @@ from app.schemas.model_config import (
 )
 from app.services.model_config import ModelConfigService
 from app.services.model_usage import ModelUsageError, fetch_daily_metrics
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/models", tags=["大模型管理"])
 
@@ -50,9 +49,7 @@ async def list_models(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        data = await ModelConfigService(db).list_models(
-            page=page, page_size=page_size, model_type=model_type
-        )
+        data = await ModelConfigService(db).list_models(page=page, page_size=page_size, model_type=model_type)
     except APIException as exc:
         _raise(exc)
     return APIResponse(data=data)

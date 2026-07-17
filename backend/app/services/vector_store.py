@@ -71,7 +71,6 @@ def delete_document_vectors(kb_id: UUID | str, document_id: UUID | str) -> None:
     """删除某文档在各索引版本集合中的向量（尽力而为）。"""
     try:
         from app.core.chroma import get_chroma_client
-        from app.services.chroma_store import collection_name_for
 
         client = get_chroma_client()
         # 列出可能相关的集合：旧命名 kb_{hex} + 新命名 kb_{hex}_{version}

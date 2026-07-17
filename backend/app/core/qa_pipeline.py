@@ -23,10 +23,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, Optional
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
 from app.core.config import settings
 from app.memory.models import ContextMessage
@@ -40,6 +37,8 @@ from app.services.langfuse_service import get_langfuse
 from app.services.llm import LLMServiceError, llm_service
 from app.services.web_search import format_web_results, search_web
 from app.utils.tracing import PerformanceTracker, new_request_id
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +113,7 @@ def _sanitize_rewrite_output(raw: str, *, fallback: str) -> str:
         return fallback
     return candidate
 
+
 @dataclass
 class PipelineRunContext:
     """单次问答运行的上下文快照，供 done 事件与持久化使用。"""
@@ -128,7 +128,7 @@ class PipelineRunContext:
     retrieval_meta: dict[str, Any] = field(default_factory=dict)
     performance: dict[str, Any] = field(default_factory=dict)
     is_guest: bool = False
-    guest_id: Optional[str] = None
+    guest_id: str | None = None
 
 
 class QAPipelineError(Exception):
@@ -147,9 +147,9 @@ class QAPipeline:
         db: AsyncSession,
         request: AskRequest,
         *,
-        user: Optional[User] = None,
-        guest_id: Optional[str] = None,
-        request_id: Optional[str] = None,
+        user: User | None = None,
+        guest_id: str | None = None,
+        request_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         执行完整问答流程，按 SSE 契约 yield 事件字典。
@@ -206,20 +206,14 @@ class QAPipeline:
 
             # [3] 加载会话记忆
             with tracker.track("memory"):
-                memory = await session_store.load_memory(
-                    session.id, pg_summary=session.summary
-                )
+                memory = await session_store.load_memory(session.id, pg_summary=session.summary)
                 if not memory.messages and session.message_count > 0:
                     # Redis 过期时从 PG 恢复最近消息（注册用户历史会话）
-                    memory.messages = await self._hydrate_context_from_db(
-                        db, session.id
-                    )
+                    memory.messages = await self._hydrate_context_from_db(db, session.id)
 
             # [4] 查询改写
             with tracker.track("rewrite"):
-                rewritten = await self._rewrite_query(
-                    question, memory.to_llm_messages()
-                )
+                rewritten = await self._rewrite_query(question, memory.to_llm_messages())
 
             retrieval_meta: dict[str, Any] = {
                 "original_query": question,
@@ -388,8 +382,8 @@ class QAPipeline:
         db: AsyncSession,
         request: AskRequest,
         *,
-        user: Optional[User],
-        guest_id: Optional[str],
+        user: User | None,
+        guest_id: str | None,
         is_guest: bool,
     ) -> QASession:
         """获取或创建会话，并校验归属隔离。"""
@@ -545,9 +539,7 @@ class QAPipeline:
             usage_sink: dict[str, Any] = {}
             reference_text = ""
             try:
-                async for delta in llm_service.stream_chat(
-                    messages, temperature=temperature, usage_sink=usage_sink
-                ):
+                async for delta in llm_service.stream_chat(messages, temperature=temperature, usage_sink=usage_sink):
                     reference_text += delta
                     yield delta
                 if lf is not None and lf_trace is not None:
@@ -562,8 +554,7 @@ class QAPipeline:
                 logger.warning("无命中参考答案生成失败：%s", exc)
                 retrieval_meta["fallback_mode"] = "notice_only_llm_error"
                 yield (
-                    "参考答案暂时无法生成（大模型服务不可用）。"
-                    "请稍后重试，或联系管理员确认知识库文档是否已入库。"
+                    "参考答案暂时无法生成（大模型服务不可用）。" "请稍后重试，或联系管理员确认知识库文档是否已入库。"
                 )
 
     @staticmethod
@@ -633,9 +624,7 @@ class QAPipeline:
             "请基于检索证据回答；若证据不足请明确说明。"
         )
         # history 已含摘要 system；再追加 RAG system 与当前问题
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": _RAG_SYSTEM_PROMPT}
-        ]
+        messages: list[dict[str, str]] = [{"role": "system", "content": _RAG_SYSTEM_PROMPT}]
         for msg in history_messages:
             # 避免重复 system 过多：保留摘要 system，跳过其他 system
             if msg["role"] == "system":
@@ -683,8 +672,8 @@ class QAPipeline:
         user_msg_id: uuid.UUID,
         assistant_msg_id: uuid.UUID,
         is_guest: bool,
-        guest_id: Optional[str],
-        kb_ids: Optional[list[uuid.UUID]],
+        guest_id: str | None,
+        kb_ids: list[uuid.UUID] | None,
     ) -> None:
         """写入 PG 消息记录并更新 Redis 热记忆。"""
         from app.models.base import utcnow

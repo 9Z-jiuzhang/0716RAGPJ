@@ -14,7 +14,7 @@ async def test_kb_create_list_get_delete(client):
 
     name = f"pytest-kb-{uuid4().hex[:8]}"
     created = await client.post(
-        "/api/v1/knowledge-bases/",
+        "/api/v1/knowledge-bases",
         headers=headers,
         json={
             "name": name,
@@ -27,12 +27,12 @@ async def test_kb_create_list_get_delete(client):
             "chunk_overlap": 50,
         },
     )
-    assert created.status_code == 200, created.text
+    assert created.status_code == 201, created.text
     body = created.json()
     assert body["code"] == 0
     kb_id = body["data"]["id"]
 
-    listed = await client.get("/api/v1/knowledge-bases/", headers=headers)
+    listed = await client.get("/api/v1/knowledge-bases", headers=headers)
     assert listed.status_code == 200
     assert any(item["id"] == kb_id for item in listed.json()["data"]["items"])
 

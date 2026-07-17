@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,8 +25,8 @@ from app.retrieval.types import KBTarget
 async def resolve_kb_targets(
     db: AsyncSession,
     *,
-    user: Optional[User] = None,
-    kb_ids: Optional[Sequence[uuid.UUID]] = None,
+    user: User | None = None,
+    kb_ids: Sequence[uuid.UUID] | None = None,
 ) -> list[KBTarget]:
     """
     计算当前身份可检索的知识库目标列表。
@@ -51,7 +51,7 @@ async def resolve_kb_targets(
 async def _list_accessible_kbs(
     db: AsyncSession,
     *,
-    user: Optional[User],
+    user: User | None,
 ) -> list[KnowledgeBase]:
     """列出身份可见且处于 active 状态的知识库。"""
     base_filter = [
@@ -69,12 +69,7 @@ async def _list_accessible_kbs(
     # 全局管理员：全部 active 库
     codes = {p.code for role in user.roles if role.is_enabled for p in role.permissions}
     role_names = {r.name for r in user.roles if r.is_enabled}
-    is_admin = (
-        "super_admin" in role_names
-        or "admin" in role_names
-        or "*" in codes
-        or "admin:*" in codes
-    )
+    is_admin = "super_admin" in role_names or "admin" in role_names or "*" in codes or "admin:*" in codes
     if is_admin:
         stmt = select(KnowledgeBase).where(*base_filter)
         return list((await db.scalars(stmt)).all())

@@ -2,9 +2,6 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.database import get_db
 from app.core.dependencies import (
     get_current_user,
@@ -15,15 +12,17 @@ from app.core.exceptions import APIException
 from app.models import User
 from app.schemas.common import APIResponse, PageResponse
 from app.schemas.knowledge_base import (
+    KBPermissionUpdate,
     KnowledgeBaseCreate,
     KnowledgeBaseFilter,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
-    KBPermissionUpdate,
     ReVectorizeRequest,
     VectorizeStatusResponse,
 )
 from app.services.knowledge_base import KnowledgeBaseService
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/knowledge-bases", tags=["knowledge-bases"])
 
@@ -106,9 +105,7 @@ async def delete_knowledge_base(
     return APIResponse(data={"message": "Knowledge base deleted"})
 
 
-@router.post(
-    "/{kb_id}/re-vectorize", response_model=APIResponse[VectorizeStatusResponse]
-)
+@router.post("/{kb_id}/re-vectorize", response_model=APIResponse[VectorizeStatusResponse])
 async def re_vectorize_knowledge_base(
     kb_id: UUID = Path(..., description="知识库ID"),
     data: ReVectorizeRequest | None = Body(default=None),
@@ -118,17 +115,13 @@ async def re_vectorize_knowledge_base(
     """重新向量化；请求体可携带分段规则（chunk_size/overlap/split_mode 等）。"""
     service = KnowledgeBaseService(db)
     try:
-        result = await service.re_vectorize_kb(
-            str(kb_id), current_user.id, options=data or ReVectorizeRequest()
-        )
+        result = await service.re_vectorize_kb(str(kb_id), current_user.id, options=data or ReVectorizeRequest())
     except APIException as exc:
         _raise_api(exc)
     return APIResponse(data=result)
 
 
-@router.get(
-    "/{kb_id}/vectorize-status", response_model=APIResponse[VectorizeStatusResponse]
-)
+@router.get("/{kb_id}/vectorize-status", response_model=APIResponse[VectorizeStatusResponse])
 async def get_vectorize_status(
     kb_id: UUID = Path(..., description="知识库ID"),
     current_user: User = Depends(require_kb_permission("kb:vectorize")),

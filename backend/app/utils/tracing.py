@@ -2,9 +2,9 @@
 
 import time
 import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Generator
 
 
 def new_request_id() -> str:

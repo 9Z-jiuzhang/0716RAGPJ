@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 ModelType = Literal["llm", "embedding", "rerank"]
 
@@ -19,12 +18,10 @@ class CreateModelConfigRequest(BaseModel):
     model_type: ModelType
     provider: str = Field(..., min_length=1, max_length=50)
     model_name: str = Field(..., min_length=1, max_length=200)
-    base_url: Optional[str] = Field(None, max_length=500)
+    base_url: str | None = Field(None, max_length=500)
     config: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: int = Field(60, ge=5, le=600)
-    api_key_env: Optional[str] = Field(
-        None, max_length=100, description="密钥环境变量名，不存储明文密钥"
-    )
+    api_key_env: str | None = Field(None, max_length=100, description="密钥环境变量名，不存储明文密钥")
     is_default: bool = False
     is_enabled: bool = True
     priority: int = Field(100, ge=0, le=10000, description="优先级，数值越小越优先")
@@ -33,16 +30,16 @@ class CreateModelConfigRequest(BaseModel):
 class UpdateModelConfigRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    provider: Optional[str] = Field(None, min_length=1, max_length=50)
-    model_name: Optional[str] = Field(None, min_length=1, max_length=200)
-    base_url: Optional[str] = Field(None, max_length=500)
-    config: Optional[dict[str, Any]] = None
-    timeout_seconds: Optional[int] = Field(None, ge=5, le=600)
-    api_key_env: Optional[str] = Field(None, max_length=100)
-    priority: Optional[int] = Field(None, ge=0, le=10000)
-    is_enabled: Optional[bool] = None
-    is_default: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=100)
+    provider: str | None = Field(None, min_length=1, max_length=50)
+    model_name: str | None = Field(None, min_length=1, max_length=200)
+    base_url: str | None = Field(None, max_length=500)
+    config: dict[str, Any] | None = None
+    timeout_seconds: int | None = Field(None, ge=5, le=600)
+    api_key_env: str | None = Field(None, max_length=100)
+    priority: int | None = Field(None, ge=0, le=10000)
+    is_enabled: bool | None = None
+    is_default: bool | None = None
 
 
 class ModelStatusRequest(BaseModel):
@@ -61,13 +58,13 @@ class ModelConfigResponse(BaseModel):
     model_type: ModelType
     provider: str
     model_name: str
-    base_url: Optional[str] = None
+    base_url: str | None = None
     is_default: bool
     is_enabled: bool
     priority: int = 100
     config: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: int
-    api_key_env: Optional[str] = None
+    api_key_env: str | None = None
     has_api_key: bool = False
     created_at: datetime
     updated_at: datetime

@@ -32,24 +32,11 @@ class ModelConfigService:
         conditions = []
         if model_type:
             conditions.append(ModelConfig.model_type == model_type)
-        total = (
-            await self.db.scalar(
-                select(func.count()).select_from(ModelConfig).where(*conditions)
-            )
-            or 0
-        )
-        stmt = select(ModelConfig).order_by(
-            ModelConfig.model_type, ModelConfig.priority.asc(), ModelConfig.name
-        )
+        total = await self.db.scalar(select(func.count()).select_from(ModelConfig).where(*conditions)) or 0
+        stmt = select(ModelConfig).order_by(ModelConfig.model_type, ModelConfig.priority.asc(), ModelConfig.name)
         if conditions:
             stmt = stmt.where(*conditions)
-        rows = list(
-            (
-                await self.db.scalars(
-                    stmt.offset((page - 1) * page_size).limit(page_size)
-                )
-            ).all()
-        )
+        rows = list((await self.db.scalars(stmt.offset((page - 1) * page_size).limit(page_size))).all())
         return PageResponse(
             items=[self._to_response(r) for r in rows],
             total=int(total),
@@ -79,9 +66,7 @@ class ModelConfigService:
         await self.db.refresh(row)
         return self._to_response(row)
 
-    async def update(
-        self, model_id: UUID, data: UpdateModelConfigRequest
-    ) -> ModelConfigResponse:
+    async def update(self, model_id: UUID, data: UpdateModelConfigRequest) -> ModelConfigResponse:
         row = await self._get(model_id)
         payload = data.model_dump(exclude_unset=True)
         for key, value in payload.items():
@@ -99,9 +84,7 @@ class ModelConfigService:
         await self.db.refresh(row)
         return self._to_response(row)
 
-    async def set_default(
-        self, model_id: UUID, is_default: bool = True
-    ) -> ModelConfigResponse:
+    async def set_default(self, model_id: UUID, is_default: bool = True) -> ModelConfigResponse:
         row = await self._get(model_id)
         if is_default:
             if not row.is_enabled:
@@ -116,9 +99,7 @@ class ModelConfigService:
     async def _set_default(self, model_id: UUID, model_type: str) -> None:
         await self.db.execute(
             update(ModelConfig)
-            .where(
-                ModelConfig.model_type == model_type, ModelConfig.is_default.is_(True)
-            )
+            .where(ModelConfig.model_type == model_type, ModelConfig.is_default.is_(True))
             .values(is_default=False)
         )
         row = await self._get(model_id)

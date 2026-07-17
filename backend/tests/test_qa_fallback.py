@@ -7,8 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from app.core.qa_pipeline import QAPipeline, _NO_EVIDENCE_NOTICE
+from app.core.qa_pipeline import _NO_EVIDENCE_NOTICE, QAPipeline
 from app.utils.tracing import PerformanceTracker
 
 

@@ -18,9 +18,7 @@ class CreateSnapshotRequest(BaseModel):
         description="快照名称",
         examples=["发布前备份"],
     )
-    description: str | None = Field(
-        default=None, max_length=2000, description="快照说明"
-    )
+    description: str | None = Field(default=None, max_length=2000, description="快照说明")
 
 
 class RollbackRequest(BaseModel):
@@ -80,9 +78,7 @@ class SnapshotListItem(BaseModel):
 class SnapshotResponse(SnapshotListItem):
     """完整快照信息。"""
 
-    config_snapshot: dict[str, Any] = Field(
-        default_factory=dict, description="配置快照"
-    )
+    config_snapshot: dict[str, Any] = Field(default_factory=dict, description="配置快照")
     updated_at: datetime | None = None
 
 
@@ -90,12 +86,8 @@ class SnapshotDetailResponse(SnapshotResponse):
     """快照详情：含文档列表、分段统计、权限配置。"""
 
     documents: list[SnapshotDocumentItem] = Field(default_factory=list)
-    permission_snapshot: list[dict[str, Any]] = Field(
-        default_factory=list, description="快照时的权限配置"
-    )
-    segment_rules: dict[str, Any] = Field(
-        default_factory=dict, description="分段规则快照"
-    )
+    permission_snapshot: list[dict[str, Any]] = Field(default_factory=list, description="快照时的权限配置")
+    segment_rules: dict[str, Any] = Field(default_factory=dict, description="分段规则快照")
 
 
 class AffectedDocument(BaseModel):
@@ -126,18 +118,10 @@ class RollbackPreviewResponse(BaseModel):
     kb_id: UUID
     snapshot_name: str
     affected_documents: list[AffectedDocument] = Field(default_factory=list)
-    config_changes: list[ConfigChangeItem] = Field(
-        default_factory=list, description="分段规则/嵌入模型/权限等配置差异"
-    )
-    total_changes: int = Field(
-        default=0, description="将发生变更的文档数（不含 unchanged）"
-    )
-    will_create_protection_snapshot: bool = Field(
-        default=True, description="回退前是否自动创建保护快照"
-    )
-    rebuild_required: bool = Field(
-        default=True, description="回退后需重建向量索引后才会切换生效版本"
-    )
+    config_changes: list[ConfigChangeItem] = Field(default_factory=list, description="分段规则/嵌入模型/权限等配置差异")
+    total_changes: int = Field(default=0, description="将发生变更的文档数（不含 unchanged）")
+    will_create_protection_snapshot: bool = Field(default=True, description="回退前是否自动创建保护快照")
+    rebuild_required: bool = Field(default=True, description="回退后需重建向量索引后才会切换生效版本")
 
 
 class SnapshotListResponse(PaginationResponse[SnapshotListItem]):
@@ -150,23 +134,15 @@ class RollbackResultResponse(BaseModel):
     """回退执行结果。"""
 
     protection_snapshot_id: UUID = Field(..., description="回退前保护快照 ID")
-    new_index_version: str = Field(
-        ..., description="新生成的索引版本号（building，待向量重建后激活）"
-    )
+    new_index_version: str = Field(..., description="新生成的索引版本号（building，待向量重建后激活）")
     index_status: str = Field(default="building", description="索引版本状态")
     before_version: str | None = Field(default=None, description="回退前生效索引版本")
     after_version: str = Field(..., description="回退后待激活的索引版本")
     restored_document_count: int = Field(..., description="恢复涉及的文档数")
-    restored_document_ids: list[UUID] = Field(
-        default_factory=list, description="已恢复文档 ID，供异步重建索引使用"
-    )
+    restored_document_ids: list[UUID] = Field(default_factory=list, description="已恢复文档 ID，供异步重建索引使用")
     selective: bool = Field(default=False, description="是否选择性恢复")
-    rebuild_required: bool = Field(
-        default=True, description="是否仍需向量化模块重建并激活索引"
-    )
-    message: str = Field(
-        default="文档与配置已按快照恢复；索引版本处于 building，待向量重建后原子激活"
-    )
+    rebuild_required: bool = Field(default=True, description="是否仍需向量化模块重建并激活索引")
+    message: str = Field(default="文档与配置已按快照恢复；索引版本处于 building，待向量重建后原子激活")
 
 
 class SnapshotCleanupResponse(BaseModel):
@@ -176,6 +152,4 @@ class SnapshotCleanupResponse(BaseModel):
     excess_deleted: int = Field(default=0, description="按最大数量清理数量")
     retention_days: int
     max_count: int
-    active_remaining: int = Field(
-        default=0, description="清理后仍活跃的快照数（含保护）"
-    )
+    active_remaining: int = Field(default=0, description="清理后仍活跃的快照数（含保护）")

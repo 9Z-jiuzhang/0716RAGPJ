@@ -2,9 +2,8 @@
 
 from collections.abc import AsyncGenerator
 
-from redis.asyncio import Redis
-
 from app.core.config import settings
+from redis.asyncio import Redis
 
 # 全局 Redis 客户端实例，在应用 lifespan 中初始化与关闭
 _redis_client: Redis | None = None

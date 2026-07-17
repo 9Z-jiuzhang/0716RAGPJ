@@ -15,14 +15,15 @@ from app.utils.exceptions import DocumentError
 from fastapi import (
     APIRouter,
     BackgroundTasks,
+    Body,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     UploadFile,
     status,
 )
-from fastapi import Body, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -78,12 +79,8 @@ async def upload_document(
         )
     except DocumentError as exc:
         _raise_doc_error(exc)
-    background_tasks.add_task(
-        document_pipeline.run_upload_pipeline, doc.id, auto_vectorize=True
-    )
-    return ok(
-        document_service.to_document_response(doc).model_dump(), message="uploaded"
-    )
+    background_tasks.add_task(document_pipeline.run_upload_pipeline, doc.id, auto_vectorize=True)
+    return ok(document_service.to_document_response(doc).model_dump(), message="uploaded")
 
 
 @router.get("/{doc_id}")
@@ -95,9 +92,7 @@ async def get_document(
 ):
     """文档详情与流水线状态。【前端：状态徽章轮询】"""
     try:
-        doc = await document_service.get_document_detail(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id")
-        )
+        doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(document_service.to_document_response(doc).model_dump())
@@ -112,9 +107,7 @@ async def get_document_content(
 ):
     """文档正文预览（解析原文 / 清洗正文）。【前端：文档管理-预览】"""
     try:
-        data = await document_service.get_document_content_preview(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id")
-        )
+        data = await document_service.get_document_content_preview(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(data.model_dump())
@@ -129,9 +122,7 @@ async def delete_document(
 ):
     """删除文档及关联向量/MinIO 对象。【前端：删除确认对话框】"""
     try:
-        await document_service.delete_document(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user
-        )
+        await document_service.delete_document(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(None, message="deleted")
@@ -165,9 +156,7 @@ async def segment_preview(
 ):
     """干跑分段预览（不写库）。【前端：确认重分段前预览】"""
     try:
-        data = await document_service.preview_segment(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), body
-        )
+        data = await document_service.preview_segment(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), body)
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(data.model_dump())
@@ -176,15 +165,11 @@ async def segment_preview(
 @router.post("/segment-preview-file")
 async def segment_preview_file(
     kb_id: str,
-    file: UploadFile | None = File(
-        None, description="待预览分段的文档文件；与 doc_id 二选一"
-    ),
+    file: UploadFile | None = File(None, description="待预览分段的文档文件；与 doc_id 二选一"),
     doc_id: str | None = Form(None, description="已上传文档 id；与 file 二选一"),
     chunk_size: int | None = Form(None, description="可选覆盖：分段长度"),
     chunk_overlap: int | None = Form(None, description="可选覆盖：重叠长度"),
-    split_mode: str | None = Form(
-        None, description="可选覆盖：分段模式 fixed/heading/paragraph/sliding"
-    ),
+    split_mode: str | None = Form(None, description="可选覆盖：分段模式 fixed/heading/paragraph/sliding"),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_permission("doc:segment")),
 ):
@@ -231,9 +216,7 @@ async def re_segment(
 ):
     """重新分段并向量化（异步 202）。【前端：预览确认后触发】"""
     try:
-        doc = await document_service.get_document_detail(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id")
-        )
+        doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
     except DocumentError as exc:
         _raise_doc_error(exc)
     background_tasks.add_task(document_pipeline.run_resegment_pipeline, doc.id, user.id)
@@ -253,14 +236,10 @@ async def retry_document(
 ):
     """error 状态重试流水线（异步 202）。状态机：error -> parsing。"""
     try:
-        doc = await document_service.prepare_retry(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user
-        )
+        doc = await document_service.prepare_retry(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
     except DocumentError as exc:
         _raise_doc_error(exc)
-    background_tasks.add_task(
-        document_pipeline.run_upload_pipeline, doc.id, auto_vectorize=True
-    )
+    background_tasks.add_task(document_pipeline.run_upload_pipeline, doc.id, auto_vectorize=True)
     return ok(
         document_service.to_document_response(doc).model_dump(),
         message="retry accepted",
@@ -276,9 +255,7 @@ async def normalize_document(
 ):
     """文档规范化，返回统计。【前端：规范化按钮】"""
     try:
-        result = await document_service.normalize_document(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user
-        )
+        result = await document_service.normalize_document(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(result.model_dump())

@@ -10,7 +10,7 @@ RRF（Reciprocal Rank Fusion）公式：
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,9 +37,9 @@ class HybridRetriever:
         targets: Sequence[KBTarget],
         *,
         strategy: RetrievalStrategy = "hybrid",
-        top_k: Optional[int] = None,
-        relevance_threshold: Optional[float] = None,
-        rewritten_query: Optional[str] = None,
+        top_k: int | None = None,
+        relevance_threshold: float | None = None,
+        rewritten_query: str | None = None,
     ) -> RetrievalResult:
         """
         执行检索并返回统一结果。
@@ -48,11 +48,7 @@ class HybridRetriever:
         rewritten_query: 若与 query 不同，记录在结果元数据中
         """
         effective_k = top_k or settings.QA_DEFAULT_TOP_K
-        threshold = (
-            settings.QA_RELEVANCE_THRESHOLD
-            if relevance_threshold is None
-            else relevance_threshold
-        )
+        threshold = settings.QA_RELEVANCE_THRESHOLD if relevance_threshold is None else relevance_threshold
         search_text = (query or "").strip()
         if not search_text or not targets:
             return RetrievalResult(
@@ -68,18 +64,14 @@ class HybridRetriever:
 
         if strategy in ("vector", "hybrid"):
             try:
-                vector_hits = await vector_retriever.search(
-                    search_text, targets, top_k=effective_k
-                )
+                vector_hits = await vector_retriever.search(search_text, targets, top_k=effective_k)
             except Exception as exc:  # noqa: BLE001 — 向量失败不得阻断全文路
                 logger.warning("向量检索失败，将仅使用全文结果：%s", exc)
                 vector_hits = []
 
         if strategy in ("fulltext", "hybrid"):
             try:
-                fulltext_hits = await fulltext_retriever.search(
-                    db, search_text, targets, top_k=effective_k
-                )
+                fulltext_hits = await fulltext_retriever.search(db, search_text, targets, top_k=effective_k)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("全文检索失败：%s", exc)
                 fulltext_hits = []
@@ -194,9 +186,7 @@ class HybridRetriever:
         return max(0.0, min(1.0, rrf_score / max_rrf))
 
     @staticmethod
-    def _apply_threshold(
-        hits: list[RetrievalHit], threshold: float
-    ) -> list[RetrievalHit]:
+    def _apply_threshold(hits: list[RetrievalHit], threshold: float) -> list[RetrievalHit]:
         """相关性阈值截断：低于阈值的片段丢弃。"""
         if threshold <= 0:
             return hits

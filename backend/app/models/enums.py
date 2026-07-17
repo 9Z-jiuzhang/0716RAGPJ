@@ -82,9 +82,7 @@ UPLOAD_ALLOWED_TYPES = frozenset(
     }
 )
 # 数据库枚举预留，上传直接拒绝
-UPLOAD_REJECTED_TYPES = frozenset(
-    {DocumentFileType.CSV, DocumentFileType.XLSX, DocumentFileType.PPTX}
-)
+UPLOAD_REJECTED_TYPES = frozenset({DocumentFileType.CSV, DocumentFileType.XLSX, DocumentFileType.PPTX})
 
 DEFAULT_SEPARATORS = ["\n\n", "\n", "。", ".", " "]
 DEFAULT_CHUNK_SIZE = 500

@@ -30,17 +30,13 @@ class Snapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="所属知识库",
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False, comment="快照名称")
-    description: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="快照说明"
-    )
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="快照说明")
     trigger: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         comment="触发方式: auto_*/manual/rollback_protection",
     )
-    status: Mapped[str] = mapped_column(
-        String(20), default="active", nullable=False, comment="active/deleted"
-    )
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, comment="active/deleted")
     config_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, comment="快照时的知识库元信息、分段规则、权限等"
     )
@@ -51,9 +47,7 @@ class Snapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     segment_rules: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
-    knowledge_base: Mapped["KnowledgeBase"] = relationship(
-        "KnowledgeBase", back_populates="snapshots"
-    )
+    knowledge_base: Mapped["KnowledgeBase"] = relationship("KnowledgeBase", back_populates="snapshots")
     documents: Mapped[list["SnapshotDocument"]] = relationship(
         "SnapshotDocument",
         back_populates="snapshot",
@@ -78,13 +72,9 @@ class SnapshotDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True), nullable=False, comment="快照时的原始文档 ID（非外键）"
     )
     filename: Mapped[str] = mapped_column(String(500), nullable=False, comment="文件名")
-    file_type: Mapped[str] = mapped_column(
-        String(20), nullable=False, comment="文件类型"
-    )
+    file_type: Mapped[str] = mapped_column(String(20), nullable=False, comment="文件类型")
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="分段数")
-    content_hash: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, comment="内容哈希"
-    )
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="内容哈希")
     doc_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON, default=dict, nullable=False, comment="快照时的文档元信息"
     )

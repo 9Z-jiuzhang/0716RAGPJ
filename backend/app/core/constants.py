@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 # 固定“访客专用”部门
 GUEST_DEPARTMENT_CODE = "GUEST"
 GUEST_DEPARTMENT_NAME = "访客专用"
@@ -21,17 +19,17 @@ VISIBILITY_PUBLIC = "public"
 VISIBILITY_RESTRICTED = "restricted"
 
 
-def normalize_department(code: Optional[str]) -> Optional[str]:
+def normalize_department(code: str | None) -> str | None:
     """规范化部门编码：去空白、转大写；空值返回 None。"""
     cleaned = (code or "").strip().upper()
     return cleaned or None
 
 
-def is_guest_department(code: Optional[str]) -> bool:
+def is_guest_department(code: str | None) -> bool:
     """是否为“访客专用”部门。"""
     return normalize_department(code) == GUEST_DEPARTMENT_CODE
 
 
-def derive_visibility(department: Optional[str]) -> str:
+def derive_visibility(department: str | None) -> str:
     """由部门派生可见性：访客专用 -> public，其余 -> restricted。"""
     return VISIBILITY_PUBLIC if is_guest_department(department) else VISIBILITY_RESTRICTED

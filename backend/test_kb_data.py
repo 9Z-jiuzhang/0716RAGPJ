@@ -4,30 +4,28 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.database import SessionLocal, engine
+from app.models import Role, User
 from app.models.base import Base
-from app.models import User, Role, Permission
-from app.models.knowledge_base import KnowledgeBase, KBPermission
 from app.models.document import Document, DocumentChunk
 from app.models.index_version import IndexVersion
-from app.models.vectorize_task import VectorizeTask
+from app.models.knowledge_base import KBPermission, KnowledgeBase
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def create_test_kb(db: AsyncSession, admin_user: User):
     """创建测试知识库和文档。"""
-    
+
     kb_types = [
         ("technical_doc", "技术文档"),
         ("product_manual", "产品手册"),
         ("faq", "FAQ"),
         ("general", "通用知识"),
     ]
-    
+
     kbs = []
-    
+
     for kb_type, name in kb_types:
         kb = KnowledgeBase(
             id=uuid.uuid4(),
@@ -46,9 +44,9 @@ async def create_test_kb(db: AsyncSession, admin_user: User):
         )
         db.add(kb)
         kbs.append(kb)
-    
+
     await db.flush()
-    
+
     for kb in kbs:
         iv = IndexVersion(
             kb_id=kb.id,
@@ -64,7 +62,7 @@ async def create_test_kb(db: AsyncSession, admin_user: User):
         )
         db.add(iv)
         kb.current_index_version = iv.version
-        
+
         for i in range(3):
             doc_id = uuid.uuid4()
             doc = Document(
@@ -83,7 +81,7 @@ async def create_test_kb(db: AsyncSession, admin_user: User):
                 normalized_text=f"这是{kb.name}的第{i+1}个测试文档内容。",
             )
             db.add(doc)
-            
+
             for j in range(3):
                 chunk = DocumentChunk(
                     document_id=doc_id,
@@ -94,7 +92,7 @@ async def create_test_kb(db: AsyncSession, admin_user: User):
                     is_enabled=True,
                 )
                 db.add(chunk)
-    
+
     await db.commit()
     print(f"已创建 {len(kbs)} 个测试知识库，每个库包含 3 个测试文档")
     return kbs
@@ -106,10 +104,10 @@ async def setup_permissions(db: AsyncSession, admin_user: User):
     if not roles:
         print("未找到角色，跳过权限设置")
         return
-    
+
     admin_role = roles[0]
     kbs = list((await db.scalars(select(KnowledgeBase))).all())
-    
+
     for kb in kbs:
         db.add(
             KBPermission(
@@ -132,7 +130,7 @@ async def setup_permissions(db: AsyncSession, admin_user: User):
                 permission_code="kb:vectorize",
             )
         )
-    
+
     await db.commit()
     print(f"已为 {len(kbs)} 个知识库设置权限")
 
@@ -140,19 +138,19 @@ async def setup_permissions(db: AsyncSession, admin_user: User):
 async def main():
     """主入口。"""
     print("正在创建测试数据...")
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     async with SessionLocal() as db:
         admin_user = await db.scalar(select(User).where(User.username == "admin"))
         if not admin_user:
             print("未找到 admin 用户，请先运行应用初始化")
             return
-        
+
         await create_test_kb(db, admin_user)
         await setup_permissions(db, admin_user)
-    
+
     print("测试数据创建完成！")
 
 

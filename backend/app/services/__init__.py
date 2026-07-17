@@ -3,8 +3,8 @@
 from app.services.audit import AuditService
 from app.services.embedding import (
     EmbeddingService,
-    embedding_service,
     embed_texts,
+    embedding_service,
     get_embedding_client,
 )
 from app.services.index_switch import IndexSwitchService

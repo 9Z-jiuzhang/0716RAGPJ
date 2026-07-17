@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.api.helpers import ok, resolve_request_id
 from app.core.database import get_db
 from app.core.dependencies import require_permission
@@ -19,6 +16,8 @@ from app.schemas.department import (
     DepartmentUpdate,
 )
 from app.services.department import DepartmentService
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/departments", tags=["部门管理"])
 

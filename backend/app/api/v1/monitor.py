@@ -1,14 +1,13 @@
 """系统监控 API：健康检查、统计概览、指标别名。"""
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.api.helpers import ok, resolve_request_id
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.schemas.common import BaseResponse
 from app.services.monitor import MonitorService
+from fastapi import APIRouter, Depends
+from fastapi.responses import RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/monitor", tags=["系统监控"])
 

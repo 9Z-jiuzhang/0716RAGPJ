@@ -6,7 +6,6 @@ import os
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -36,10 +35,10 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 # 确保配置单例与引擎使用测试环境主机名
 try:
-    from app.core.config import get_settings
     import app.core.config as config_module
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
     import app.core.database as database_module
+    from app.core.config import get_settings
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
     get_settings.cache_clear()
     config_module.settings = get_settings()
@@ -62,10 +61,10 @@ class FakeRedis:
     async def ping(self) -> bool:
         return True
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         return self._store.get(key)
 
-    async def set(self, key: str, value: str, ex: Optional[int] = None) -> bool:  # noqa: ARG002
+    async def set(self, key: str, value: str, ex: int | None = None) -> bool:  # noqa: ARG002
         self._store[key] = value
         return True
 

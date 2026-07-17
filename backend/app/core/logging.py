@@ -7,11 +7,10 @@ import sys
 from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
 
 from app.core.config import settings
 
-request_id_ctx: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
 class RequestIdFilter(logging.Filter):
@@ -67,6 +66,4 @@ def setup_logging() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    logging.getLogger(__name__).info(
-        "logging initialized level=%s dir=%s", settings.LOG_LEVEL, log_dir
-    )
+    logging.getLogger(__name__).info("logging initialized level=%s dir=%s", settings.LOG_LEVEL, log_dir)

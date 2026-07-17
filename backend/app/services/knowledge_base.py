@@ -22,19 +22,19 @@ from app.core.exceptions import (
     VectorizeTaskNotFoundException,
 )
 from app.models import Document, User, VectorizeTask
+from app.models.enums import SnapshotTrigger
 from app.models.knowledge_base import KBPermission, KnowledgeBase
 from app.schemas.common import PageResponse
 from app.schemas.enums import KnowledgeBaseStatus, KnowledgeBaseType, Visibility
 from app.schemas.knowledge_base import (
+    KBPermissionUpdate,
     KnowledgeBaseCreate,
     KnowledgeBaseFilter,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
-    KBPermissionUpdate,
     ReVectorizeRequest,
     VectorizeStatusResponse,
 )
-from app.models.enums import SnapshotTrigger
 from app.services.chunking import merge_rules
 from app.services.document_pipeline import run_resegment_pipeline
 from app.services.index_switch import IndexSwitchService
@@ -53,9 +53,7 @@ class KnowledgeBaseService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_kb(
-        self, data: KnowledgeBaseCreate, creator_id: UUID
-    ) -> KnowledgeBaseResponse:
+    async def create_kb(self, data: KnowledgeBaseCreate, creator_id: UUID) -> KnowledgeBaseResponse:
         """创建知识库。同名且未删除时抛冲突。"""
         existing = await self.db.scalar(
             select(KnowledgeBase).where(
@@ -105,19 +103,9 @@ class KnowledgeBaseService:
         if filter.tag:
             conditions.append(KnowledgeBase.tags.contains([filter.tag]))
 
-        codes = {
-            p.code
-            for role in current_user.roles
-            if role.is_enabled
-            for p in role.permissions
-        }
+        codes = {p.code for role in current_user.roles if role.is_enabled for p in role.permissions}
         role_names = {r.name for r in current_user.roles if r.is_enabled}
-        is_admin = (
-            "super_admin" in role_names
-            or "admin" in role_names
-            or "*" in codes
-            or "admin:*" in codes
-        )
+        is_admin = "super_admin" in role_names or "admin" in role_names or "*" in codes or "admin:*" in codes
         if not is_admin:
             role_ids = [r.id for r in current_user.roles if r.is_enabled]
             subject = [KBPermission.user_id == current_user.id]
@@ -135,12 +123,7 @@ class KnowledgeBaseService:
                 scope_filters.append(KnowledgeBase.department == dept)
             conditions.append(or_(*scope_filters))
 
-        total = (
-            await self.db.scalar(
-                select(func.count()).select_from(KnowledgeBase).where(*conditions)
-            )
-            or 0
-        )
+        total = await self.db.scalar(select(func.count()).select_from(KnowledgeBase).where(*conditions)) or 0
         rows = list(
             (
                 await self.db.scalars(
@@ -160,9 +143,7 @@ class KnowledgeBaseService:
         kb = await self._get_active_kb(kb_id)
         return await self._to_response(kb)
 
-    async def update_kb(
-        self, kb_id: str, data: KnowledgeBaseUpdate, user_id: UUID
-    ) -> KnowledgeBaseResponse:
+    async def update_kb(self, kb_id: str, data: KnowledgeBaseUpdate, user_id: UUID) -> KnowledgeBaseResponse:
         """更新知识库元信息。"""
         kb = await self._get_active_kb(kb_id)
         payload = data.model_dump(exclude_unset=True)
@@ -265,13 +246,7 @@ class KnowledgeBaseService:
             if options.force_all
             else Document.status.in_(("ready", "error", "pending_segment"))
         )
-        docs = list(
-            (
-                await self.db.scalars(
-                    select(Document).where(Document.kb_id == kb.id, status_filter)
-                )
-            ).all()
-        )
+        docs = list((await self.db.scalars(select(Document).where(Document.kb_id == kb.id, status_filter))).all())
 
         # 将分段规则同步到文档（重新向量化时按新规则切分）
         if options.apply_to_documents:
@@ -330,18 +305,13 @@ class KnowledgeBaseService:
         """返回该知识库最近一次向量化任务状态。"""
         kb = await self._get_active_kb(kb_id)
         task = await self.db.scalar(
-            select(VectorizeTask)
-            .where(VectorizeTask.kb_id == kb.id)
-            .order_by(VectorizeTask.created_at.desc())
-            .limit(1)
+            select(VectorizeTask).where(VectorizeTask.kb_id == kb.id).order_by(VectorizeTask.created_at.desc()).limit(1)
         )
         if task is None:
             raise VectorizeTaskNotFoundException()
         return self._task_to_status(task)
 
-    async def update_kb_permissions(
-        self, kb_id: str, data: KBPermissionUpdate, user_id: UUID
-    ) -> None:
+    async def update_kb_permissions(self, kb_id: str, data: KBPermissionUpdate, user_id: UUID) -> None:
         """全量替换知识库级权限授予。"""
         kb = await self._get_active_kb(kb_id)
         # 5.8.1：知识库权限变更前自动快照
@@ -352,13 +322,7 @@ class KnowledgeBaseService:
             user_id,
             name=f"permission:{kb.name}",
         )
-        existing = list(
-            (
-                await self.db.scalars(
-                    select(KBPermission).where(KBPermission.kb_id == kb.id)
-                )
-            ).all()
-        )
+        existing = list((await self.db.scalars(select(KBPermission).where(KBPermission.kb_id == kb.id))).all())
         for row in existing:
             await self.db.delete(row)
         for item in data.permissions:
@@ -401,19 +365,10 @@ class KnowledgeBaseService:
         return kb
 
     async def _to_response(self, kb: KnowledgeBase) -> KnowledgeBaseResponse:
-        doc_count = (
-            await self.db.scalar(
-                select(func.count())
-                .select_from(Document)
-                .where(Document.kb_id == kb.id)
-            )
-            or 0
-        )
+        doc_count = await self.db.scalar(select(func.count()).select_from(Document).where(Document.kb_id == kb.id)) or 0
         chunk_count = (
             await self.db.scalar(
-                select(func.coalesce(func.sum(Document.chunk_count), 0)).where(
-                    Document.kb_id == kb.id
-                )
+                select(func.coalesce(func.sum(Document.chunk_count), 0)).where(Document.kb_id == kb.id)
             )
             or 0
         )
@@ -495,13 +450,7 @@ async def _run_kb_revectorize(
         try:
             # 后台再确认一次：分段规则已落到文档（防提交竞态）
             if apply_to_documents and segment_rules and document_ids:
-                docs = list(
-                    (
-                        await db.scalars(
-                            select(DocModel).where(DocModel.id.in_(document_ids))
-                        )
-                    ).all()
-                )
+                docs = list((await db.scalars(select(DocModel).where(DocModel.id.in_(document_ids)))).all())
                 for doc in docs:
                     doc.segment_rules = merge_rules(doc.segment_rules, segment_rules)
                 await db.commit()
@@ -558,9 +507,7 @@ async def _run_kb_revectorize(
                     if iv:
                         total_chunks = (
                             await db.scalar(
-                                select(
-                                    func.coalesce(func.sum(Document.chunk_count), 0)
-                                ).where(Document.kb_id == kb_id)
+                                select(func.coalesce(func.sum(Document.chunk_count), 0)).where(Document.kb_id == kb_id)
                             )
                             or 0
                         )

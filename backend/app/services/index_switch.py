@@ -1,13 +1,13 @@
-from typing import Any, Optional
-from uuid import UUID, uuid4
 from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import APIException
-from app.models.knowledge_base import KnowledgeBase
 from app.models.index_version import IndexVersion
+from app.models.knowledge_base import KnowledgeBase
 
 
 class IndexSwitchService:
@@ -55,7 +55,7 @@ class IndexSwitchService:
         kb_id: UUID,
         *,
         chunk_count: int = 0,
-        config: Optional[dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
     ) -> str:
         """创建新的 building 状态索引版本，返回版本号（不自动切换）。"""
         kb = await self.db.get(KnowledgeBase, kb_id)
@@ -82,7 +82,7 @@ class IndexSwitchService:
         await self.db.flush()
         return version
 
-    async def get_current_version(self, kb_id: UUID) -> Optional[str]:
+    async def get_current_version(self, kb_id: UUID) -> str | None:
         """获取知识库当前的索引版本。"""
         kb = await self.db.get(KnowledgeBase, kb_id)
         return kb.current_index_version if kb else None

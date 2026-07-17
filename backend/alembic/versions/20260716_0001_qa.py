@@ -12,7 +12,7 @@ Create Date: 2026-07-16
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
@@ -20,9 +20,9 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "20260716_0001_qa"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -40,14 +40,24 @@ def upgrade() -> None:
         op.create_table(
             "qa_sessions",
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-            sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=True),
+            sa.Column(
+                "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+            ),
             sa.Column("guest_id", sa.String(length=64), nullable=True, comment="访客匿名标识，注册用户会话为空"),
             sa.Column("title", sa.String(length=100), nullable=False, server_default="新会话", comment="会话标题"),
             sa.Column("summary", sa.Text(), nullable=True, comment="长期记忆摘要（超窗历史压缩结果）"),
-            sa.Column("status", sa.String(length=20), nullable=False, server_default="active", comment="active/expired/deleted"),
+            sa.Column(
+                "status",
+                sa.String(length=20),
+                nullable=False,
+                server_default="active",
+                comment="active/expired/deleted",
+            ),
             sa.Column("last_active_at", sa.DateTime(timezone=True), nullable=False, comment="最后活跃时间"),
             sa.Column("message_count", sa.Integer(), nullable=False, server_default="0", comment="消息条数"),
-            sa.Column("kb_ids", postgresql.ARRAY(postgresql.UUID(as_uuid=True)), nullable=True, comment="关联知识库 ID"),
+            sa.Column(
+                "kb_ids", postgresql.ARRAY(postgresql.UUID(as_uuid=True)), nullable=True, comment="关联知识库 ID"
+            ),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
             sa.CheckConstraint("user_id IS NOT NULL OR guest_id IS NOT NULL", name="ck_qa_sessions_owner"),
@@ -74,7 +84,9 @@ def upgrade() -> None:
             sa.Column("role", sa.String(length=20), nullable=False, comment="user/assistant/system"),
             sa.Column("content", sa.Text(), nullable=False, comment="消息正文"),
             sa.Column("citations", postgresql.JSON(astext_type=sa.Text()), nullable=True, comment="引用来源片段"),
-            sa.Column("retrieval_meta", postgresql.JSON(astext_type=sa.Text()), nullable=True, comment="检索与生成元数据"),
+            sa.Column(
+                "retrieval_meta", postgresql.JSON(astext_type=sa.Text()), nullable=True, comment="检索与生成元数据"
+            ),
             sa.Column("token_count", sa.Integer(), nullable=True, comment="大致 token 消耗"),
             sa.Column("request_id", sa.String(length=64), nullable=True, comment="请求追踪 ID"),
             sa.Column("strategy", sa.String(length=20), nullable=True, comment="检索策略"),
@@ -94,18 +106,14 @@ def upgrade() -> None:
         columns = {c["name"] for c in inspector.get_columns("document_chunks")}
         if "content_tsv" not in columns:
             # STORED 生成列：content 变更时自动刷新，无需应用层维护
-            op.execute(
-                """
+            op.execute("""
                 ALTER TABLE document_chunks
                 ADD COLUMN content_tsv tsvector
                 GENERATED ALWAYS AS (to_tsvector('simple', coalesce(content, ''))) STORED
-                """
-            )
+                """)
         existing_indexes = {idx["name"] for idx in inspector.get_indexes("document_chunks")}
         if "ix_document_chunks_content_tsv" not in existing_indexes:
-            op.execute(
-                "CREATE INDEX ix_document_chunks_content_tsv ON document_chunks USING GIN (content_tsv)"
-            )
+            op.execute("CREATE INDEX ix_document_chunks_content_tsv ON document_chunks USING GIN (content_tsv)")
         if "ix_document_chunks_content_trgm" not in existing_indexes:
             op.execute(
                 "CREATE INDEX ix_document_chunks_content_trgm ON document_chunks USING GIN (content gin_trgm_ops)"

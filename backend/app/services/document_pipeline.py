@@ -23,9 +23,7 @@ from app.services.snapshot_hooks import take_auto_snapshot
 logger = logging.getLogger(__name__)
 
 
-async def run_upload_pipeline(
-    document_id: uuid.UUID, *, auto_vectorize: bool = True
-) -> None:
+async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = True) -> None:
     """uploaded/parsing -> processing -> pending_segment -> vectorizing -> ready。"""
     async with SessionLocal() as db:
         doc = await doc_repo.get_document_by_id(db, document_id)
@@ -33,9 +31,7 @@ async def run_upload_pipeline(
             logger.error("pipeline: document not found %s", document_id)
             return
         try:
-            with langfuse_span(
-                "document.upload_pipeline", {"document_id": str(document_id)}
-            ):
+            with langfuse_span("document.upload_pipeline", {"document_id": str(document_id)}):
                 await _parse(db, doc)
                 await _process(db, doc)
                 await _segment(db, doc)
@@ -223,9 +219,7 @@ async def _vectorize(
     record_metric("vectorizing", "start")
 
     kb = await doc_repo.get_knowledge_base(db, doc.kb_id)
-    active_version = (
-        (kb.current_index_version or "").strip() if kb is not None else ""
-    )
+    active_version = (kb.current_index_version or "").strip() if kb is not None else ""
 
     if not skip_auto_snapshot:
         snap = await take_auto_snapshot(
@@ -287,11 +281,12 @@ async def run_rollback_rebuild(
     - 已有分段：只向量化（兼容旧快照内嵌 chunks）
     - 否则：重分段 + 向量化（从快照恢复的文本或对象存储）
     """
+    from sqlalchemy import select
+
     from app.models.enums import IndexVersionStatus
     from app.models.index_version import IndexVersion
     from app.models.knowledge_base import KnowledgeBase
     from app.services.snapshot import SnapshotService
-    from sqlalchemy import select
 
     errors: list[str] = []
     before_version: str | None = None
@@ -373,15 +368,14 @@ async def run_rollback_rebuild(
                 request_id=request_id,
             )
             # 用当前文档分段数刷新索引版本统计
-            from app.models import Document
             from sqlalchemy import func as sa_func
+
+            from app.models import Document
 
             total_chunks = int(
                 (
                     await db.scalar(
-                        select(
-                            sa_func.coalesce(sa_func.sum(Document.chunk_count), 0)
-                        ).where(
+                        select(sa_func.coalesce(sa_func.sum(Document.chunk_count), 0)).where(
                             Document.kb_id == kb_id,
                             Document.status != "archived",
                         )

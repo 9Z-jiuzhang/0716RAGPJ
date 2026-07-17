@@ -1,10 +1,14 @@
 """命中率测试服务。"""
 
 import json
+import logging
 import time
 import uuid
 from datetime import datetime
 from typing import Any
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hit_tests import TestCases, TestQuestions, TestResults, TestRuns
 from app.schemas.hit_tests import (
@@ -20,8 +24,8 @@ from app.schemas.hit_tests import (
     TestRunResponse,
     UpdateTestCaseRequest,
 )
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 class HitTestService:
@@ -58,12 +62,7 @@ class HitTestService:
         total = await self.db.scalar(select(func.count(TestCases.id))) or 0
 
         # 查询当前页数据
-        query = (
-            select(TestCases)
-            .order_by(TestCases.created_at.desc())
-            .offset(offset)
-            .limit(page_size)
-        )
+        query = select(TestCases).order_by(TestCases.created_at.desc()).offset(offset).limit(page_size)
         result = await self.db.execute(query)
         cases = result.scalars().all()
 
@@ -95,9 +94,7 @@ class HitTestService:
         # 转换为响应格式
         return await self._convert_case_to_response(case)
 
-    async def create_test_case(
-        self, request: CreateTestCaseRequest
-    ) -> TestCaseResponse:
+    async def create_test_case(self, request: CreateTestCaseRequest) -> TestCaseResponse:
         """
         创建测试用例
 
@@ -167,9 +164,7 @@ class HitTestService:
         # 更新问题列表（如果提供）
         if request.questions is not None:
             # 删除现有问题记录
-            await self.db.execute(
-                TestQuestions.__table__.delete().where(TestQuestions.case_id == case_id)
-            )
+            await self.db.execute(TestQuestions.__table__.delete().where(TestQuestions.case_id == case_id))
 
             # 创建新的问题记录
             for idx, question in enumerate(request.questions):
@@ -233,9 +228,7 @@ class HitTestService:
             if not case:
                 raise ValueError("测试用例不存在")
             query = (
-                select(TestQuestions)
-                .where(TestQuestions.case_id == request.case_id)
-                .order_by(TestQuestions.sort_order)
+                select(TestQuestions).where(TestQuestions.case_id == request.case_id).order_by(TestQuestions.sort_order)
             )
             result = await self.db.execute(query)
             db_questions = result.scalars().all()
@@ -354,12 +347,7 @@ class HitTestService:
         total = await self.db.scalar(select(func.count(TestRuns.id))) or 0
 
         # 查询当前页数据
-        query = (
-            select(TestRuns)
-            .order_by(TestRuns.created_at.desc())
-            .offset(offset)
-            .limit(page_size)
-        )
+        query = select(TestRuns).order_by(TestRuns.created_at.desc()).offset(offset).limit(page_size)
         result = await self.db.execute(query)
         runs = result.scalars().all()
 
@@ -445,9 +433,7 @@ class HitTestService:
             await self.db.commit()
         return int(total)
 
-    async def compare_strategies(
-        self, request: CompareTestRequest
-    ) -> CompareTestResponse:
+    async def compare_strategies(self, request: CompareTestRequest) -> CompareTestResponse:
         """同一用例在多种检索策略下并排对比。"""
         from app.schemas.hit_tests import (
             CompareTestResponse,
@@ -490,13 +476,8 @@ class HitTestService:
                     )
                 )
 
-        side_by_side = [
-            QuestionCompareRow(question=q, by_strategy=items)
-            for q, items in by_question.items()
-        ]
-        return CompareTestResponse(
-            case_id=request.case_id, runs=runs, side_by_side=side_by_side
-        )
+        side_by_side = [QuestionCompareRow(question=q, by_strategy=items) for q, items in by_question.items()]
+        return CompareTestResponse(case_id=request.case_id, runs=runs, side_by_side=side_by_side)
 
     async def _execute_retrieval(
         self,
@@ -542,9 +523,7 @@ class HitTestService:
         if not targets:
             return []
 
-        strategy_key: RetrievalStrategy = (
-            strategy if strategy in ("vector", "fulltext", "hybrid") else "hybrid"
-        )
+        strategy_key: RetrievalStrategy = strategy if strategy in ("vector", "fulltext", "hybrid") else "hybrid"
         result = await hybrid_retriever.retrieve(
             self.db,
             question,
@@ -659,11 +638,7 @@ class HitTestService:
             测试用例响应
         """
         # 查询关联的问题列表
-        query = (
-            select(TestQuestions)
-            .where(TestQuestions.case_id == case.id)
-            .order_by(TestQuestions.sort_order)
-        )
+        query = select(TestQuestions).where(TestQuestions.case_id == case.id).order_by(TestQuestions.sort_order)
         result = await self.db.execute(query)
         db_questions = result.scalars().all()
 
@@ -704,11 +679,7 @@ class HitTestService:
             status=run.status,
             total_questions=run.total_questions,
             hit_count=run.hit_count,
-            hit_rate=(
-                (run.hit_count / run.total_questions)
-                if run.total_questions
-                else None
-            ),
+            hit_rate=((run.hit_count / run.total_questions) if run.total_questions else None),
             recall_at_k=run.recall_at_k,
             mrr=run.mrr,
             avg_elapsed_ms=run.avg_elapsed_ms,

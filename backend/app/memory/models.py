@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -12,8 +12,8 @@ class ContextMessage:
 
     role: str
     content: str
-    message_id: Optional[str] = None
-    citations: Optional[list[dict[str, Any]]] = None
+    message_id: str | None = None
+    citations: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {"role": self.role, "content": self.content}
@@ -24,7 +24,7 @@ class ContextMessage:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ContextMessage":
+    def from_dict(cls, data: dict[str, Any]) -> ContextMessage:
         return cls(
             role=str(data.get("role", "user")),
             content=str(data.get("content", "")),
@@ -38,10 +38,10 @@ class SessionMemory:
     """加载后的会话记忆快照。"""
 
     session_id: str
-    summary: Optional[str] = None
+    summary: str | None = None
     messages: list[ContextMessage] = field(default_factory=list)
-    user_id: Optional[str] = None
-    guest_id: Optional[str] = None
+    user_id: str | None = None
+    guest_id: str | None = None
 
     @property
     def turn_count(self) -> int:
@@ -59,10 +59,7 @@ class SessionMemory:
             out.append(
                 {
                     "role": "system",
-                    "content": (
-                        "以下是本会话较早轮次的压缩摘要，供理解上下文参考：\n"
-                        f"{self.summary.strip()}"
-                    ),
+                    "content": ("以下是本会话较早轮次的压缩摘要，供理解上下文参考：\n" f"{self.summary.strip()}"),
                 }
             )
         for msg in self.messages:

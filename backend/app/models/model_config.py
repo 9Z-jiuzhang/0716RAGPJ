@@ -17,21 +17,13 @@ class ModelConfig(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "model_configs"
 
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="展示名称")
-    model_type: Mapped[str] = mapped_column(
-        String(20), nullable=False, index=True, comment="llm / embedding / rerank"
-    )
+    model_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True, comment="llm / embedding / rerank")
     provider: Mapped[str] = mapped_column(String(50), nullable=False, comment="提供方")
-    model_name: Mapped[str] = mapped_column(
-        String(200), nullable=False, comment="实际模型标识"
-    )
-    base_url: Mapped[str | None] = mapped_column(
-        String(500), nullable=True, comment="API Base URL"
-    )
+    model_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="实际模型标识")
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="API Base URL")
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    priority: Mapped[int] = mapped_column(
-        Integer, default=100, nullable=False, comment="优先级，数值越小越优先"
-    )
+    priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False, comment="优先级，数值越小越优先")
     config: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, comment="temperature/max_tokens 等"
     )

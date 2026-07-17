@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
 from app.retrieval.types import KBTarget, RetrievalHit
 from app.services.chroma_store import chroma_store

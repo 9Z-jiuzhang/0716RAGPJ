@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
-
 from app.schemas.common import PaginationResponse
+from pydantic import BaseModel, Field
 
 
 class CitationSchema(BaseModel):
@@ -25,11 +24,9 @@ class AskRequest(BaseModel):
     """流式问答请求体。"""
 
     question: str = Field(..., min_length=1, max_length=2000, description="用户问题")
-    session_id: Optional[UUID] = Field(default=None, description="不传则创建新会话")
-    kb_ids: Optional[list[UUID]] = Field(default=None, description="限定检索知识库")
-    strategy: Literal["vector", "fulltext", "hybrid"] = Field(
-        default="hybrid", description="检索策略"
-    )
+    session_id: UUID | None = Field(default=None, description="不传则创建新会话")
+    kb_ids: list[UUID] | None = Field(default=None, description="限定检索知识库")
+    strategy: Literal["vector", "fulltext", "hybrid"] = Field(default="hybrid", description="检索策略")
     top_k: int = Field(default=5, ge=1, le=20, description="返回片段数量")
     temperature: float = Field(default=0.7, ge=0, le=2, description="生成温度")
 
@@ -59,14 +56,14 @@ class MessageSchema(BaseModel):
     id: UUID
     role: Literal["user", "assistant", "system"]
     content: str
-    citations: Optional[list[CitationSchema]] = None
-    token_count: Optional[int] = None
+    citations: list[CitationSchema] | None = None
+    token_count: int | None = None
     created_at: datetime
     # 扩展字段：检索元数据与追踪（契约外可选返回）
-    retrieval_meta: Optional[dict[str, Any]] = None
-    request_id: Optional[str] = None
-    strategy: Optional[str] = None
-    latency_ms: Optional[int] = None
+    retrieval_meta: dict[str, Any] | None = None
+    request_id: str | None = None
+    strategy: str | None = None
+    latency_ms: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -84,4 +81,4 @@ class FeedbackRequest(BaseModel):
 
     message_id: UUID = Field(description="被评价的助手消息 ID")
     rating: Literal["useful", "useless"] = Field(description="有用/无用")
-    comment: Optional[str] = Field(default=None, max_length=500, description="可选评论")
+    comment: str | None = Field(default=None, max_length=500, description="可选评论")

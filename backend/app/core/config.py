@@ -123,7 +123,7 @@ class Settings(BaseSettings):
         )
 
     @property
-    def DATABASE_URL(self) -> str:
+    def DATABASE_URL(self) -> str:  # noqa: N802
         """兼容旧代码的数据库连接地址。"""
         return self.database_url
 

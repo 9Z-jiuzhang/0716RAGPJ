@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.core.config import settings
 
@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - 本地未安装 chromadb（如 Windows
     ClientAPI = Any  # type: ignore[misc, assignment]
 
 # 全局 Chroma HTTP 客户端单例
-_chroma_client: Optional[Any] = None
+_chroma_client: Any | None = None
 
 
 def init_chroma() -> Any:
@@ -51,9 +51,7 @@ def close_chroma() -> None:
 def get_chroma_client() -> Any:
     """获取已初始化的 Chroma 客户端，供检索模块使用。"""
     if _chroma_client is None:
-        raise RuntimeError(
-            "Chroma 尚未初始化，请确认应用 lifespan 已调用 init_chroma()"
-        )
+        raise RuntimeError("Chroma 尚未初始化，请确认应用 lifespan 已调用 init_chroma()")
     return _chroma_client
 
 

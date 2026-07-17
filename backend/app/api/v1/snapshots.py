@@ -41,9 +41,7 @@ router = APIRouter(
 )
 
 
-def _request_id(
-    x_request_id: str | None = Header(default=None, alias="X-Request-Id")
-) -> str:
+def _request_id(x_request_id: str | None = Header(default=None, alias="X-Request-Id")) -> str:
     return x_request_id or str(uuid4())
 
 
@@ -70,9 +68,7 @@ async def list_snapshots(
     request_id: str = Depends(_request_id),
 ) -> BaseResponse:
     """获取快照列表。"""
-    data: SnapshotListResponse = await SnapshotService(db).list_snapshots(
-        kb_id, page, page_size
-    )
+    data: SnapshotListResponse = await SnapshotService(db).list_snapshots(kb_id, page, page_size)
     await db.commit()  # 可能回填了遗留计数
     return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
 
@@ -148,9 +144,7 @@ async def get_snapshot(
     request_id: str = Depends(_request_id),
 ) -> BaseResponse:
     """获取快照详情。"""
-    data: SnapshotDetailResponse = await SnapshotService(db).get_detail(
-        kb_id, snapshot_id
-    )
+    data: SnapshotDetailResponse = await SnapshotService(db).get_detail(kb_id, snapshot_id)
     return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
 
 
@@ -167,9 +161,7 @@ async def preview_rollback(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_kb_access("snapshot:read")),
     request_id: str = Depends(_request_id),
-    document_ids: list[UUID] | None = Query(
-        default=None, description="可选：仅预览指定文档的选择性恢复差异"
-    ),
+    document_ids: list[UUID] | None = Query(default=None, description="可选：仅预览指定文档的选择性恢复差异"),
 ) -> BaseResponse:
     """差异预览。"""
     data: RollbackPreviewResponse = await SnapshotService(db).preview_rollback(

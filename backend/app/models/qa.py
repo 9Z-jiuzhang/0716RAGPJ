@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import (
     CheckConstraint,
@@ -44,7 +44,7 @@ class QASession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     # 注册用户 ID；访客会话时为空
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
@@ -52,7 +52,7 @@ class QASession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="注册用户 ID，访客会话为空",
     )
     # 访客匿名临时标识（前端生成或服务端下发）
-    guest_id: Mapped[Optional[str]] = mapped_column(
+    guest_id: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
         index=True,
@@ -65,7 +65,7 @@ class QASession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="会话标题，可由首问自动生成或用户重命名",
     )
     # 超过上下文窗口后由摘要模块压缩写入，随请求注入 LLM 提示
-    summary: Mapped[Optional[str]] = mapped_column(
+    summary: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
         comment="长期记忆摘要（超窗历史压缩结果）",
@@ -92,13 +92,13 @@ class QASession(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="消息条数（含 user/assistant）",
     )
     # 该会话曾限定检索的知识库 ID 列表，便于列表页展示 kb_names
-    kb_ids: Mapped[Optional[list[uuid.UUID]]] = mapped_column(
+    kb_ids: Mapped[list[uuid.UUID] | None] = mapped_column(
         ARRAY(UUID(as_uuid=True)),
         nullable=True,
         comment="会话关联的知识库 ID 列表",
     )
 
-    messages: Mapped[list["QAMessage"]] = relationship(
+    messages: Mapped[list[QAMessage]] = relationship(
         "QAMessage",
         back_populates="session",
         cascade="all, delete-orphan",
@@ -135,37 +135,37 @@ class QAMessage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="消息正文",
     )
     # 引用列表结构对齐 CitationResponse：doc_id/doc_name/chunk_index/content/score
-    citations: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(
+    citations: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSON,
         nullable=True,
         comment="回答引用来源片段列表",
     )
     # 检索策略、命中数、各阶段耗时、改写后的查询等可观测字段
-    retrieval_meta: Mapped[Optional[dict[str, Any]]] = mapped_column(
+    retrieval_meta: Mapped[dict[str, Any] | None] = mapped_column(
         JSON,
         nullable=True,
         comment="检索与生成元数据（strategy/scores/latency 等）",
     )
-    token_count: Mapped[Optional[int]] = mapped_column(
+    token_count: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
         comment="大致 token 消耗（可选）",
     )
-    request_id: Mapped[Optional[str]] = mapped_column(
+    request_id: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
         index=True,
         comment="请求追踪 ID，与日志/SSE done 事件对齐",
     )
-    strategy: Mapped[Optional[str]] = mapped_column(
+    strategy: Mapped[str | None] = mapped_column(
         String(20),
         nullable=True,
         comment="本轮实际使用的检索策略: vector/fulltext/hybrid",
     )
-    latency_ms: Mapped[Optional[int]] = mapped_column(
+    latency_ms: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
         comment="本轮端到端耗时（毫秒）",
     )
 
-    session: Mapped["QASession"] = relationship("QASession", back_populates="messages")
+    session: Mapped[QASession] = relationship("QASession", back_populates="messages")

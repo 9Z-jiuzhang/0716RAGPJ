@@ -1,7 +1,7 @@
 """FastAPI 应用入口：生命周期、种子数据、可观测性与模块路由挂载。"""
 
-from contextlib import asynccontextmanager
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,27 +59,15 @@ async def seed_identity_data() -> None:
 
         all_perms = await _all_permissions(db)
         perm_by_code = {p.code: p for p in all_perms}
-        roles = {
-            r.name: r
-            for r in (
-                await db.scalars(select(Role).options(selectinload(Role.permissions)))
-            ).all()
-        }
+        roles = {r.name: r for r in (await db.scalars(select(Role).options(selectinload(Role.permissions)))).all()}
 
         for role_name, (description, codes) in BUILTIN_ROLES.items():
             if role_name not in roles:
-                roles[role_name] = Role(
-                    name=role_name, description=description, is_builtin=True
-                )
+                roles[role_name] = Role(name=role_name, description=description, is_builtin=True)
                 db.add(roles[role_name])
         await db.flush()
 
-        roles = {
-            r.name: r
-            for r in (
-                await db.scalars(select(Role).options(selectinload(Role.permissions)))
-            ).all()
-        }
+        roles = {r.name: r for r in (await db.scalars(select(Role).options(selectinload(Role.permissions)))).all()}
 
         # 内置角色权限与描述对齐种子（区分超管/管理员）
         for role_name, (description, codes) in BUILTIN_ROLES.items():
@@ -115,11 +103,7 @@ async def seed_identity_data() -> None:
             )
         else:
             # 若旧库 admin 误绑超管能力：保持用户名 admin，角色纠正为 admin（不强制覆盖已有多角色）
-            admin_user = await db.scalar(
-                select(User)
-                .options(selectinload(User.roles))
-                .where(User.username == "admin")
-            )
+            admin_user = await db.scalar(select(User).options(selectinload(User.roles)).where(User.username == "admin"))
             if admin_user and not any(r.name == "admin" for r in admin_user.roles):
                 if "admin" in roles:
                     admin_user.roles = [roles["admin"]]
@@ -130,11 +114,7 @@ async def seed_identity_data() -> None:
                 ("staff_a", "staff_a@example.com", "A部门员工", "A"),
                 ("staff_b", "staff_b@example.com", "B部门员工", "B"),
             ):
-                existing = await db.scalar(
-                    select(User)
-                    .options(selectinload(User.roles))
-                    .where(User.username == uname)
-                )
+                existing = await db.scalar(select(User).options(selectinload(User.roles)).where(User.username == uname))
                 if not existing:
                     db.add(
                         User(
@@ -152,25 +132,15 @@ async def seed_identity_data() -> None:
                         existing.roles = [roles["staff"]]
 
         # 废弃旧「user」角色：迁移到 guest 后删除（与访客功能重复）
-        legacy_user_role = await db.scalar(
-            select(Role).where(Role.name == "user")
-        )
+        legacy_user_role = await db.scalar(select(Role).where(Role.name == "user"))
         if legacy_user_role and "guest" in roles:
             from .models.identity import user_roles
 
             bound_user_ids = (
-                await db.scalars(
-                    select(user_roles.c.user_id).where(
-                        user_roles.c.role_id == legacy_user_role.id
-                    )
-                )
+                await db.scalars(select(user_roles.c.user_id).where(user_roles.c.role_id == legacy_user_role.id))
             ).all()
             for uid in bound_user_ids:
-                u = await db.scalar(
-                    select(User)
-                    .options(selectinload(User.roles))
-                    .where(User.id == uid)
-                )
+                u = await db.scalar(select(User).options(selectinload(User.roles)).where(User.id == uid))
                 if not u:
                     continue
                 remaining = [r for r in u.roles if r.name != "user"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from app.core.config import settings
@@ -13,7 +13,7 @@ from app.core.metrics import llm_calls_total, llm_tokens_total
 logger = logging.getLogger(__name__)
 
 
-def redact_text(text: Optional[str], max_len: Optional[int] = None) -> str:
+def redact_text(text: str | None, max_len: int | None = None) -> str:
     """截断敏感原文，避免完整用户内容进入追踪。"""
     if not text:
         return ""
@@ -56,9 +56,7 @@ class LangfuseService:
 
     def __init__(self) -> None:
         self._client = None
-        self.enabled = bool(
-            settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY
-        )
+        self.enabled = bool(settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY)
         if self.enabled:
             try:
                 from langfuse import Langfuse
@@ -80,10 +78,10 @@ class LangfuseService:
         self,
         *,
         name: str,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
-        input_text: Optional[str] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        input_text: str | None = None,
     ) -> Any:
         if not self.enabled or self._client is None:
             return _NoOpTrace()
@@ -101,9 +99,9 @@ class LangfuseService:
         *,
         model: str,
         input_text: str,
-        latency_ms: Optional[float] = None,
-        token_count: Optional[int] = None,
-        error: Optional[str] = None,
+        latency_ms: float | None = None,
+        token_count: int | None = None,
+        error: str | None = None,
     ) -> Any:
         status = "error" if error else "ok"
         llm_calls_total.labels(component="embedding", status=status).inc()
@@ -127,10 +125,10 @@ class LangfuseService:
         trace: Any,
         *,
         query: str,
-        context_summary: Optional[str] = None,
+        context_summary: str | None = None,
         hit_count: int = 0,
-        latency_ms: Optional[float] = None,
-        error: Optional[str] = None,
+        latency_ms: float | None = None,
+        error: str | None = None,
     ) -> Any:
         status = "error" if error else "ok"
         llm_calls_total.labels(component="retrieval", status=status).inc()
@@ -158,12 +156,12 @@ class LangfuseService:
         *,
         model: str,
         prompt: str,
-        prompt_version: Optional[str] = None,
-        completion: Optional[str] = None,
-        input_tokens: Optional[int] = None,
-        output_tokens: Optional[int] = None,
-        latency_ms: Optional[float] = None,
-        error: Optional[str] = None,
+        prompt_version: str | None = None,
+        completion: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        latency_ms: float | None = None,
+        error: str | None = None,
     ) -> Any:
         status = "error" if error else "ok"
         llm_calls_total.labels(component="generation", status=status).inc()
@@ -200,7 +198,7 @@ class LangfuseService:
         *,
         name: str = "user_feedback",
         value: float,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ) -> None:
         if not self.enabled:
             return
@@ -220,7 +218,7 @@ class LangfuseService:
             except Exception:
                 logger.exception("langfuse flush failed")
 
-    async def health_probe(self) -> tuple[str, Optional[float]]:
+    async def health_probe(self) -> tuple[str, float | None]:
         """探测 Langfuse host 可达性。密钥缺失返回 degraded。"""
         import httpx
 
@@ -238,9 +236,7 @@ class LangfuseService:
         try:
             t0 = time.perf_counter()
             async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(
-                    settings.LANGFUSE_HOST.rstrip("/") + "/api/public/health"
-                )
+                resp = await client.get(settings.LANGFUSE_HOST.rstrip("/") + "/api/public/health")
                 latency = round((time.perf_counter() - t0) * 1000, 2)
                 if resp.status_code < 500:
                     return "healthy", latency
@@ -249,7 +245,7 @@ class LangfuseService:
             return "unhealthy", None
 
 
-_langfuse: Optional[LangfuseService] = None
+_langfuse: LangfuseService | None = None
 
 
 def get_langfuse() -> LangfuseService:

@@ -15,18 +15,14 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute("ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL")
-    op.execute(
-        """
+    op.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS uq_kb_name_active
         ON knowledge_bases (name)
         WHERE deleted_at IS NULL
-        """
-    )
+        """)
     op.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS raw_text TEXT NULL")
     op.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS normalized_text TEXT NULL")
-    op.execute(
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS segment_rules JSONB NOT NULL DEFAULT '{}'::jsonb"
-    )
+    op.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS segment_rules JSONB NOT NULL DEFAULT '{}'::jsonb")
     op.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS index_version VARCHAR(64) NULL")
     op.execute("ALTER TABLE index_versions ADD COLUMN IF NOT EXISTS is_current BOOLEAN NOT NULL DEFAULT FALSE")
 

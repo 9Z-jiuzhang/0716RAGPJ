@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from typing import Sequence
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import Float, cast, func, literal_column, or_, select
@@ -243,9 +243,7 @@ class FulltextRetriever:
         parts = [p for p in re.split(r"\s+", (query or "").strip()) if p]
         refined: list[str] = []
         for p in parts:
-            refined.extend(
-                t for t in re.split(r"[，。；、,\.\!\?？！；：:\(\)（）\[\]【】]+", p) if t
-            )
+            refined.extend(t for t in re.split(r"[，。；、,\.\!\?？！；：:\(\)（）\[\]【】]+", p) if t)
 
         question_tails = (
             "是什么情况",
