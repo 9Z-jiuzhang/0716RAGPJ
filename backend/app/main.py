@@ -1,5 +1,6 @@
 """FastAPI 应用入口：生命周期、种子数据、可观测性与模块路由挂载。"""
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -156,7 +157,9 @@ async def lifespan(_: FastAPI):
     await embedding_service.aclose()
     await close_redis()
     close_chroma()
-    await engine.dispose()
+    # pytest 函数级 event loop 下 dispose 全局 engine 会导致后续用例 Event loop is closed
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        await engine.dispose()
 
 
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=lifespan)
