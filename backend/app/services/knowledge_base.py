@@ -10,7 +10,13 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import (
+    GUEST_DEPARTMENT_CODE,
+    derive_visibility,
+    normalize_department,
+)
 from app.core.exceptions import (
+    ConflictException,
     KnowledgeBaseAlreadyExistsException,
     KnowledgeBaseNotFoundException,
     VectorizeTaskNotFoundException,
@@ -25,9 +31,11 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
     KBPermissionUpdate,
+    ReVectorizeRequest,
     VectorizeStatusResponse,
 )
 from app.models.enums import SnapshotTrigger
+from app.services.chunking import merge_rules
 from app.services.document_pipeline import run_resegment_pipeline
 from app.services.index_switch import IndexSwitchService
 from app.services.snapshot_hooks import take_auto_snapshot
@@ -58,12 +66,15 @@ class KnowledgeBaseService:
         if existing is not None:
             raise KnowledgeBaseAlreadyExistsException(data.name)
 
+        # 部门驱动：可见性由部门派生（访客专用 -> public，其余 -> restricted）
+        department = normalize_department(data.department)
         kb = KnowledgeBase(
             name=data.name,
             type=_enum_str(data.type),
             tags=list(data.tags or []),
             description=data.description,
-            visibility=_enum_str(data.visibility),
+            visibility=derive_visibility(department),
+            department=department,
             embedding_model=data.embedding_model,
             chunk_size=data.chunk_size,
             chunk_overlap=data.chunk_overlap,
@@ -100,19 +111,29 @@ class KnowledgeBaseService:
             if role.is_enabled
             for p in role.permissions
         }
-        if "*" not in codes and "admin:*" not in codes:
+        role_names = {r.name for r in current_user.roles if r.is_enabled}
+        is_admin = (
+            "super_admin" in role_names
+            or "admin" in role_names
+            or "*" in codes
+            or "admin:*" in codes
+        )
+        if not is_admin:
             role_ids = [r.id for r in current_user.roles if r.is_enabled]
             subject = [KBPermission.user_id == current_user.id]
             if role_ids:
                 subject.append(KBPermission.role_id.in_(role_ids))
             granted = select(KBPermission.kb_id).where(or_(*subject)).distinct()
-            conditions.append(
-                or_(
-                    KnowledgeBase.visibility == Visibility.PUBLIC.value,
-                    KnowledgeBase.creator_id == current_user.id,
-                    KnowledgeBase.id.in_(granted),
-                )
-            )
+            dept = normalize_department(getattr(current_user, "department", None))
+            # 部门驱动：访客专用库 ∪ 本部门库 ∪ 本人创建 ∪ 显式授权
+            scope_filters = [
+                KnowledgeBase.department == GUEST_DEPARTMENT_CODE,
+                KnowledgeBase.creator_id == current_user.id,
+                KnowledgeBase.id.in_(granted),
+            ]
+            if dept:
+                scope_filters.append(KnowledgeBase.department == dept)
+            conditions.append(or_(*scope_filters))
 
         total = (
             await self.db.scalar(
@@ -156,12 +177,20 @@ class KnowledgeBaseService:
             if clash is not None:
                 raise KnowledgeBaseAlreadyExistsException(payload["name"])
         for field, value in payload.items():
+            if field == "department":
+                kb.department = normalize_department(value)
+                continue
+            if field == "visibility":
+                # 可见性由部门派生，忽略前端直接传入的值（保持单一事实来源）
+                continue
             if value is None:
                 continue
-            if field in ("type", "visibility"):
+            if field == "type":
                 setattr(kb, field, _enum_str(value))
             else:
                 setattr(kb, field, value)
+        # 统一由部门派生可见性
+        kb.visibility = derive_visibility(kb.department)
         await self.db.commit()
         await self.db.refresh(kb)
         return await self._to_response(kb)
@@ -177,15 +206,52 @@ class KnowledgeBaseService:
         await self.db.commit()
 
     async def re_vectorize_kb(
-        self, kb_id: str, user_id: UUID
+        self,
+        kb_id: str,
+        user_id: UUID,
+        options: ReVectorizeRequest | None = None,
     ) -> VectorizeStatusResponse:
         """
-        创建重新向量化任务，并在后台对 ready 文档逐个重分段/向量化。
+        创建重新向量化任务：可选更新分段规则后，对文档逐个重分段/向量化。
 
         成功后写入新索引版本并原子切换；失败时保留旧版本。
         """
+        options = options or ReVectorizeRequest()
         kb = await self._get_active_kb(kb_id)
-        # 5.8.1：批量重新向量化前自动快照（整库级一次，避免仅依赖逐文档钩子）
+
+        # 禁止并发重建
+        active = await self.db.scalar(
+            select(VectorizeTask)
+            .where(
+                VectorizeTask.kb_id == kb.id,
+                VectorizeTask.status.in_(("pending", "running", "queued")),
+            )
+            .order_by(VectorizeTask.created_at.desc())
+            .limit(1)
+        )
+        if active is not None:
+            raise ConflictException("该知识库已有进行中的向量化任务，请稍后再试")
+
+        # 可选：更新知识库默认分段 / 嵌入模型
+        rules_patch: dict = {}
+        if options.chunk_size is not None:
+            kb.chunk_size = options.chunk_size
+            rules_patch["chunk_size"] = options.chunk_size
+        else:
+            rules_patch["chunk_size"] = kb.chunk_size
+        if options.chunk_overlap is not None:
+            kb.chunk_overlap = options.chunk_overlap
+            rules_patch["chunk_overlap"] = options.chunk_overlap
+        else:
+            rules_patch["chunk_overlap"] = kb.chunk_overlap
+        if options.split_mode:
+            rules_patch["split_mode"] = options.split_mode.strip().lower()
+        if options.separators is not None:
+            rules_patch["separators"] = [s for s in options.separators if s is not None]
+        if options.embedding_model:
+            kb.embedding_model = options.embedding_model.strip()
+
+        # 5.8.1：批量重新向量化前自动快照
         await take_auto_snapshot(
             self.db,
             kb.id,
@@ -193,25 +259,39 @@ class KnowledgeBaseService:
             user_id,
             name=f"kb_revectorize:{kb.name}",
         )
+
+        status_filter = (
+            Document.status != "deleted"
+            if options.force_all
+            else Document.status.in_(("ready", "error", "pending_segment"))
+        )
         docs = list(
             (
                 await self.db.scalars(
-                    select(Document).where(
-                        Document.kb_id == kb.id,
-                        Document.status.in_(("ready", "error", "pending_segment")),
-                    )
+                    select(Document).where(Document.kb_id == kb.id, status_filter)
                 )
             ).all()
         )
+
+        # 将分段规则同步到文档（重新向量化时按新规则切分）
+        if options.apply_to_documents:
+            for doc in docs:
+                doc.segment_rules = merge_rules(doc.segment_rules, rules_patch)
+
+        await self.db.flush()
+
         index_svc = IndexSwitchService(self.db)
         target_version = await index_svc.create_index_version(
             kb.id,
-            chunk_count=sum(d.chunk_count for d in docs),
+            chunk_count=sum(d.chunk_count or 0 for d in docs),
             config={
                 "embedding_model": kb.embedding_model,
                 "chunk_size": kb.chunk_size,
                 "chunk_overlap": kb.chunk_overlap,
+                "split_mode": rules_patch.get("split_mode"),
+                "separators": rules_patch.get("separators"),
                 "trigger": "re_vectorize",
+                "apply_to_documents": options.apply_to_documents,
             },
         )
         from app.services.task_queue import TaskQueueService
@@ -225,9 +305,9 @@ class KnowledgeBaseService:
                 "target_version": target_version,
                 "document_ids": [str(d.id) for d in docs],
                 "user_id": str(user_id),
+                "segment_rules": rules_patch,
             },
         )
-        # enqueue_task 已 commit；刷新 kb 状态
         kb = await self._get_active_kb(str(kb.id))
         kb.status = KnowledgeBaseStatus.VECTORIZING.value
         await self.db.commit()
@@ -240,6 +320,8 @@ class KnowledgeBaseService:
                 target_version=target_version,
                 document_ids=[d.id for d in docs],
                 user_id=user_id,
+                segment_rules=rules_patch,
+                apply_to_documents=options.apply_to_documents,
             )
         )
         return self._task_to_status(task)
@@ -357,6 +439,7 @@ class KnowledgeBaseService:
             tags=list(kb.tags or []),
             description=kb.description,
             visibility=visibility,
+            department=getattr(kb, "department", None),
             embedding_model=kb.embedding_model,
             chunk_size=kb.chunk_size,
             chunk_overlap=kb.chunk_overlap,
@@ -381,6 +464,7 @@ class KnowledgeBaseService:
             error_message=task.error_message,
             started_at=task.started_at,
             completed_at=task.completed_at,
+            target_version=task.target_version,
         )
 
 
@@ -391,9 +475,12 @@ async def _run_kb_revectorize(
     target_version: str,
     document_ids: list[UUID],
     user_id: UUID,
+    segment_rules: dict | None = None,
+    apply_to_documents: bool = True,
 ) -> None:
     """后台执行知识库级重新向量化并切换索引版本。"""
     from app.core.database import SessionLocal
+    from app.models.document import Document as DocModel
 
     async with SessionLocal() as db:
         task = await db.get(VectorizeTask, task_id)
@@ -406,6 +493,19 @@ async def _run_kb_revectorize(
         processed = 0
         errors: list[str] = []
         try:
+            # 后台再确认一次：分段规则已落到文档（防提交竞态）
+            if apply_to_documents and segment_rules and document_ids:
+                docs = list(
+                    (
+                        await db.scalars(
+                            select(DocModel).where(DocModel.id.in_(document_ids))
+                        )
+                    ).all()
+                )
+                for doc in docs:
+                    doc.segment_rules = merge_rules(doc.segment_rules, segment_rules)
+                await db.commit()
+
             for doc_id in document_ids:
                 try:
                     await run_resegment_pipeline(
@@ -429,7 +529,17 @@ async def _run_kb_revectorize(
             if kb is None or task is None:
                 return
 
-            if errors and processed == 0:
+            if not document_ids:
+                # 无文档时仍切换空索引版本，避免库卡在 vectorizing
+                try:
+                    switcher = IndexSwitchService(db)
+                    await switcher.switch_index_version(kb_id, target_version)
+                    task.status = "completed"
+                except Exception as exc:  # noqa: BLE001
+                    task.status = "failed"
+                    task.error_message = str(exc)[:2000]
+                kb.status = KnowledgeBaseStatus.ACTIVE.value
+            elif errors and processed == 0:
                 task.status = "failed"
                 task.error_message = "; ".join(errors)[:2000]
                 kb.status = KnowledgeBaseStatus.ACTIVE.value
@@ -437,7 +547,6 @@ async def _run_kb_revectorize(
                 # 原子切换到新版本；失败则保留旧 current_index_version
                 try:
                     switcher = IndexSwitchService(db)
-                    # create_index_version 已写入 building 记录；切换前标记 chunk 数
                     from app.models.index_version import IndexVersion
 
                     iv = await db.scalar(
@@ -458,7 +567,7 @@ async def _run_kb_revectorize(
                         iv.chunk_count = int(total_chunks)
                         iv.status = "active"
                     await switcher.switch_index_version(kb_id, target_version)
-                    task.status = "completed" if not errors else "completed"
+                    task.status = "completed"
                     if errors:
                         task.error_message = f"部分失败: {'; '.join(errors)[:1800]}"
                 except Exception as exc:  # noqa: BLE001

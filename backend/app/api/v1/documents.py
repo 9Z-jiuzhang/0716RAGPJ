@@ -103,6 +103,23 @@ async def get_document(
     return ok(document_service.to_document_response(doc).model_dump())
 
 
+@router.get("/{doc_id}/content")
+async def get_document_content(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("doc:read")),
+):
+    """文档正文预览（解析原文 / 清洗正文）。【前端：文档管理-预览】"""
+    try:
+        data = await document_service.get_document_content_preview(
+            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id")
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(data.model_dump())
+
+
 @router.delete("/{doc_id}")
 async def delete_document(
     kb_id: str,

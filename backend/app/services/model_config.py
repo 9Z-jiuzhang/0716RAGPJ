@@ -38,7 +38,9 @@ class ModelConfigService:
             )
             or 0
         )
-        stmt = select(ModelConfig).order_by(ModelConfig.model_type, ModelConfig.name)
+        stmt = select(ModelConfig).order_by(
+            ModelConfig.model_type, ModelConfig.priority.asc(), ModelConfig.name
+        )
         if conditions:
             stmt = stmt.where(*conditions)
         rows = list(
@@ -65,6 +67,7 @@ class ModelConfigService:
             config=data.config or {},
             timeout_seconds=data.timeout_seconds,
             api_key_env=data.api_key_env,
+            priority=getattr(data, "priority", 100) or 100,
             is_default=False,
             is_enabled=data.is_enabled,
         )
@@ -140,6 +143,7 @@ class ModelConfigService:
             base_url=row.base_url,
             is_default=row.is_default,
             is_enabled=row.is_enabled,
+            priority=getattr(row, "priority", 100) or 100,
             config=row.config or {},
             timeout_seconds=row.timeout_seconds,
             api_key_env=env_name,

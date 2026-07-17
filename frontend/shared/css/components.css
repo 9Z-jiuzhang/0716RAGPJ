@@ -83,6 +83,66 @@
   font-size: 12px;
 }
 
+/* 命中率测试：用例选用（单选样式，避免主色实心按钮挤在表格里） */
+.ht-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .ht-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ht-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.ht-pick input {
+  margin: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.ht-pick.is-on {
+  border-color: var(--color-primary);
+  background: #E8F0FE;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.ht-case-row.is-selected td {
+  background: rgba(26, 115, 232, 0.08);
+}
+
+.ht-runs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ht-runs-toolbar .card-title {
+  margin: 0;
+  flex: 1;
+}
+
 /* ---------- 卡片 ---------- */
 .card {
   background: var(--color-surface);
@@ -209,7 +269,8 @@ textarea.form-control {
 }
 
 /* ---------- 弹窗 ---------- */
-.modal-mask {
+.modal-mask,
+.modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(32, 33, 36, 0.45);
@@ -227,19 +288,64 @@ textarea.form-control {
   box-shadow: var(--shadow-modal);
   padding: 20px 22px;
   animation: rise-in 150ms ease;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.modal-body {
+  margin-bottom: 12px;
+}
+
+.modal-footer,
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 12px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg-tint, #f8f9fa);
+}
+
+.checkbox-grid label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.checkbox-grid small {
+  color: var(--color-text-secondary);
+  font-size: 11px;
 }
 
 .modal-title {
   margin: 0 0 12px;
   font-size: 17px;
   font-weight: 600;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
 }
 
 @keyframes fade-in {
@@ -315,15 +421,4 @@ textarea.form-control {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 12px;
-}
-
-/* ---------- 演示模式横幅：信息条，非错误红 ---------- */
-.demo-banner {
-  background: #E8F0FE;
-  color: var(--color-primary-dark);
-  padding: 8px 16px;
-  text-align: center;
-  border-bottom: 1px solid #C5D8F5;
-  font-size: 13px;
-  line-height: 1.4;
 }

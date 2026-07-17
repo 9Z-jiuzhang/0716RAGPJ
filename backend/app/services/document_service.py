@@ -22,6 +22,7 @@ from app.repositories import document as doc_repo
 from app.schemas.document import (
     ChunkListResponse,
     DocumentChunkResponse,
+    DocumentContentPreviewResponse,
     DocumentListItem,
     DocumentListResponse,
     DocumentResponse,
@@ -350,6 +351,54 @@ async def get_document_detail(
     if not doc:
         raise DocumentNotFoundError(str(doc_id))
     return doc
+
+
+_PREVIEW_MAX_CHARS = 80_000
+
+
+async def get_document_content_preview(
+    db: AsyncSession,
+    kb_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    *,
+    max_chars: int = _PREVIEW_MAX_CHARS,
+) -> DocumentContentPreviewResponse:
+    """返回文档解析/清洗正文，供管理端预览（过长截断）。"""
+    doc = await get_document_detail(db, kb_id, doc_id)
+    raw = doc.raw_text or ""
+    normalized = doc.normalized_text or ""
+    truncated = False
+    if len(raw) > max_chars:
+        raw = raw[:max_chars]
+        truncated = True
+    if len(normalized) > max_chars:
+        normalized = normalized[:max_chars]
+        truncated = True
+
+    if normalized.strip():
+        source = "normalized_text"
+    elif raw.strip():
+        source = "raw_text"
+    else:
+        source = "empty"
+
+    return DocumentContentPreviewResponse(
+        id=str(doc.id),
+        kb_id=str(doc.kb_id),
+        filename=doc.filename,
+        file_type=doc.file_type,
+        status=doc.status,
+        chunk_count=doc.chunk_count or 0,
+        error_message=doc.error_message,
+        raw_text=raw,
+        normalized_text=normalized,
+        raw_char_count=len(doc.raw_text or ""),
+        normalized_char_count=len(doc.normalized_text or ""),
+        truncated=truncated,
+        max_preview_chars=max_chars,
+        preview_source=source,
+        segment_rules=dict(doc.segment_rules or {}),
+    )
 
 
 async def delete_document(

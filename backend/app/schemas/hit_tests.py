@@ -82,9 +82,13 @@ class TestRunResponse(BaseModel):
     status: Literal["running", "completed", "failed"] = Field(description="状态")
     total_questions: int = Field(description="总问题数")
     hit_count: int = Field(description="命中数")
+    hit_rate: float | None = Field(
+        None, description="命中率 = hit_count / total_questions"
+    )
     recall_at_k: float | None = Field(None, description="Recall@K")
     mrr: float | None = Field(None, description="Mean Reciprocal Rank")
     avg_elapsed_ms: float | None = Field(None, description="平均耗时（毫秒）")
+    created_at: datetime | None = Field(None, description="创建时间")
     completed_at: datetime | None = Field(None, description="完成时间")
 
 

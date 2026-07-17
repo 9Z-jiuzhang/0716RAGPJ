@@ -1,9 +1,11 @@
-"""知识库检索范围解析：访客仅公开库，登录用户取公开库 ∪ 授权库。
+"""知识库检索范围解析（部门驱动的统一访问控制）。
 
-与产品手册 / OpenAPI 约定一致：
-- 未登录：visibility=public 且 status=active
-- 已登录：公开库 ∪ 本人创建 ∪ 用户/角色 kb_permissions；指定 kb_ids 时取交集
-- 仅返回已发布索引版本（current_index_version 非空）的知识库，避免空向量库误召回
+整合“可见性”与“部门”，以部门为唯一访问控制轴：
+- 未登录（访客）：仅“访客专用(GUEST)”部门的库，且 status=active
+- 已登录员工：访客专用库 ∪ 本部门库 ∪ 本人创建 ∪ 用户/角色 kb_permissions
+  （员工权限覆盖访客：GUEST 部门内容对员工同样开放）
+- 全局管理员：全部 active 库
+- 指定 kb_ids 时取交集；仅返回已发布索引版本（current_index_version 非空）的库
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from typing import Optional, Sequence
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import GUEST_DEPARTMENT_CODE, normalize_department
 from app.models.identity import User
 from app.models.knowledge_base import KBPermission, KnowledgeBase
 from app.retrieval.types import KBTarget
@@ -56,16 +59,23 @@ async def _list_accessible_kbs(
     ]
 
     if user is None:
-        # 访客：仅公开库
+        # 访客：仅“访客专用(GUEST)”部门的库
         stmt = select(KnowledgeBase).where(
             *base_filter,
-            KnowledgeBase.visibility == "public",
+            KnowledgeBase.department == GUEST_DEPARTMENT_CODE,
         )
         return list((await db.scalars(stmt)).all())
 
     # 全局管理员：全部 active 库
     codes = {p.code for role in user.roles if role.is_enabled for p in role.permissions}
-    if "*" in codes or "admin:*" in codes:
+    role_names = {r.name for r in user.roles if r.is_enabled}
+    is_admin = (
+        "super_admin" in role_names
+        or "admin" in role_names
+        or "*" in codes
+        or "admin:*" in codes
+    )
+    if is_admin:
         stmt = select(KnowledgeBase).where(*base_filter)
         return list((await db.scalars(stmt)).all())
 
@@ -78,10 +88,14 @@ async def _list_accessible_kbs(
     granted_ids_stmt = select(KBPermission.kb_id).where(or_(*subject)).distinct()
     granted_ids = list((await db.scalars(granted_ids_stmt)).all())
 
+    # 员工：访客专用库 ∪ 本部门库 ∪ 本人创建 ∪ 显式授权
     conditions = [
-        KnowledgeBase.visibility == "public",
+        KnowledgeBase.department == GUEST_DEPARTMENT_CODE,
         KnowledgeBase.creator_id == user.id,
     ]
+    dept = normalize_department(getattr(user, "department", None))
+    if dept:
+        conditions.append(KnowledgeBase.department == dept)
     if granted_ids:
         conditions.append(KnowledgeBase.id.in_(granted_ids))
 

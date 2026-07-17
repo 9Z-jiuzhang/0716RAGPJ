@@ -37,7 +37,10 @@ class UserResponse(BaseModel):
     nickname: str | None
     status: str
     roles: list[str]
+    role_labels: list[str] = Field(default_factory=list, description="角色中文名")
     permissions: list[str] = Field(default_factory=list, description="权限标识列表")
+    department: str | None = Field(default=None, description="所属部门")
+    is_super_admin: bool = False
     created_at: datetime
     last_login_at: datetime | None
 
@@ -45,7 +48,7 @@ class UserResponse(BaseModel):
 class UserUpdateRequest(BaseModel):
     nickname: str | None = Field(default=None, max_length=100)
     email: EmailStr | None = None
-
+    department: str | None = Field(default=None, max_length=50)
 
 class UserStatusRequest(BaseModel):
     status: str = Field(pattern="^(active|disabled|pending)$")
@@ -56,7 +59,7 @@ class UserRolesRequest(BaseModel):
 
 
 class AdminCreateUserRequest(BaseModel):
-    """管理员创建用户；默认授予注册用户角色。"""
+    """管理员创建用户；未指定角色时默认授予访客（guest）。"""
 
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=128)
@@ -83,6 +86,7 @@ class RolePermissionsRequest(BaseModel):
 class RoleResponse(BaseModel):
     id: str
     name: str
+    display_name: str = Field(default="", description="角色中文名")
     description: str | None
     is_builtin: bool
     is_enabled: bool

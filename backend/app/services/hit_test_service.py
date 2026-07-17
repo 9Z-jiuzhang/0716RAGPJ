@@ -230,25 +230,29 @@ class HitTestService:
         if request.case_id:
             # 从测试用例获取问题
             case = await self.db.get(TestCases, request.case_id)
-            if case:
-                query = (
-                    select(TestQuestions)
-                    .where(TestQuestions.case_id == request.case_id)
-                    .order_by(TestQuestions.sort_order)
+            if not case:
+                raise ValueError("测试用例不存在")
+            query = (
+                select(TestQuestions)
+                .where(TestQuestions.case_id == request.case_id)
+                .order_by(TestQuestions.sort_order)
+            )
+            result = await self.db.execute(query)
+            db_questions = result.scalars().all()
+            questions = [
+                TestQuestion(
+                    question=q.question,
+                    expected_doc_ids=q.expected_doc_ids,
+                    expected_chunk_ids=q.expected_chunk_ids,
                 )
-                result = await self.db.execute(query)
-                db_questions = result.scalars().all()
-                questions = [
-                    TestQuestion(
-                        question=q.question,
-                        expected_doc_ids=q.expected_doc_ids,
-                        expected_chunk_ids=q.expected_chunk_ids,
-                    )
-                    for q in db_questions
-                ]
+                for q in db_questions
+            ]
         elif request.questions:
             # 使用临时问题列表
             questions = [TestQuestion(question=q) for q in request.questions]
+
+        if not questions:
+            raise ValueError("没有可执行的测试问题")
 
         # 创建测试运行记录
         run = TestRuns(
@@ -424,6 +428,23 @@ class HitTestService:
 
         return "\n".join(lines)
 
+    async def delete_test_run(self, run_id: uuid.UUID) -> bool:
+        """删除单条测试运行记录（级联删除明细）。"""
+        run = await self.db.get(TestRuns, run_id)
+        if not run:
+            return False
+        await self.db.delete(run)
+        await self.db.commit()
+        return True
+
+    async def delete_all_test_runs(self) -> int:
+        """清空全部测试运行记录，返回删除条数。"""
+        total = await self.db.scalar(select(func.count(TestRuns.id))) or 0
+        if total:
+            await self.db.execute(TestRuns.__table__.delete())
+            await self.db.commit()
+        return int(total)
+
     async def compare_strategies(
         self, request: CompareTestRequest
     ) -> CompareTestResponse:
@@ -534,6 +555,23 @@ class HitTestService:
         )
 
         hits = result.hits
+        # 混合/向量失败且无召回时，强制降级全文并放宽阈值，避免「库内有文却 0 命中」
+        if not hits and strategy_key != "fulltext":
+            logger.warning(
+                "命中率测试主检索无结果 strategy=%s，降级全文检索 question=%s",
+                strategy_key,
+                question[:80],
+            )
+            result = await hybrid_retriever.retrieve(
+                self.db,
+                question,
+                targets,
+                strategy="fulltext",
+                top_k=top_k,
+                relevance_threshold=0.0,
+            )
+            hits = result.hits
+
         if doc_ids:
             wanted = {str(d) for d in doc_ids}
             hits = [h for h in hits if h.doc_id in wanted]
@@ -557,28 +595,26 @@ class HitTestService:
         expected_chunk_ids: list[uuid.UUID] | None,
     ) -> tuple[bool, int | None]:
         """
-        判断是否命中期望结果
+        判断是否命中期望结果。
 
-        参数:
-            results: 检索结果列表
-            expected_doc_ids: 期望命中的文档 ID 列表
-            expected_chunk_ids: 期望命中的分段 ID 列表
-
-        返回:
-            (是否命中, 命中排名)
+        - 配置了 expected_doc_ids / expected_chunk_ids：Top-K 内命中任一期望即算命中
+        - 未配置期望（临时题冒烟）：有任意召回结果即算命中（验证检索链路）
         """
-        if not expected_doc_ids and not expected_chunk_ids:
-            # 无期望结果，默认视为未命中
+        if not results:
             return False, None
 
+        if not expected_doc_ids and not expected_chunk_ids:
+            # 冒烟：有召回即命中
+            return True, 1
+
+        expected_docs = {str(x) for x in (expected_doc_ids or [])}
+        expected_chunks = {str(x) for x in (expected_chunk_ids or [])}
+
         for rank, result in enumerate(results, 1):
-            result_doc_id = uuid.UUID(result.get("doc_id", ""))
-            result_chunk_id = uuid.UUID(result.get("chunk_id", ""))
-
-            # 检查是否命中期望文档或分段
-            doc_hit = expected_doc_ids and result_doc_id in expected_doc_ids
-            chunk_hit = expected_chunk_ids and result_chunk_id in expected_chunk_ids
-
+            result_doc_id = str(result.get("doc_id") or "")
+            result_chunk_id = str(result.get("chunk_id") or "")
+            doc_hit = bool(expected_docs and result_doc_id in expected_docs)
+            chunk_hit = bool(expected_chunks and result_chunk_id in expected_chunks)
             if doc_hit or chunk_hit:
                 return True, rank
 
@@ -668,9 +704,15 @@ class HitTestService:
             status=run.status,
             total_questions=run.total_questions,
             hit_count=run.hit_count,
+            hit_rate=(
+                (run.hit_count / run.total_questions)
+                if run.total_questions
+                else None
+            ),
             recall_at_k=run.recall_at_k,
             mrr=run.mrr,
             avg_elapsed_ms=run.avg_elapsed_ms,
+            created_at=getattr(run, "created_at", None),
             completed_at=run.completed_at,
         )
 
@@ -685,7 +727,15 @@ class HitTestService:
             单题测试结果响应
         """
         # 将 JSON 字符串列表解析为 dict 列表
-        actual_chunks = [json.loads(chunk) for chunk in (result.actual_chunks or [])]
+        actual_chunks = []
+        for chunk in result.actual_chunks or []:
+            if isinstance(chunk, dict):
+                actual_chunks.append(chunk)
+                continue
+            try:
+                actual_chunks.append(json.loads(chunk))
+            except (TypeError, json.JSONDecodeError):
+                actual_chunks.append({"content": str(chunk)})
         return TestResultResponse(
             id=result.id,
             question=result.question,

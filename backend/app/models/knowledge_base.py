@@ -45,6 +45,9 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     visibility: Mapped[str] = mapped_column(
         String(20), default="restricted", nullable=False, comment="可见性"
     )
+    department: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, comment="所属部门，如 A / B；空表示不限部门"
+    )
     embedding_model: Mapped[str] = mapped_column(
         String(100), nullable=False, comment="嵌入模型标识"
     )

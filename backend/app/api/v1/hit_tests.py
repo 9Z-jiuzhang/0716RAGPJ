@@ -144,22 +144,37 @@ async def execute_test_run(
         )
 
     service = HitTestService(db)
-    from app.services.langfuse_service import get_langfuse
+    try:
+        from app.services.langfuse_service import get_langfuse
 
-    lf = get_langfuse()
-    trace = lf.start_trace(
-        name="hit_test_run",
-        user_id=str(getattr(user, "id", "")),
-        metadata={"case_id": str(request.case_id) if request.case_id else None},
-    )
-    run = await service.execute_test_run(request=request)
-    lf.span_retrieval(
-        trace,
-        query=f"hit_test case={request.case_id}",
-        context_summary=f"run_id={getattr(run, 'id', run)}",
-        hit_count=0,
-    )
-    lf.flush()
+        lf = get_langfuse()
+        trace = lf.start_trace(
+            name="hit_test_run",
+            user_id=str(getattr(user, "id", "")),
+            metadata={"case_id": str(request.case_id) if request.case_id else None},
+        )
+    except Exception:
+        lf = None
+        trace = None
+
+    try:
+        run = await service.execute_test_run(request=request)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    if lf and trace:
+        try:
+            lf.span_retrieval(
+                trace,
+                query=f"hit_test case={request.case_id}",
+                context_summary=f"run_id={getattr(run, 'id', run)}",
+                hit_count=getattr(run, "hit_count", 0) or 0,
+            )
+            lf.flush()
+        except Exception:
+            pass
 
     return BaseResponse(data=run)
 
@@ -209,6 +224,17 @@ async def list_test_runs(
     return BaseResponse(data=result)
 
 
+@router.delete("/runs", response_model=BaseResponse)
+async def delete_all_test_runs(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_permission("test:write")),
+) -> BaseResponse:
+    """清空全部命中率测试运行记录。需要 test:write。"""
+    service = HitTestService(db)
+    deleted = await service.delete_all_test_runs()
+    return BaseResponse(message=f"已清除 {deleted} 条运行记录", data={"deleted": deleted})
+
+
 @router.get("/runs/{id}", response_model=BaseResponse)
 async def get_test_run(
     id: uuid.UUID,
@@ -230,6 +256,23 @@ async def get_test_run(
         )
 
     return BaseResponse(data=run)
+
+
+@router.delete("/runs/{id}", response_model=BaseResponse)
+async def delete_test_run(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_permission("test:write")),
+) -> BaseResponse:
+    """删除单条命中率测试运行记录。需要 test:write。"""
+    service = HitTestService(db)
+    ok = await service.delete_test_run(run_id=id)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="测试运行记录不存在",
+        )
+    return BaseResponse(message="已删除")
 
 
 @router.get("/runs/{id}/export", response_class=PlainTextResponse)

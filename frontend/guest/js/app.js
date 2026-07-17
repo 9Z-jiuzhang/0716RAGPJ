@@ -8,7 +8,7 @@
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js";
-import { api, askStream, isDemoMode } from "/assets/js/api.js";
+import { api, askStream, clearDemoFlags } from "/assets/js/api.js";
 import {
   isLoggedIn,
   getUser,
@@ -22,16 +22,18 @@ import {
   canAccessAdmin,
   getPostLoginTarget,
   canAccessKb,
+  getDepartment,
 } from "/assets/js/auth.js";
 import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
-import { resolveDemoLoginUser, isBuiltinDemoUsername } from "/assets/js/mock.js";
+
+clearDemoFlags();
 
 /** 当前问答会话 ID（多轮上下文） */
 let currentSessionId = null;
 /** 流式请求控制器 */
 let askAbort = null;
-/** 推理面板默认折叠 */
-let reasoningCollapsed = true;
+/** 待从历史打开的会话 ID（跳转问答页后由 pageChat 加载） */
+let pendingOpenSessionId = null;
 
 /**
  * 拆分模型推理标签与最终回答。
@@ -73,13 +75,6 @@ function renderAssistantBubbleHtml(rawText, extrasHtml = "") {
     </details>`;
   }
   return `${reasoningHtml}<div class="msg-answer">${answerHtml}</div>${extrasHtml || ""}`;
-}
-
-/** 显示/隐藏演示横幅 */
-function syncDemoBanner() {
-  const el = document.getElementById("demoBanner");
-  if (!el) return;
-  el.classList.toggle("hidden", !isDemoMode());
 }
 
 /** 登录成功后按角色跳转 */
@@ -165,7 +160,6 @@ function renderShell(activeTitle, { wide = false } = {}) {
 
 /** 路由分发 */
 function dispatchRender() {
-  syncDemoBanner();
   const path = currentPath();
   // 注册并入登录页
   if (path === "/login" || path === "/register") return pageAuth(path === "/register" ? "register" : "login");
@@ -203,16 +197,6 @@ function pageChat() {
           <button type="button" class="btn" id="btnSend">发送</button>
         </div>
       </div>
-      <div class="reasoning-panel" id="reasoningPanel">
-        <button type="button" class="reasoning-toggle" id="reasoningToggle" title="切换推理面板">▶</button>
-        <div class="reasoning-header">
-          <div class="reasoning-title">推理过程 <span class="badge">流程示意</span></div>
-          <button type="button" class="reasoning-toggle" id="reasoningToggleHeader">◀</button>
-        </div>
-        <div class="reasoning-steps" id="reasoningSteps">
-          <div class="reasoning-empty">发送问题后，将展示系统处理的每一步推理过程</div>
-        </div>
-      </div>
     </div>
   `;
 
@@ -226,39 +210,47 @@ function pageChat() {
     }
   });
 
-  const toggle = document.getElementById("reasoningToggle");
-  const toggleHeader = document.getElementById("reasoningToggleHeader");
-  const panel = document.getElementById("reasoningPanel");
+  // 从历史打开会话：渲染完成后加载该会话消息（避免路由二次渲染清空）
+  if (pendingOpenSessionId) {
+    const sid = pendingOpenSessionId;
+    pendingOpenSessionId = null;
+    currentSessionId = sid;
+    loadSessionMessages(sid);
+  }
+}
 
-  const handleToggle = () => {
-    reasoningCollapsed = !reasoningCollapsed;
-    panel.classList.toggle("collapsed", reasoningCollapsed);
-    panel.classList.toggle("visible", !reasoningCollapsed);
-    toggle.textContent = reasoningCollapsed ? "▶" : "◀";
-    toggleHeader.textContent = reasoningCollapsed ? "▶" : "◀";
-  };
-
-  toggle.addEventListener("click", handleToggle);
-  toggleHeader.addEventListener("click", handleToggle);
-
-  const handleResize = () => {
-    const isMobile = window.innerWidth <= 1024;
-    if (isMobile) {
-      panel.classList.remove("collapsed");
-      panel.classList.toggle("visible", !reasoningCollapsed);
-    } else {
-      panel.classList.remove("visible");
-      panel.classList.toggle("collapsed", reasoningCollapsed);
+/** 拉取并渲染指定会话的历史消息到问答页 */
+async function loadSessionMessages(sessionId) {
+  try {
+    const detail = await api.get(`/qa/sessions/${sessionId}?page=1&page_size=100`);
+    const list = document.getElementById("msgList");
+    if (!list) return;
+    list.innerHTML = "";
+    const messages = detail.items || detail.messages || [];
+    if (!messages.length) {
+      list.innerHTML = `<div class="empty-state">该会话暂无消息</div>`;
+      return;
     }
-  };
-
-  window.addEventListener("resize", handleResize);
-  handleResize();
-  // 默认折叠推理侧栏
-  panel.classList.add("collapsed");
-  panel.classList.remove("visible");
-  toggle.textContent = "▶";
-  toggleHeader.textContent = "▶";
+    messages.forEach((m) => {
+      const html =
+        m.role === "assistant"
+          ? `${renderAssistantBubbleHtml(
+              m.content || "",
+              m.citations
+                ? `<div class="citations"><div class="citation-heading">引用来源（共 ${(m.citations || []).length} 段，点击展开原文）</div>${(m.citations || [])
+                    .map(
+                      (c) =>
+                        `<details class="citation-item"><summary class="citation-meta">${escapeHtml(c.doc_name)} · #${c.chunk_index}</summary><div class="citation-content">${escapeHtml(c.content || "")}</div></details>`
+                    )
+                    .join("")}</div>`
+                : ""
+            )}`
+          : escapeHtml(m.content);
+      appendMessage(m.role === "user" ? "user" : "assistant", html);
+    });
+  } catch (e) {
+    toast(e.message || "加载会话失败", "error");
+  }
 }
 
 /** 追加一条消息气泡 */
@@ -363,31 +355,6 @@ function updateReasoningStep(stepNum, status, elapsedMs) {
   }
 }
 
-/** 模拟推理过程数据（后端未实现时使用） */
-const mockTraces = [
-  { step: 1, type: "rewrite", content: "查询改写", detail: "将问题改写为标准化检索语句", elapsed_ms: 120, status: "completed" },
-  { step: 2, type: "retrieval", content: "多路检索", detail: "向量检索召回8个片段，全文检索召回5个片段", elapsed_ms: 200, status: "completed" },
-  { step: 3, type: "rerank", content: "重排与筛选", detail: "RRF融合排序，过滤后保留4个片段", elapsed_ms: 150, status: "completed" },
-  { step: 4, type: "assembly", content: "上下文组装", detail: "基于4个检索结果构建LLM输入Prompt", elapsed_ms: 100, status: "completed" },
-  { step: 5, type: "generation", content: "生成回答", detail: "引用2个来源，回答生成完成", elapsed_ms: 600, status: "completed" },
-];
-
-/** 模拟 SSE 流式推送推理步骤 */
-async function simulateReasoningTraces(onTrace) {
-  for (let i = 0; i < mockTraces.length; i++) {
-    const trace = { ...mockTraces[i] };
-    trace.status = "processing";
-    delete trace.elapsed_ms;
-    onTrace(trace);
-
-    await new Promise((resolve) => setTimeout(resolve, 400 + Math.random() * 300));
-
-    trace.status = "completed";
-    trace.elapsed_ms = mockTraces[i].elapsed_ms;
-    onTrace(trace);
-  }
-}
-
 /** 发送问题并 SSE 流式展示（手册交互流程） */
 async function sendQuestion() {
   const input = document.getElementById("questionInput");
@@ -423,10 +390,6 @@ async function sendQuestion() {
       appendReasoningStep(trace);
     }
   };
-
-  if (isDemoMode()) {
-    simulateReasoningTraces(handleTrace);
-  }
 
   try {
     await askStream(
@@ -467,12 +430,12 @@ async function sendQuestion() {
             if (!items.length) {
               citationsHtml = `<div class="citations text-muted">未命中可引用分段，不会编造来源。</div>`;
             } else {
-              citationsHtml = `<div class="citations"><div class="citation-heading">引用来源</div>${items
+              citationsHtml = `<div class="citations"><div class="citation-heading">引用来源（共 ${items.length} 段，点击展开原文）</div>${items
                 .map(
-                  (c) => `<div class="citation-item">
-                    <div class="citation-meta">${escapeHtml(c.doc_name || "未知文档")} · 分段 #${escapeHtml(c.chunk_index)} · 置信 ${(Number(c.score || 0) * 100).toFixed(0)}%</div>
-                    <div>${escapeHtml(c.content || "")}</div>
-                  </div>`
+                  (c) => `<details class="citation-item">
+                    <summary class="citation-meta">${escapeHtml(c.doc_name || "未知文档")} · 分段 #${escapeHtml(c.chunk_index)} · 置信 ${(Number(c.score || 0) * 100).toFixed(0)}%</summary>
+                    <div class="citation-content">${escapeHtml(c.content || "")}</div>
+                  </details>`
                 )
                 .join("")}</div>`;
             }
@@ -520,14 +483,10 @@ function pageAuth(initialTab = "login") {
           <button type="button" class="auth-tab ${initialTab === "register" ? "active" : ""}" data-tab="register">注册</button>
         </div>
         <div id="authPanel"></div>
-        <div class="auth-demo-hint">
-          <strong>演示账号</strong>（密码任意，对齐手册 §3）<br/>
-          <code>super</code> 超级管理员　
-          <code>admin</code> 普通管理员<br/>
-          <code>staff_a</code> A部门员工　
-          <code>staff_b</code> B部门员工　
-          <code>user</code> 注册用户
-        </div>
+        <p class="text-muted" style="margin-top:12px;font-size:13px">
+          测试账号：<code>admin</code> / <code>Admin123!</code>　
+          <code>super</code> / <code>Super123!</code>
+        </p>
       </div>
       <button type="button" class="btn btn-text" data-go="/">以访客身份继续问答（仅公开库）</button>
     </div>
@@ -557,8 +516,8 @@ function pageAuth(initialTab = "login") {
 function renderLoginForm(panel) {
   panel.innerHTML = `
     <p class="text-muted auth-lead">不同角色登录后看到的入口不同：访客仅问答，员工可上传，管理员进控制台。</p>
-    <div class="form-group"><label>用户名</label><input class="form-control" id="loginUser" type="text" autocomplete="username" placeholder="admin / staff / user" /></div>
-    <div class="form-group"><label>密码</label><input class="form-control" id="loginPass" type="password" autocomplete="current-password" placeholder="演示模式任意密码" /></div>
+    <div class="form-group"><label>用户名</label><input class="form-control" id="loginUser" type="text" autocomplete="username" placeholder="用户名" /></div>
+    <div class="form-group"><label>密码</label><input class="form-control" id="loginPass" type="password" autocomplete="current-password" placeholder="密码" /></div>
     <button class="btn" id="btnDoLogin" style="width:100%">登录</button>
   `;
   document.getElementById("btnDoLogin").addEventListener("click", doLogin);
@@ -586,23 +545,23 @@ async function doLogin() {
   if (!username || !password) return toast("请填写用户名和密码", "error");
   try {
     const data = await api.post("/auth/login", { username, password });
-    // 内置演示账号一律以角色表为准；其它账号合并接口资料但不降级角色
-    const mapped = resolveDemoLoginUser(username);
-    const user = isBuiltinDemoUsername(username)
-      ? mapped
-      : data?.user
-        ? mergeUserProfiles(mapped, data.user)
-        : mapped;
-
+    if (!data?.access_token) throw new Error("登录失败：未返回令牌");
     replaceAuthSession({
-      access_token: data?.access_token || `demo-access-${user.role}`,
-      refresh_token: data?.refresh_token || "demo-refresh-token",
-      user,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      user: { username },
+    });
+    const me = await api.get("/auth/me");
+    replaceAuthSession({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      user: me,
     });
     const role = getPrimaryRole();
     toast(`登录成功（${getRoleLabel(role)}）`, "success");
     redirectAfterLogin();
   } catch (e) {
+    clearAuth();
     toast(e.message || "登录失败", "error");
   }
 }
@@ -661,39 +620,10 @@ async function pageHistory() {
       </div>`;
     // 打开会话：写入 sessionId 并跳转问答页
     document.querySelectorAll("[data-open]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        currentSessionId = btn.getAttribute("data-open");
-        // 拉取消息预览到问答页
+      btn.addEventListener("click", () => {
+        // 记录待打开会话，跳转问答页后由 pageChat 统一加载消息
+        pendingOpenSessionId = btn.getAttribute("data-open");
         navigate("/");
-        dispatchRender();
-        // 切换会话时清空推理面板
-        setTimeout(() => clearReasoningPanel(), 100);
-        try {
-          const detail = await api.get(`/qa/sessions/${currentSessionId}`);
-          const list = document.getElementById("msgList");
-          if (list) {
-            list.innerHTML = "";
-            (detail.messages || []).forEach((m) => {
-              const html =
-                m.role === "assistant"
-                  ? `${renderAssistantBubbleHtml(
-                      m.content || "",
-                      m.citations
-                        ? `<div class="citations">${(m.citations || [])
-                            .map(
-                              (c) =>
-                                `<div class="citation-item"><div class="citation-meta">${escapeHtml(c.doc_name)} · #${c.chunk_index}</div>${escapeHtml(c.content || "")}</div>`
-                            )
-                            .join("")}</div>`
-                        : ""
-                    )}`
-                  : escapeHtml(m.content);
-              appendMessage(m.role === "user" ? "user" : "assistant", html);
-            });
-          }
-        } catch (e) {
-          toast(e.message || "加载会话失败", "error");
-        }
       });
     });
   } catch (e) {
@@ -733,31 +663,18 @@ async function pageProfile() {
         <button class="btn" id="btnSaveProfile">保存资料</button>
         <hr style="border:none;border-top:1px solid var(--color-border);margin:20px 0" />
         <h3 class="card-title">我的上传记录</h3>
-        <p class="text-muted">正式环境将对接文档列表接口；演示模式下展示示意数据。</p>
-        <div class="table-wrap">
-          <table class="table">
-            <thead><tr><th>文件名</th><th>知识库</th><th>状态</th><th>时间</th></tr></thead>
-            <tbody>
-              <tr><td>手册节选.pdf</td><td>公开产品手册</td><td><span class="badge badge-success">就绪</span></td><td>${formatDateTime(new Date().toISOString())}</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <p class="text-muted">上传记录请在管理端知识库文档列表中查看。</p>
       </div>`;
     document.getElementById("btnSaveProfile").onclick = async () => {
       const nickname = document.getElementById("pfNick").value.trim();
       const email = document.getElementById("pfEmail").value.trim();
       try {
-        // 契约：PUT /users/{id}；无 id 时仅更新本地演示
-        if (me.id) {
-          await api.put(`/users/${me.id}`, { nickname, email });
-        }
-        saveAuth({ user: { ...me, nickname, email } });
+        const updated = await api.put("/auth/me", { nickname, email });
+        saveAuth({ user: updated || { ...me, nickname, email } });
         toast("资料已保存", "success");
         dispatchRender();
       } catch (e) {
-        // 演示降级：仍保存本地
-        saveAuth({ user: { ...me, nickname, email } });
-        toast("已保存到本地（接口未就绪）", "success");
+        toast(e.message || "保存失败", "error");
       }
     };
   } catch (e) {
@@ -795,7 +712,7 @@ async function pageUpload() {
   document.getElementById("pageRoot").innerHTML = `
     <div class="card upload-panel">
       <h2 class="card-title">上传文档到知识库</h2>
-      <p class="text-muted">当前身份：${getRoleLabel()}。仅列出本账号授权范围内的知识库；类型与大小须由服务端最终校验。</p>
+      <p class="text-muted">当前身份：${getRoleLabel()}${getDepartment() ? ` · 部门 ${getDepartment()}` : ""}。管理员/超管可上传至任意库；员工仅本部门或授权知识库。类型与大小由服务端最终校验。</p>
       <div class="form-group">
         <label>目标知识库</label>
         <select class="form-control" id="kbSelect">
@@ -857,31 +774,15 @@ async function handleUpload(file) {
     prog.innerHTML = `<span class="text-success">上传成功，已进入预处理/向量化队列</span>`;
     toast("上传成功", "success");
   } catch (e) {
-    // 演示降级：仍展示完整进度反馈，保证可落地演示
-    let p = 20;
-    const timer = setInterval(() => {
-      p += 15;
-      bar.style.width = `${Math.min(p, 100)}%`;
-      if (p >= 100) {
-        clearInterval(timer);
-        prog.innerHTML = `<span class="text-success">演示模式：已模拟上传「${escapeHtml(file.name)}」并进入处理队列（${escapeHtml(e.message || "接口未就绪")}）</span>`;
-      }
-    }, 200);
+    bar.style.width = "0%";
+    prog.innerHTML = `<span class="text-danger">上传失败：${escapeHtml(e.message || "未知错误")}</span>`;
+    toast(e.message || "上传失败", "error");
   }
 }
 
 /* ========================= 启动 ========================= */
-// 监听演示模式事件，刷新横幅与导航
-document.addEventListener("rag:demo-mode", () => {
-  syncDemoBanner();
-});
-
-// 注册路由（全部指向统一渲染）
 ["/", "/login", "/register", "/history", "/profile", "/upload", "*"].forEach((p) => {
   route(p, () => dispatchRender());
 });
 
-// 启动路由
 startRouter();
-// 初始横幅状态
-syncDemoBanner();

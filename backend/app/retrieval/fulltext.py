@@ -239,21 +239,74 @@ class FulltextRetriever:
 
     @staticmethod
     def _extract_tokens(query: str) -> list[str]:
-        """提取关键词：空白分词 + 连续中文/字母数字片段。"""
-        parts = [p for p in re.split(r"\s+", query) if p]
-        # 额外按标点切分
+        """提取关键词：支持中文 n-gram，避免整句无法 ILIKE 命中。"""
+        parts = [p for p in re.split(r"\s+", (query or "").strip()) if p]
         refined: list[str] = []
         for p in parts:
-            refined.extend(t for t in re.split(r"[，。；、,\.\!\?；：:]+", p) if t)
-        # 去重保序，过滤过短噪声
+            refined.extend(
+                t for t in re.split(r"[，。；、,\.\!\?？！；：:\(\)（）\[\]【】]+", p) if t
+            )
+
+        question_tails = (
+            "是什么情况",
+            "是什么意思",
+            "怎么样",
+            "如何办理",
+            "如何申请",
+            "怎么算",
+            "怎么折算",
+            "是多少",
+            "是什么",
+            "如何",
+            "怎么",
+            "哪些",
+            "多少",
+            "吗",
+            "呢",
+        )
+
         seen: set[str] = set()
         tokens: list[str] = []
-        for t in refined:
+
+        def add(token: str) -> None:
+            t = (token or "").strip()
             if len(t) < 2 or t in seen:
-                continue
+                return
+            # 过滤纯语气词
+            if t in {"什么", "情况", "如何", "怎么", "是否", "可以", "需要"}:
+                return
             seen.add(t)
             tokens.append(t)
-        return tokens[:8]
+
+        for raw in refined:
+            add(raw)
+            core = raw
+            for tail in question_tails:
+                if core.endswith(tail) and len(core) > len(tail) + 1:
+                    core = core[: -len(tail)]
+                    add(core)
+                    break
+
+            # 连续中文：2/3/4-gram，提升「公司年假是什么情况」类问句召回
+            cjk_spans = re.findall(r"[\u4e00-\u9fff]{2,}", core or raw)
+            for span in cjk_spans:
+                add(span)
+                for n in (2, 3, 4):
+                    if len(span) < n:
+                        continue
+                    # 控制组合数量：取首尾与滑动窗口抽样
+                    add(span[:n])
+                    add(span[-n:])
+                    step = 1 if len(span) <= 8 else 2
+                    for i in range(0, len(span) - n + 1, step):
+                        add(span[i : i + n])
+                        if len(tokens) >= 28:
+                            return tokens[:28]
+
+            for m in re.findall(r"[A-Za-z0-9][A-Za-z0-9._-]{1,}", raw):
+                add(m)
+
+        return tokens[:28]
 
     @staticmethod
     def _normalize_ts_rank(rank: float) -> float:

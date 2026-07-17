@@ -50,7 +50,10 @@ export function normalizeUser(user) {
     ...user,
     role,
     roles: uniq.length ? uniq : [role],
+    role_labels: user.role_labels || [],
     permissions: user.permissions || user.permission_codes || [],
+    department: user.department || user.dept || "",
+    is_super_admin: Boolean(user.is_super_admin) || uniq.includes("super_admin"),
   };
 }
 
@@ -79,6 +82,7 @@ export function mergeUserProfiles(local, remote) {
     last_login_at: b.last_login_at || a.last_login_at,
     role: stronger.role,
     roles: stronger.roles,
+    role_labels: stronger.role_labels || weaker.role_labels,
     permissions: perms.length ? perms : stronger.permissions,
     department: stronger.department || weaker.department,
     kb_ids: stronger.kb_ids || weaker.kb_ids,
@@ -188,8 +192,17 @@ export function getDepartment() {
 /** 展示用角色名 */
 export function getRoleLabel(roleHint) {
   if (!isLoggedIn()) return "访客";
+  const user = getUser() || {};
+  if (Array.isArray(user.role_labels) && user.role_labels.length) {
+    const dept = getDepartment();
+    const base = user.role_labels[0];
+    if ((base === "员工" || roleHint === "staff") && dept) return `员工·${dept}部门`;
+    return user.role_labels.join("、");
+  }
   if (isSuperAdmin()) return "超级管理员";
-  if (isAdminUser() || roleHint === "admin") return "普通管理员";
+  if (isAdminUser() || roleHint === "admin") return "管理员";
+  const roles = roleSet(user);
+  if (roles.has("guest")) return "访客";
   const dept = getDepartment();
   const primary = roleHint || getPrimaryRole();
   if (primary === "staff") {
@@ -224,7 +237,7 @@ export function canAccessKb(kb) {
   return false;
 }
 
-/** 是否可上传：员工；管理员在访客端也可上传（便于演示） */
+/** 是否可上传：员工；管理员在访客端也可上传 */
 export function canUpload() {
   return getPrimaryRole() === "staff" || isAdminUser() || hasPermission("kb:upload");
 }

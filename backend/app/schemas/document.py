@@ -1,4 +1,4 @@
-"""文档模块 Pydantic DTO。【对齐 contracts/openapi.json】"""
+"""文档模块 Pydantic DTO。【对齐 docs/openapi.json】"""
 
 from __future__ import annotations
 
@@ -21,6 +21,29 @@ class DocumentResponse(BaseModel):
     creator_id: str
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentContentPreviewResponse(BaseModel):
+    """文档正文预览（管理端预览面板）。"""
+
+    id: str
+    kb_id: str
+    filename: str
+    file_type: str
+    status: str
+    chunk_count: int
+    error_message: str | None = None
+    raw_text: str = Field(default="", description="解析后的原文")
+    normalized_text: str = Field(default="", description="清洗后的正文")
+    raw_char_count: int = 0
+    normalized_char_count: int = 0
+    truncated: bool = Field(False, description="正文是否因过长被截断")
+    max_preview_chars: int = Field(80000, description="单字段预览最大字符数")
+    preview_source: str = Field(
+        default="normalized_text",
+        description="推荐展示源：normalized_text / raw_text / empty",
+    )
+    segment_rules: dict[str, Any] = Field(default_factory=dict)
 
 
 class DocumentListItem(BaseModel):

@@ -18,12 +18,27 @@ from app.schemas.model_config import (
     UpdateModelConfigRequest,
 )
 from app.services.model_config import ModelConfigService
+from app.services.model_usage import ModelUsageError, fetch_daily_metrics
 
 router = APIRouter(prefix="/models", tags=["大模型管理"])
 
 
 def _raise(exc: APIException) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get("/usage", response_model=APIResponse[dict])
+async def get_model_usage(
+    days: int = Query(30, ge=1, le=180, description="统计最近天数"),
+    model: str | None = Query(None, description="按模型名过滤（Langfuse 中的 model）"),
+    _: User = Depends(require_permission("model:read")),
+):
+    """从 Langfuse 拉取模型用量（token / 调用次数 / 成本），支持按模型筛选。"""
+    try:
+        data = await fetch_daily_metrics(days=days, model=model)
+    except ModelUsageError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return APIResponse(data=data)
 
 
 @router.get("", response_model=APIResponse[PageResponse[ModelConfigResponse]])

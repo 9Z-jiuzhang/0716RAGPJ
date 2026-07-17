@@ -5,10 +5,11 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.helpers import ok, resolve_request_id
 from app.core.database import get_db
-from app.core.dependencies import require_permission
+from app.core.dependencies import is_super_admin, require_permission
 from app.core.security import hash_password
 from app.models import AuditLog, Role, User
 from app.schemas.common import BaseResponse
@@ -19,9 +20,19 @@ from app.schemas.identity import (
     UserStatusRequest,
     UserUpdateRequest,
 )
-from app.utils.identity_helpers import present_user
+from app.utils.identity_helpers import max_role_rank, present_user, role_rank
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
+
+
+def _assert_can_manage(operator: User, target: User, *, action: str = "管理") -> None:
+    """仅允许操作权限严格低于自己的用户；不可操作自己。"""
+    if target.id == operator.id:
+        raise HTTPException(status_code=400, detail=f"不能{action}自己")
+    op_rank = max_role_rank(operator)
+    tg_rank = max_role_rank(target)
+    if tg_rank >= op_rank:
+        raise HTTPException(status_code=403, detail=f"只能{action}权限低于自己的用户")
 
 
 @router.post("", response_model=BaseResponse, status_code=201)
@@ -31,7 +42,7 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
-    """管理员新增用户；未指定角色时自动分配注册用户角色。"""
+    """管理员新增用户；未指定角色时自动分配访客角色。"""
     if await db.scalar(
         select(User).where(
             (User.username == data.username) | (User.email == data.email)
@@ -48,10 +59,18 @@ async def create_user(
         ).all()
         if len(roles) != len(data.role_ids):
             raise HTTPException(status_code=400, detail="包含不存在的角色")
+        if not is_super_admin(operator):
+            op_rank = max_role_rank(operator)
+            for role in roles:
+                if role_rank(role.name) >= op_rank:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="无权分配管理员或超级管理员角色",
+                    )
     else:
-        default_role = await db.scalar(select(Role).where(Role.name == "user"))
+        default_role = await db.scalar(select(Role).where(Role.name == "guest"))
         if not default_role:
-            raise HTTPException(status_code=503, detail="默认注册用户角色不存在")
+            raise HTTPException(status_code=503, detail="默认访客角色不存在")
         roles = [default_role]
     user = User(
         username=data.username,
@@ -102,6 +121,7 @@ async def list_users(
     count_stmt = select(func.count()).select_from(User)
     list_stmt = (
         select(User)
+        .options(selectinload(User.roles))
         .order_by(User.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -155,6 +175,8 @@ async def update_user(
         user.email = data.email
     if data.nickname is not None:
         user.nickname = data.nickname
+    if data.department is not None:
+        user.department = data.department.strip().upper() or None
     db.add(
         AuditLog(
             user_id=operator.id,
@@ -177,11 +199,14 @@ async def set_status(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
-    user = await db.get(User, uuid.UUID(user_id))
+    user = await db.scalar(
+        select(User)
+        .options(selectinload(User.roles))
+        .where(User.id == uuid.UUID(user_id))
+    )
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    if user.id == operator.id and data.status != "active":
-        raise HTTPException(status_code=400, detail="不能禁用当前管理员")
+    _assert_can_manage(operator, user, action="变更状态")
     user.status = data.status
     db.add(
         AuditLog(
@@ -205,7 +230,11 @@ async def set_roles(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
-    user = await db.get(User, uuid.UUID(user_id))
+    user = await db.scalar(
+        select(User)
+        .options(selectinload(User.roles))
+        .where(User.id == uuid.UUID(user_id))
+    )
     roles = (
         await db.scalars(
             select(Role).where(Role.id.in_([uuid.UUID(x) for x in data.role_ids]))
@@ -215,6 +244,20 @@ async def set_roles(
         raise HTTPException(status_code=404, detail="用户不存在")
     if len(roles) != len(data.role_ids):
         raise HTTPException(status_code=400, detail="包含不存在的角色")
+
+    _assert_can_manage(operator, user, action="变更角色")
+
+    # 超管可分配任意角色（含 admin / super_admin）；
+    # 普通管理员不可分配 admin 或更高
+    if not is_super_admin(operator):
+        op_rank = max_role_rank(operator)
+        for role in roles:
+            if role_rank(role.name) >= op_rank:
+                raise HTTPException(
+                    status_code=403,
+                    detail="无权将他人设为管理员或超级管理员",
+                )
+
     user.roles = list(roles)
     db.add(
         AuditLog(
@@ -228,3 +271,33 @@ async def set_roles(
     await db.commit()
     await db.refresh(user)
     return ok(present_user(user), request_id=request_id)
+
+
+@router.delete("/{user_id}", response_model=BaseResponse)
+async def delete_user(
+    user_id: str,
+    operator: User = Depends(require_permission("user:write")),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(resolve_request_id),
+) -> BaseResponse:
+    """删除权限严格低于自己的用户。"""
+    user = await db.scalar(
+        select(User)
+        .options(selectinload(User.roles))
+        .where(User.id == uuid.UUID(user_id))
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    _assert_can_manage(operator, user, action="删除")
+    db.add(
+        AuditLog(
+            user_id=operator.id,
+            action="user.delete",
+            resource_type="user",
+            resource_id=user_id,
+            detail={"username": user.username},
+        )
+    )
+    await db.delete(user)
+    await db.commit()
+    return ok({"deleted": True}, request_id=request_id, message="用户已删除")

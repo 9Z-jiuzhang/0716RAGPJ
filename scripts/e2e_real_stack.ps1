@@ -27,15 +27,31 @@ function Step($name, $scriptBlock) {
 }
 
 function CurlJson([string]$Method, [string]$Url, [string]$JsonBody = $null, [string]$AuthToken = $null) {
-    $args = @("-s", "-S", "-X", $Method, $Url, "-H", "Accept: application/json")
+    # 不使用 -L：POST 遇 307 跟随时可能丢 body；调用方应使用无尾斜杠的规范路径
+    # 输出写文件再按 UTF-8 读取，避免 PowerShell 管道弄坏中文
+    $outFile = Join-Path $env:TEMP ("e2e_curl_" + [guid]::NewGuid().ToString() + ".txt")
+    $args = @("-s", "-S", "-X", $Method, $Url, "-H", "Accept: application/json", "-o", $outFile, "-w", "%{http_code}")
     if ($AuthToken) { $args += @("-H", "Authorization: Bearer $AuthToken") }
     if ($null -ne $JsonBody) {
         $tmp = Join-Path $env:TEMP ("e2e_body_" + [guid]::NewGuid().ToString() + ".json")
         [System.IO.File]::WriteAllText($tmp, $JsonBody, [System.Text.UTF8Encoding]::new($false))
         $args += @("-H", "Content-Type: application/json", "--data-binary", "@$tmp")
     }
-    $out = & curl.exe @args
-    return $out
+    $codeStr = & curl.exe @args
+    $code = 0
+    [int]::TryParse(([string]$codeStr).Trim(), [ref]$code) | Out-Null
+    $body = ""
+    if (Test-Path $outFile) {
+        $body = [System.IO.File]::ReadAllText($outFile, [System.Text.Encoding]::UTF8)
+        Remove-Item $outFile -ErrorAction SilentlyContinue
+    }
+    if ($code -ge 300 -and $code -lt 400) {
+        throw ("unexpected redirect HTTP {0} for {1} {2} (check trailing slash); body={3}" -f $code, $Method, $Url, $body)
+    }
+    if ($code -ge 400) {
+        throw ("HTTP {0} for {1} {2} : {3}" -f $code, $Method, $Url, $body)
+    }
+    return $body
 }
 
 Step "health" {
@@ -60,19 +76,24 @@ Step "auth_me" {
 }
 
 Step "kb_list_or_create" {
-    $raw = CurlJson "GET" "$Base/knowledge-bases/?page=1&page_size=20" $null $script:Token
-    $list = $raw | ConvertFrom-Json
-    $items = @()
-    if ($list.data.items) { $items = @($list.data.items) }
-    elseif ($list.data -is [System.Array]) { $items = @($list.data) }
-    if ($items.Count -gt 0) {
-        $script:KbId = [string]$items[0].id
+    # 注意：路径不要尾斜杠，否则 FastAPI 307 重定向会导致 POST 丢 body
+    # 优先复用 pytest-kb-smoke（已有索引），否则取第一个，否则新建
+    $raw = CurlJson "GET" "$Base/knowledge-bases?page=1&page_size=20" $null $script:Token
+    if ($raw -match '"name"\s*:\s*"pytest-kb-smoke".*?"id"\s*:\s*"([0-9a-fA-F-]{36})"') {
+        $script:KbId = $Matches[1]
+        "reuse kb=pytest-kb-smoke id=$($script:KbId)"
+    } elseif ($raw -match '"id"\s*:\s*"([0-9a-fA-F-]{36})"\s*,\s*"name"\s*:\s*"pytest-kb-smoke"') {
+        $script:KbId = $Matches[1]
+        "reuse kb=pytest-kb-smoke id=$($script:KbId)"
+    } elseif ($raw -match '"id"\s*:\s*"([0-9a-fA-F-]{36})"') {
+        $script:KbId = $Matches[1]
         "reuse kb=$($script:KbId)"
     } else {
-        $body = '{"name":"E2E-KB","type":"general","visibility":"restricted","embedding_model":"text-embedding-v3","description":"e2e","tags":[],"chunk_size":500,"chunk_overlap":50}'
-        $craw = CurlJson "POST" "$Base/knowledge-bases/" $body $script:Token
-        $created = $craw | ConvertFrom-Json
-        $script:KbId = [string]$created.data.id
+        $body = '{"name":"E2E-KB","type":"general","embedding_model":"text-embedding-v3","description":"e2e","tags":[],"chunk_size":500,"chunk_overlap":50,"department":"GUEST"}'
+        $craw = CurlJson "POST" "$Base/knowledge-bases" $body $script:Token
+        if ($craw -match '"id"\s*:\s*"([0-9a-fA-F-]{36})"') {
+            $script:KbId = $Matches[1]
+        }
         if (-not $script:KbId) { throw "create kb failed: $craw" }
         "created kb=$($script:KbId)"
     }
@@ -134,20 +155,23 @@ Step "snapshot_preview" {
 }
 
 Step "qa_ask_sse" {
-    # Mark as soft: real answer only after doc ready + index version
     $payloadFile = Join-Path $env:TEMP "e2e_qa_body.json"
     $json = "{`"question`":`"What is RAG? Answer briefly using the knowledge base.`",`"strategy`":`"hybrid`",`"top_k`":3,`"kb_ids`":[`"$($script:KbId)`"]}"
     [System.IO.File]::WriteAllText($payloadFile, $json, [System.Text.UTF8Encoding]::new($false))
     $tmp = Join-Path $env:TEMP "e2e_sse.txt"
-    & curl.exe -s -S -N -X POST "$Base/qa/ask" `
+    $httpCode = & curl.exe -s -S -N -X POST "$Base/qa/ask" `
         -H "Authorization: Bearer $($script:Token)" `
         -H "Content-Type: application/json" `
         -H "Accept: text/event-stream" `
         --max-time 180 `
-        --data-binary "@$payloadFile" -o $tmp
+        --data-binary "@$payloadFile" `
+        -o $tmp `
+        -w "%{http_code}"
     $content = Get-Content $tmp -Raw -ErrorAction SilentlyContinue
-    if (-not $content) { throw "empty SSE body" }
+    if (-not $content) { throw "empty SSE body; http=$httpCode" }
+    if ([int]$httpCode -ge 400) { throw ("SSE HTTP {0}: {1}" -f $httpCode, $content.Substring(0,[Math]::Min(300,$content.Length))) }
     if ($content -match 'event:\s*error') { throw "SSE error event: $($content.Substring(0,[Math]::Min(300,$content.Length)))" }
+    if ($content -notmatch 'event:\s*(chunk|done|citations)') { throw "no SSE events found: $($content.Substring(0,[Math]::Min(300,$content.Length)))" }
     $len = $content.Length
     $preview = $content.Substring(0, [Math]::Min(400, $len)).Replace("`r", " ").Replace("`n", " ")
     "bytes=$len; preview=$preview"

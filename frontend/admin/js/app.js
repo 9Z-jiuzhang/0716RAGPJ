@@ -6,15 +6,18 @@
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js";
-import { api, isDemoMode } from "/assets/js/api.js";
-import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin } from "/assets/js/auth.js";
+import { api, clearDemoFlags } from "/assets/js/api.js";
+import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js";
 import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
+
+clearDemoFlags();
 
 /** 管理端菜单（按权限码裁剪；前端隐藏不能替代后端鉴权） */
 const MENUS = [
-  { path: "/admin", label: "仪表盘", perm: "system:read" },
+  { path: "/admin", label: "首页", perm: "system:read" },
   { path: "/admin/users", label: "用户管理", perm: "user:read" },
   { path: "/admin/roles", label: "角色管理", perm: "role:read" },
+  { path: "/admin/departments", label: "部门管理", perm: "department:read" },
   { path: "/admin/models", label: "大模型管理", perm: "model:read" },
   { path: "/admin/knowledge-bases", label: "知识库管理", perm: "kb:read" },
   { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
@@ -32,12 +35,6 @@ function requirePerm(perm, title) {
   return true;
 }
 
-/** 演示横幅同步 */
-function syncDemoBanner() {
-  const el = document.getElementById("demoBanner");
-  if (el) el.classList.toggle("hidden", !isDemoMode());
-}
-
 /** 登录门禁：未登录或不具备管理权限则回访客登录页 */
 function guard() {
   if (!isLoggedIn()) {
@@ -51,50 +48,6 @@ function guard() {
     return false;
   }
   return true;
-}
-
-/**
- * 临时联调入口：仅以当前登录人的权限发起只读请求，便于分别验收 5.2 与 5.3。
- * 项目全部联调完成后，可连同顶部 btnIdentityRoleCheck 按钮一起删除。
- */
-async function runIdentityRoleCheck() {
-  const button = document.getElementById("btnIdentityRoleCheck");
-  if (button) {
-    button.disabled = true;
-    button.textContent = "联调中…";
-  }
-
-  const checks = [];
-  const verify = async (name, request) => {
-    try {
-      await request();
-      checks.push(`通过：${name}`);
-    } catch (error) {
-      checks.push(`失败：${name}（${error.message || "请求异常"}）`);
-    }
-  };
-
-  if (isDemoMode()) {
-    checks.push("提示：当前为演示模式，以下结果不代表真实后端状态。");
-  }
-  await verify("5.2 当前登录身份", () => api.get("/auth/me"));
-  if (hasPermission("user:read")) {
-    await verify("5.2 用户列表权限", () => api.get("/users?page=1&page_size=1"));
-  } else {
-    checks.push("跳过：5.2 用户列表（当前角色无 user:read 权限）");
-  }
-  if (hasPermission("role:read")) {
-    await verify("5.3 角色列表权限", () => api.get("/roles?page=1&page_size=1"));
-    await verify("5.3 权限清单读取", () => api.get("/roles/permissions"));
-  } else {
-    checks.push("跳过：5.3 角色管理（当前角色无 role:read 权限）");
-  }
-
-  alert(`5.2 / 5.3 联调结果\n\n${checks.join("\n")}`);
-  if (button) {
-    button.disabled = false;
-    button.textContent = "5.2/5.3 联调";
-  }
 }
 
 /** 渲染管理端壳层（顶栏主导 + 全宽内容；右上保留智能对话/退出） */
@@ -121,7 +74,6 @@ function renderShell(title) {
         </nav>
         <div class="topnav-actions">
           <span class="text-muted">${roleText}</span>
-          <button type="button" class="btn btn-secondary btn-sm" id="btnIdentityRoleCheck">5.2/5.3 联调</button>
           <a class="btn btn-secondary btn-sm" href="/#/">智能对话</a>
           <button type="button" class="btn btn-text" id="btnLogout">退出</button>
         </div>
@@ -135,7 +87,6 @@ function renderShell(title) {
   document.querySelectorAll("[data-go]").forEach((el) => {
     el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
   });
-  document.getElementById("btnIdentityRoleCheck").onclick = runIdentityRoleCheck;
   document.getElementById("btnLogout").onclick = async () => {
     const ok = await confirmDialog({ title: "退出", message: "确定退出管理端吗？", confirmText: "退出" });
     if (!ok) return;
@@ -157,9 +108,14 @@ function renderBars(values, { percent = false } = {}) {
     .join("")}</div>`;
 }
 
+/** 离开页面时清掉残留弹窗，避免挂在日志等页面下方造成错位点击 */
+function closeAllModals() {
+  document.querySelectorAll(".modal-mask, .modal-backdrop").forEach((el) => el.remove());
+}
+
 /** 路由分发 */
 async function dispatchRender() {
-  syncDemoBanner();
+  closeAllModals();
   const path = currentPath();
   // 知识库详情 / 文档 / 快照
   let m;
@@ -168,6 +124,8 @@ async function dispatchRender() {
   if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)$/))) return pageKbDetail(m[1]);
   if (path === "/admin/users") return pageUsers();
   if (path === "/admin/roles") return pageRoles();
+  if ((m = path.match(/^\/admin\/departments\/([^/]+)$/))) return pageDepartmentDetail(m[1]);
+  if (path === "/admin/departments") return pageDepartments();
   if (path === "/admin/models") return pageModels();
   if (path === "/admin/knowledge-bases") return pageKbList();
   if (path === "/admin/hit-test") return pageHitTest();
@@ -176,39 +134,264 @@ async function dispatchRender() {
   return pageDashboard();
 }
 
-/* ========== 仪表盘 /admin ========== */
+/* ========== 首页 /admin（系统介绍 + 当前角色 + 运行概览） ========== */
+function renderHomeIntro() {
+  return `
+    <div class="card">
+      <h2 class="card-title">企业智能知识库系统</h2>
+      <p style="margin:0 0 10px;line-height:1.8">
+        本系统是一套面向企业内部的<strong>检索增强生成（RAG）知识库与智能问答平台</strong>，
+        帮助企业将分散的制度、文档、手册等沉淀为统一、可检索、可溯源的知识资产，
+        并通过大模型提供自然语言问答服务。
+      </p>
+      <p class="text-muted" style="margin:0 0 10px;line-height:1.8">
+        在<strong>知识管理</strong>方面，支持 PDF / Word / Markdown 等多格式文档上传、自动解析、
+        智能分段与向量化入库，并提供索引版本与回退快照，保证知识更新可控可追溯；
+        在<strong>智能问答</strong>方面，采用向量检索与全文检索融合的混合检索策略，
+        结合大模型进行流式作答，并附带引用来源，避免凭空编造。
+      </p>
+      <p class="text-muted" style="margin:0;line-height:1.8">
+        在<strong>安全与治理</strong>方面，以部门为核心实现访问隔离：访客仅能访问「访客专用」知识库，
+        员工可访问本部门授权及访客专用的知识库，管理员则可访问全部；同时提供角色权限管理、
+        审计日志、系统监控与大模型用量统计，满足企业级的权限管控与运维观测需求。
+      </p>
+    </div>`;
+}
+
+function renderCurrentRoleCard() {
+  const user = getUser() || {};
+  const name = escapeHtml(user.nickname || user.username || "用户");
+  const roleLabel = escapeHtml(getRoleLabel());
+  const dept = escapeHtml(user.department || "");
+
+  const hour = new Date().getHours();
+  let timeGreeting = "你好";
+  if (hour < 6) timeGreeting = "夜深了";
+  else if (hour < 12) timeGreeting = "早上好";
+  else if (hour < 14) timeGreeting = "中午好";
+  else if (hour < 18) timeGreeting = "下午好";
+  else timeGreeting = "晚上好";
+
+  let roleGreeting;
+  if (isSuperAdmin()) {
+    roleGreeting = "您是<strong>超级管理员</strong>，拥有系统的全部权限（含模型配置），可访问所有知识库，祝管理顺利。";
+  } else if (hasPermission("user:read") || hasPermission("role:read")) {
+    roleGreeting = "您是<strong>管理员</strong>，可管理用户、角色、部门、知识库与系统运维，可访问所有知识库。";
+  } else if (dept) {
+    roleGreeting = `您是<strong>${dept} 部门员工</strong>，可访问本部门授权及「访客专用」的知识库，欢迎开始今天的工作。`;
+  } else {
+    roleGreeting = "欢迎使用智能知识库系统，可访问「访客专用」及您被授权的知识库。";
+  }
+
+  return `
+    <div class="card">
+      <h3 class="card-title">${timeGreeting}，${name}！</h3>
+      <p class="text-muted" style="margin:0;line-height:1.8">
+        当前登录身份：<strong>${roleLabel}</strong>。${roleGreeting}
+      </p>
+    </div>`;
+}
+
 async function pageDashboard() {
-  if (!requirePerm("system:read", "管理首页 / 仪表盘")) return;
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载统计数据…</div>`;
+  if (!requirePerm("system:read", "首页")) return;
+  const headerHtml = `${renderHomeIntro()}${renderCurrentRoleCard()}`;
+  document.getElementById("pageRoot").innerHTML = `${headerHtml}<div class="loading">加载统计数据…</div>`;
   try {
     const s = await api.get("/monitor/stats");
     document.getElementById("pageRoot").innerHTML = `
+      ${headerHtml}
+      <div class="card" style="background:transparent;box-shadow:none;padding:0;margin:8px 0 0">
+        <h3 class="card-title">运行概览</h3>
+      </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="label">知识库总数</div><div class="value">${s.kb_count ?? "-"}</div></div>
         <div class="stat-card"><div class="label">文档总数</div><div class="value">${s.doc_count ?? "-"}</div></div>
         <div class="stat-card"><div class="label">用户总数</div><div class="value">${s.user_count ?? "-"}</div></div>
         <div class="stat-card"><div class="label">活跃会话</div><div class="value">${s.active_sessions ?? "-"}</div></div>
-        <div class="stat-card"><div class="label">任务队列</div><div class="value">${s.queue_length ?? "-"}</div></div>
       </div>
       <div class="chart-grid">
         <div class="card"><h3 class="card-title">近 7 天问答量</h3>${renderBars(s.qa_trend_7d || [0, 0, 0, 0, 0, 0, 0])}</div>
         <div class="card"><h3 class="card-title">近 7 天命中率</h3>${renderBars(s.hit_rate_trend_7d || [0, 0, 0, 0, 0, 0, 0], { percent: true })}</div>
-        <div class="card"><h3 class="card-title">系统资源概览</h3>
-          <p>CPU：${s.cpu ?? "-"}%</p>
-          <div style="height:8px;background:#E8F0FE;border-radius:4px;margin:6px 0 12px"><div style="height:100%;width:${s.cpu || 0}%;background:var(--color-primary)"></div></div>
-          <p>内存：${s.memory ?? "-"}%</p>
-          <div style="height:8px;background:#E8F0FE;border-radius:4px;margin:6px 0 12px"><div style="height:100%;width:${s.memory || 0}%;background:var(--color-primary-light)"></div></div>
-          <p>磁盘：${s.disk ?? "-"}%</p>
-          <div style="height:8px;background:#E8F0FE;border-radius:4px;margin:6px 0"><div style="height:100%;width:${s.disk || 0}%;background:var(--color-primary-dark)"></div></div>
-        </div>
         <div class="card"><h3 class="card-title">近 24 小时错误趋势</h3>${renderBars(s.error_24h || [0, 0, 0, 0])}</div>
       </div>`;
   } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+    document.getElementById("pageRoot").innerHTML = `${headerHtml}<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
 }
 
 /* ========== 用户管理 ========== */
+function roleLabelOf(u) {
+  if (Array.isArray(u.role_labels) && u.role_labels.length) return u.role_labels.join("、");
+  const names = (u.roles || [u.role]).filter(Boolean);
+  const map = { super_admin: "超级管理员", admin: "管理员", staff: "员工", guest: "访客", user: "注册用户", kb_admin: "知识库维护员" };
+  return names.map((n) => map[n] || n).join("、") || "-";
+}
+
+/** 角色等级：越高权限越大。仅可分配/删除低于自己等级的用户。 */
+function roleRankOfName(name) {
+  const map = { super_admin: 100, admin: 50, staff: 20, kb_admin: 20, guest: 10, user: 10 };
+  return map[name] || 5;
+}
+
+function maxRoleRankOfUser(u) {
+  const names = (u?.roles || []).filter(Boolean);
+  if (!names.length) return 0;
+  return Math.max(...names.map(roleRankOfName));
+}
+
+function openUserRolePicker({ user, roles, departments = [], onSave }) {
+  closeAllModals();
+  const dialogId = `userRole-${Date.now()}`;
+  const current = new Set(user.roles || []);
+  const iAmSuper = isSuperAdmin();
+  // 超管可分配 admin / super_admin；普通管理员不可分配 admin 或超管
+  const options = (roles || [])
+    .filter((r) => {
+      if (r.name === "user") return false; // 已废弃，等同访客
+      if (iAmSuper) return true;
+      return r.name !== "super_admin" && r.name !== "admin";
+    })
+    .map(
+      (r) => `<label><input type="radio" name="role_id" value="${escapeHtml(r.id)}" ${current.has(r.name) ? "checked" : ""}>
+        ${escapeHtml(r.display_name || r.name)} <small>${escapeHtml(r.name)}</small></label>`
+    )
+    .join("");
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div id="${dialogId}" class="modal-backdrop" style="display:flex">
+      <form class="modal" style="max-width:520px;width:92%">
+        <div class="modal-header"><h3>变更「${escapeHtml(user.username)}」角色</h3></div>
+        <div class="modal-body">
+          <p class="text-muted">${iAmSuper ? "超管可将用户设为管理员或超级管理员。" : "管理员不可将他人设为管理员或超级管理员，也不可改超管账号。"}</p>
+          <div class="checkbox-grid">${options || "<span class='text-muted'>无可分配角色</span>"}</div>
+          <label class="form-label" style="margin-top:12px">所属部门（员工上传隔离用）</label>
+          <select class="form-control" name="department">
+            ${departmentSelectHtml(departments, user.department, { emptyLabel: "不限 / 管理员" })}
+          </select>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close>取消</button>
+          <button class="btn btn-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>`
+  );
+  const root = document.getElementById(dialogId);
+  root.querySelector("[data-close]").onclick = () => root.remove();
+  root.querySelector("form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const roleId = String(form.get("role_id") || "").trim();
+    if (!roleId) return toast("请选择角色", "error");
+    try {
+      await onSave({ role_ids: [roleId], department: String(form.get("department") || "") });
+      root.remove();
+    } catch (error) {
+      toast(error.message || "保存失败", "error");
+    }
+  };
+}
+
+async function openCreateUserForm() {
+  closeAllModals();
+  let roles = [];
+  let departments = [];
+  try {
+    const [roleData, deptData] = await Promise.all([
+      api.get("/roles?page=1&page_size=100"),
+      loadDepartmentOptions(),
+    ]);
+    roles = (roleData.items || []).filter((r) => {
+      if (r.name === "user") return false;
+      if (isSuperAdmin()) return true;
+      return r.name !== "super_admin" && r.name !== "admin";
+    });
+    departments = deptData;
+  } catch (e) {
+    toast(e.message || "加载角色/部门失败", "error");
+    return;
+  }
+
+  const roleOptions = roles
+    .map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.display_name || r.name)}（${escapeHtml(r.name)}）</option>`)
+    .join("");
+
+  const mask = document.createElement("div");
+  mask.className = "modal-mask";
+  mask.innerHTML = `
+    <form class="modal" style="width:min(520px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+      <div class="modal-header"><h3>新增用户</h3></div>
+      <div class="modal-body">
+        <label class="form-label">账号 <span style="color:var(--color-danger)">*</span></label>
+        <input class="form-control" name="username" required minlength="3" maxlength="50" placeholder="3-50 位" />
+        <label class="form-label" style="margin-top:10px">邮箱 <span style="color:var(--color-danger)">*</span></label>
+        <input class="form-control" name="email" type="email" required placeholder="user@example.com" />
+        <label class="form-label" style="margin-top:10px">初始密码 <span style="color:var(--color-danger)">*</span></label>
+        <input class="form-control" name="password" type="text" required minlength="8" maxlength="128" placeholder="至少 8 位" />
+        <label class="form-label" style="margin-top:10px">昵称</label>
+        <input class="form-control" name="nickname" maxlength="100" placeholder="可留空，默认同账号" />
+        <label class="form-label" style="margin-top:10px">角色</label>
+        <select class="form-control" name="role_id">
+          <option value="">默认（访客）</option>
+          ${roleOptions}
+        </select>
+        <label class="form-label" style="margin-top:10px">所属部门</label>
+        <select class="form-control" name="department">
+          ${departmentSelectHtml(departments, "", { emptyLabel: "不限 / 管理员" })}
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>取消</button>
+        <button type="submit" class="btn btn-primary">创建</button>
+      </div>
+    </form>`;
+  document.body.appendChild(mask);
+  mask.querySelector("[data-close]").onclick = () => mask.remove();
+  mask.addEventListener("click", (e) => {
+    if (e.target === mask) mask.remove();
+  });
+  mask.querySelector("form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.currentTarget);
+    const username = String(fd.get("username") || "").trim();
+    const email = String(fd.get("email") || "").trim();
+    const password = String(fd.get("password") || "");
+    const nickname = String(fd.get("nickname") || "").trim() || username;
+    const roleId = String(fd.get("role_id") || "").trim();
+    const department = String(fd.get("department") || "").trim().toUpperCase();
+    if (!username || !email || !password) {
+      toast("请填写账号、邮箱与密码", "error");
+      return;
+    }
+    if (password.length < 8) {
+      toast("密码至少 8 位", "error");
+      return;
+    }
+    const submitBtn = ev.currentTarget.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "创建中…";
+    }
+    try {
+      const payload = { username, email, password, nickname };
+      if (roleId) payload.role_ids = [roleId];
+      const created = await api.post("/users", payload);
+      if (department && created?.id) {
+        await api.put(`/users/${created.id}`, { department });
+      }
+      toast("用户创建成功", "success");
+      mask.remove();
+      pageUsers();
+    } catch (e) {
+      toast(e.message || "用户创建失败", "error");
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "创建";
+      }
+    }
+  };
+}
+
 async function pageUsers() {
   if (!requirePerm("user:read", "用户管理")) return;
   const canWrite = hasPermission("user:write");
@@ -219,7 +402,7 @@ async function pageUsers() {
     document.getElementById("pageRoot").innerHTML = `
       <div class="card">
         <div class="toolbar"><strong>用户列表</strong><span class="spacer"></span>
-          <span class="text-muted">${canWrite ? "可新增用户、启用/禁用与变更角色" : "只读（需超级管理员 user:write）"}</span>
+          <span class="text-muted">${canWrite ? "可新增用户、启用/禁用、变更角色、删除权限更低的用户" : "只读"}</span>
           ${canWrite ? `<button class="btn btn-sm" id="btnNewUser">新增用户</button>` : ""}
           <input class="form-control" id="userKw" style="width:200px;height:32px" placeholder="搜索账号/昵称" />
         </div>
@@ -229,15 +412,24 @@ async function pageUsers() {
             ${items
               .map((u) => {
                 const st = u.status === "active" ? `<span class="badge badge-success">活跃</span>` : u.status === "disabled" ? `<span class="badge badge-danger">禁用</span>` : `<span class="badge badge-warning">待验证</span>`;
+                const locked = Boolean(u.is_super_admin) && !isSuperAdmin();
+                const myRank = isSuperAdmin() ? 100 : isAdminUser() ? 50 : 0;
+                const targetRank = maxRoleRankOfUser(u);
+                const canManage = canWrite && !locked && targetRank < myRank;
                 const ops = canWrite
-                  ? `<button class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
-                    <button class="btn btn-text btn-sm" data-role="${escapeHtml(u.id)}">变更角色</button>`
+                  ? locked
+                    ? `<span class="text-muted">权限不足</span>`
+                    : canManage
+                      ? `<button class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
+                    <button class="btn btn-secondary btn-sm" data-role="${escapeHtml(u.id)}">变更角色</button>
+                    <button class="btn btn-danger btn-sm" data-del-user="${escapeHtml(u.id)}">删除</button>`
+                      : `<span class="text-muted">权限不足</span>`
                   : `<span class="text-muted">—</span>`;
                 return `<tr data-id="${escapeHtml(u.id)}">
                   <td>${escapeHtml(u.username)}</td>
                   <td>${escapeHtml(u.nickname || "-")}</td>
                   <td>${st}</td>
-                  <td>${escapeHtml((u.roles || [u.role]).filter(Boolean).join(", "))}</td>
+                  <td>${escapeHtml(roleLabelOf(u))}</td>
                   <td>${escapeHtml(u.department || "-")}</td>
                   <td>${formatDateTime(u.created_at)}</td>
                   <td>${formatDateTime(u.last_login_at)}</td>
@@ -251,7 +443,6 @@ async function pageUsers() {
 
     if (!canWrite) return;
 
-    // 启用/禁用（危险操作确认）
     document.querySelectorAll("[data-toggle]").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.getAttribute("data-toggle");
@@ -274,79 +465,141 @@ async function pageUsers() {
       };
     });
 
-    // 角色变更：管理员只能分配已有角色，密码仍由用户本人管理。
     document.querySelectorAll("[data-role]").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.getAttribute("data-role");
+        const user = items.find((x) => x.id === id);
+        if (!user) return;
+        if (user.is_super_admin && !isSuperAdmin()) {
+          toast("无权变更超级管理员", "error");
+          return;
+        }
+        const myRank = isSuperAdmin() ? 100 : isAdminUser() ? 50 : 0;
+        if (maxRoleRankOfUser(user) >= myRank) {
+          toast("只能变更权限低于自己的用户", "error");
+          return;
+        }
         try {
-          const roleData = await api.get("/roles?page=1&page_size=100");
-          const choices = (roleData.items || []).map((role) => `${role.id} = ${role.name}`).join("\n");
-          const picked = prompt(`输入要分配的角色 ID（可从下列选择一个）：\n${choices}`);
-          if (!picked) return;
-          await api.put(`/users/${id}/roles`, { role_ids: [picked.trim()] });
-          toast("用户角色已更新", "success");
-          pageUsers();
+          const [roleData, departments] = await Promise.all([
+            api.get("/roles?page=1&page_size=100"),
+            loadDepartmentOptions(),
+          ]);
+          openUserRolePicker({
+            user,
+            roles: roleData.items || [],
+            departments,
+            onSave: async ({ role_ids, department }) => {
+              await api.put(`/users/${id}/roles`, { role_ids });
+              await api.put(`/users/${id}`, { department });
+              toast("用户角色与部门已更新", "success");
+              pageUsers();
+            },
+          });
         } catch (e) {
           toast(e.message || "角色更新失败", "error");
         }
       };
     });
 
+    document.querySelectorAll("[data-del-user]").forEach((btn) => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute("data-del-user");
+        const user = items.find((x) => x.id === id);
+        if (!user) return;
+        const ok = await confirmDialog({
+          title: "删除用户",
+          message: `确定删除用户「${user.username}」？此操作不可恢复。`,
+          confirmText: "删除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await api.delete(`/users/${id}`);
+          toast("用户已删除", "success");
+          pageUsers();
+        } catch (e) {
+          toast(e.message || "删除失败", "error");
+        }
+      };
+    });
+
     const btnNewUser = document.getElementById("btnNewUser");
-    if (btnNewUser) btnNewUser.onclick = async () => {
-      const username = prompt("新用户账号（3-50 位）：");
-      if (!username) return;
-      const email = prompt("新用户邮箱：");
-      const password = prompt("初始密码（至少 8 位）：");
-      if (!email || !password) return;
-      const nickname = prompt("昵称（可留空）：") || username;
-      try {
-        await api.post("/users", { username, email, password, nickname });
-        toast("用户创建成功，已自动分配注册用户角色", "success");
-        pageUsers();
-      } catch (e) {
-        toast(e.message || "用户创建失败", "error");
-      }
-    };
+    if (btnNewUser) btnNewUser.onclick = () => openCreateUserForm();
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
 }
 
 /* ========== 角色管理 ========== */
+async function fetchPermissionCatalog() {
+  const raw = await api.get("/roles/permissions");
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw?.items)) return raw.items;
+  return [];
+}
+
 function openRolePermissionForm({ title, role = null, permissionData, onSave }) {
+  closeAllModals();
   const dialogId = `roleForm-${Date.now()}`;
   const selected = new Set(role?.permissions || []);
-  document.body.insertAdjacentHTML("beforeend", `
-    <div id="${dialogId}" class="modal-backdrop" style="display:flex">
+  const perms = Array.isArray(permissionData) ? permissionData : [];
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div id="${dialogId}" class="modal-backdrop" style="display:flex">
       <form class="modal" style="max-width:680px;width:92%">
         <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
         <div class="modal-body">
-          <label class="form-label">角色名称</label>
-          <input class="form-control" name="name" value="${escapeHtml(role?.name || "")}" ${role ? "readonly" : "required"} />
+          <label class="form-label">角色标识（英文/下划线，创建后不可改）</label>
+          <input class="form-control" name="name" value="${escapeHtml(role?.name || "")}" ${role ? "readonly" : "required"} placeholder="例如 dept_a_staff" />
           <label class="form-label" style="margin-top:12px">角色说明</label>
-          <input class="form-control" name="description" value="${escapeHtml(role?.description || "")}" />
-          <p class="text-muted" style="margin-top:14px">功能权限（可不勾选，创建无权限角色）</p>
-          <div class="checkbox-grid">${permissionData.map((item) => `<label><input type="checkbox" name="permission" value="${escapeHtml(item.code)}" ${selected.has(item.code) ? "checked" : ""}> ${escapeHtml(item.name)} <small>${escapeHtml(item.code)}</small></label>`).join("")}</div>
+          <input class="form-control" name="description" value="${escapeHtml(role?.description || "")}" placeholder="中文说明" />
+          <p class="text-muted" style="margin-top:14px">功能权限（显示为中文名；可不勾选）</p>
+          <div class="checkbox-grid">${
+            perms.length
+              ? perms
+                  .map(
+                    (item) =>
+                      `<label><input type="checkbox" name="permission" value="${escapeHtml(item.code)}" ${selected.has(item.code) ? "checked" : ""}>
+                        ${escapeHtml(item.name || item.code)} <small>${escapeHtml(item.code)}</small></label>`
+                  )
+                  .join("")
+              : `<span class="text-muted">暂无权限清单</span>`
+          }</div>
         </div>
-        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>取消</button><button class="btn btn-primary" type="submit">保存</button></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close>取消</button>
+          <button class="btn btn-primary" type="submit">保存</button>
+        </div>
       </form>
-    </div>`);
+    </div>`
+  );
   const root = document.getElementById(dialogId);
   root.querySelector("[data-close]").onclick = () => root.remove();
+  root.onclick = (e) => {
+    if (e.target === root) root.remove();
+  };
   root.querySelector("form").onsubmit = async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") || "").trim();
+    if (!name || name.length < 2) return toast("角色标识至少 2 个字符", "error");
     try {
-      await onSave({ name: String(form.get("name") || "").trim(), description: String(form.get("description") || "").trim(), permission_codes: form.getAll("permission") });
+      await onSave({
+        name,
+        description: String(form.get("description") || "").trim(),
+        permission_codes: form.getAll("permission").map(String),
+      });
       root.remove();
       pageRoles();
-    } catch (error) { toast(error.message || "保存失败", "error"); }
+    } catch (error) {
+      toast(error.message || "保存失败", "error");
+    }
   };
 }
 
 async function pageRoles() {
   if (!requirePerm("role:read", "角色管理")) return;
+  const canWrite = hasPermission("role:write");
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载角色…</div>`;
   try {
     const data = await api.get("/roles?page=1&page_size=50");
@@ -354,25 +607,31 @@ async function pageRoles() {
     document.getElementById("pageRoot").innerHTML = `
       <div class="card">
         <div class="toolbar"><strong>角色与权限</strong><span class="spacer"></span>
-          ${hasPermission("role:write") ? `<button class="btn btn-sm" id="btnNewRole">新建角色</button>` : `<span class="text-muted">只读（需超级管理员 role:write）</span>`}
+          ${canWrite ? `<button class="btn btn-sm" id="btnNewRole">新建角色</button>` : `<span class="text-muted">只读</span>`}
         </div>
+        <p class="text-muted" style="margin:0 0 12px">内置：超级管理员 / 管理员 / 员工 / 访客。仅超级管理员可配置角色权限；普通管理员不可修改「超级管理员」角色。</p>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>名称</th><th>说明</th><th>内置</th><th>权限数</th><th>操作</th></tr></thead>
+          <thead><tr><th>中文名</th><th>标识</th><th>说明</th><th>内置</th><th>权限数</th><th>操作</th></tr></thead>
           <tbody>
             ${items
-              .map(
-                (r) => `<tr>
-                  <td>${escapeHtml(r.name)}</td>
+              .filter((r) => r.name !== "user")
+              .map((r) => {
+                const isSuperRole = r.name === "super_admin";
+                const canEditThis = canWrite && (isSuperAdmin() || !isSuperRole);
+                const canConfigPerms = isSuperAdmin() && canEditThis;
+                return `<tr>
+                  <td><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
+                  <td><code>${escapeHtml(r.name)}</code></td>
                   <td>${escapeHtml(r.description || "")}</td>
                   <td>${r.is_builtin ? `<span class="badge">内置</span>` : "-"}</td>
                   <td>${(r.permissions || []).length}</td>
                   <td>
                     <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
-                    ${hasPermission("role:write") ? `<button class="btn btn-text btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
-                    ${!r.is_builtin && hasPermission("role:write") ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
+                    ${canConfigPerms ? `<button class="btn btn-secondary btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
+                    ${!r.is_builtin && canEditThis ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
                   </td>
-                </tr>`
-              )
+                </tr>`;
+              })
               .join("")}
           </tbody>
         </table></div>
@@ -381,23 +640,63 @@ async function pageRoles() {
     const btnNew = document.getElementById("btnNewRole");
     if (btnNew) {
       btnNew.onclick = async () => {
-        const permissionData = await api.get("/roles/permissions");
-        openRolePermissionForm({ title: "新建角色", permissionData, onSave: async (data) => { await api.post("/roles", data); toast("角色创建成功", "success"); } });
+        try {
+          const permissionData = await fetchPermissionCatalog();
+          openRolePermissionForm({
+            title: "新建角色",
+            permissionData,
+            onSave: async (payload) => {
+              await api.post("/roles", payload);
+              toast("角色创建成功", "success");
+            },
+          });
+        } catch (e) {
+          toast(e.message || "无法加载权限清单", "error");
+        }
       };
     }
 
     document.querySelectorAll("[data-view]").forEach((btn) => {
-      btn.onclick = () => {
+      btn.onclick = async () => {
         const r = items.find((x) => x.id === btn.getAttribute("data-view"));
-        alert((r?.permissions || []).join("\n") || "无");
+        if (!r) return;
+        try {
+          const catalog = await fetchPermissionCatalog();
+          const byCode = Object.fromEntries(catalog.map((p) => [p.code, p.name]));
+          const lines = (r.permissions || []).map((c) => `${byCode[c] || c}（${c}）`);
+          await openWideModal({
+            title: `${r.display_name || r.name} · 权限`,
+            bodyHtml: `<pre style="white-space:pre-wrap;font-size:13px;margin:0">${escapeHtml(lines.join("\n") || "无权限")}</pre>`,
+            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
+          });
+        } catch {
+          alert((r.permissions || []).join("\n") || "无");
+        }
       };
     });
 
     document.querySelectorAll("[data-edit-perms]").forEach((btn) => {
       btn.onclick = async () => {
+        if (!isSuperAdmin()) {
+          toast("仅超级管理员可配置角色权限", "error");
+          return;
+        }
         const role = items.find((item) => item.id === btn.getAttribute("data-edit-perms"));
-        const permissionData = await api.get("/roles/permissions");
-        openRolePermissionForm({ title: `配置“${role.name}”权限`, role, permissionData, onSave: async (data) => { await api.put(`/roles/${role.id}/permissions`, { permission_codes: data.permission_codes }); toast("角色权限已更新", "success"); } });
+        if (!role) return;
+        try {
+          const permissionData = await fetchPermissionCatalog();
+          openRolePermissionForm({
+            title: `配置「${role.display_name || role.name}」权限`,
+            role,
+            permissionData,
+            onSave: async (payload) => {
+              await api.put(`/roles/${role.id}/permissions`, { permission_codes: payload.permission_codes });
+              toast("角色权限已更新", "success");
+            },
+          });
+        } catch (e) {
+          toast(e.message || "无法打开权限配置", "error");
+        }
       };
     });
 
@@ -419,34 +718,617 @@ async function pageRoles() {
   }
 }
 
+/* ========== 部门管理 ========== */
+async function loadDepartmentOptions() {
+  try {
+    const data = await api.get("/departments?page=1&page_size=100");
+    return data.items || [];
+  } catch {
+    return [];
+  }
+}
+
+/** 访问范围（部门驱动）标签：GUEST=访客专用；其余=部门；空=私有 */
+function accessScopeBadge(k) {
+  const dept = String(k.department || "").toUpperCase();
+  if (dept === "GUEST") return `<span class="badge badge-success">访客专用</span>`;
+  if (dept) return `<span class="badge">${escapeHtml(k.department)} 部门</span>`;
+  return `<span class="badge">私有</span>`;
+}
+
+function departmentSelectHtml(departments, selectedCode, { emptyLabel = "不限 / 未分配" } = {}) {
+  const cur = String(selectedCode || "").toUpperCase();
+  const opts = (departments || [])
+    .filter((d) => d.is_enabled !== false)
+    .map(
+      (d) =>
+        `<option value="${escapeHtml(d.code)}" ${String(d.code).toUpperCase() === cur ? "selected" : ""}>${escapeHtml(d.name)}（${escapeHtml(d.code)}）</option>`
+    )
+    .join("");
+  return `<option value="">${escapeHtml(emptyLabel)}</option>${opts}`;
+}
+
+function openDepartmentForm({ title, dept = null, onSave }) {
+  closeAllModals();
+  const mask = document.createElement("div");
+  mask.className = "modal-mask";
+  mask.innerHTML = `
+    <form class="modal" style="width:min(520px,calc(100vw - 24px))">
+      <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
+      <div class="modal-body">
+        <label class="form-label">部门编码</label>
+        <input class="form-control" name="code" required maxlength="50" value="${escapeHtml(dept?.code || "")}" placeholder="如 A / B / HR" ${dept ? "" : ""} />
+        <label class="form-label" style="margin-top:10px">部门名称</label>
+        <input class="form-control" name="name" required maxlength="100" value="${escapeHtml(dept?.name || "")}" placeholder="如 研发部" />
+        <label class="form-label" style="margin-top:10px">部门介绍</label>
+        <textarea class="form-control" name="description" rows="4" placeholder="可选，介绍部门职责与范围">${escapeHtml(dept?.description || "")}</textarea>
+        <label class="form-label" style="margin-top:10px;display:flex;align-items:center;gap:8px">
+          <input type="checkbox" name="is_enabled" ${dept?.is_enabled === false ? "" : "checked"} /> 启用
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>`;
+  document.body.appendChild(mask);
+  mask.querySelector("[data-close]").onclick = () => mask.remove();
+  mask.addEventListener("click", (e) => {
+    if (e.target === mask) mask.remove();
+  });
+  mask.querySelector("form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.currentTarget);
+    const payload = {
+      code: String(fd.get("code") || "").trim(),
+      name: String(fd.get("name") || "").trim(),
+      description: String(fd.get("description") || "").trim() || null,
+      is_enabled: !!fd.get("is_enabled"),
+    };
+    if (!payload.code || !payload.name) {
+      toast("请填写编码与名称", "error");
+      return;
+    }
+    try {
+      await onSave(payload);
+      mask.remove();
+      if (dept?.id) pageDepartmentDetail(String(dept.id));
+      else pageDepartments();
+    } catch (e) {
+      toast(e.message || "保存失败", "error");
+    }
+  };
+}
+
+async function pageDepartments() {
+  if (!requirePerm("department:read", "部门管理")) return;
+  const canWrite = hasPermission("department:write");
+  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载部门…</div>`;
+  try {
+    const data = await api.get("/departments?page=1&page_size=100");
+    const items = data.items || [];
+    document.getElementById("pageRoot").innerHTML = `
+      <div class="card">
+        <div class="toolbar"><strong>部门管理</strong><span class="spacer"></span>
+          ${canWrite ? `<button type="button" class="btn btn-sm" id="btnNewDept">新建部门</button>` : `<span class="text-muted">只读</span>`}
+        </div>
+        <p class="text-muted" style="margin:0 0 12px">维护部门介绍、成员与关联知识库。用户/知识库上的部门字段与部门编码对应，用于上传与访问隔离。</p>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>名称</th><th>编码</th><th>介绍</th><th>成员</th><th>知识库</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>
+            ${
+              items.length
+                ? items
+                    .map(
+                      (d) => `<tr>
+                        <td><strong>${escapeHtml(d.name)}</strong></td>
+                        <td><code>${escapeHtml(d.code)}</code></td>
+                        <td class="text-muted" style="max-width:240px">${escapeHtml(d.description || "-")}</td>
+                        <td>${escapeHtml(d.member_count ?? 0)}</td>
+                        <td>${escapeHtml(d.kb_count ?? 0)}</td>
+                        <td>${d.is_enabled ? `<span class="badge badge-success">启用</span>` : `<span class="badge">停用</span>`}</td>
+                        <td style="white-space:nowrap">
+                          <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments/${escapeHtml(d.id)}">管理</button>
+                          ${
+                            canWrite
+                              ? `<button type="button" class="btn btn-text btn-sm" data-edit="${escapeHtml(d.id)}">编辑</button>
+                                 ${String(d.code).toUpperCase() === "GUEST" ? "" : `<button type="button" class="btn btn-text btn-sm" data-del="${escapeHtml(d.id)}" style="color:var(--color-danger)">删除</button>`}`
+                              : ""
+                          }
+                        </td>
+                      </tr>`
+                    )
+                    .join("")
+                : `<tr><td colspan="7" class="text-muted">暂无部门</td></tr>`
+            }
+          </tbody>
+        </table></div>
+      </div>`;
+
+    document.querySelectorAll("[data-go]").forEach((btn) => {
+      btn.onclick = () => navigate(btn.getAttribute("data-go"));
+    });
+
+    const btnNew = document.getElementById("btnNewDept");
+    if (btnNew) {
+      btnNew.onclick = () =>
+        openDepartmentForm({
+          title: "新建部门",
+          onSave: async (payload) => {
+            await api.post("/departments", payload);
+            toast("部门已创建", "success");
+          },
+        });
+    }
+
+    document.querySelectorAll("[data-edit]").forEach((btn) => {
+      btn.onclick = () => {
+        const d = items.find((x) => String(x.id) === btn.getAttribute("data-edit"));
+        if (!d) return;
+        openDepartmentForm({
+          title: `编辑「${d.name}」`,
+          dept: d,
+          onSave: async (payload) => {
+            await api.put(`/departments/${d.id}`, payload);
+            toast("部门已更新", "success");
+          },
+        });
+      };
+    });
+
+    document.querySelectorAll("[data-del]").forEach((btn) => {
+      btn.onclick = async () => {
+        const ok = await confirmDialog({
+          title: "删除部门",
+          message: "删除后将解除该部门下成员与知识库关联，确定继续？",
+          confirmText: "删除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await api.delete(`/departments/${btn.getAttribute("data-del")}`);
+          toast("已删除", "success");
+          pageDepartments();
+        } catch (e) {
+          toast(e.message || "删除失败", "error");
+        }
+      };
+    });
+  } catch (e) {
+    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function pageDepartmentDetail(deptId) {
+  if (!requirePerm("department:read", "部门详情")) return;
+  const canWrite = hasPermission("department:write");
+  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载部门详情…</div>`;
+  try {
+    const d = await api.get(`/departments/${deptId}`);
+    const members = d.members || [];
+    const kbs = d.knowledge_bases || [];
+    document.getElementById("pageRoot").innerHTML = `
+      <div class="card" style="margin-bottom:12px">
+        <div class="toolbar">
+          <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments">返回列表</button>
+          <span class="spacer"></span>
+          ${canWrite ? `<button type="button" class="btn btn-sm" id="btnEditDept">编辑介绍</button>` : ""}
+        </div>
+        <h3 style="margin:8px 0 4px">${escapeHtml(d.name)} <code style="font-size:13px">${escapeHtml(d.code)}</code></h3>
+        <p class="text-muted" style="margin:0 0 8px">${d.is_enabled ? "启用" : "停用"} · 成员 ${members.length} · 知识库 ${kbs.length}</p>
+        <div style="padding:12px;background:var(--color-bg-tint,#f8f9fa);border-radius:8px;white-space:pre-wrap">${escapeHtml(d.description || "暂无部门介绍")}</div>
+      </div>
+      <div class="ht-layout">
+        <div class="card">
+          <div class="ht-runs-toolbar">
+            <h3 class="card-title">成员列表</h3>
+            ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnAddMember">添加成员</button>` : ""}
+          </div>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>用户名</th><th>昵称</th><th>状态</th><th></th></tr></thead>
+            <tbody>
+              ${
+                members.length
+                  ? members
+                      .map(
+                        (u) => `<tr>
+                          <td>${escapeHtml(u.username)}</td>
+                          <td>${escapeHtml(u.nickname || "-")}</td>
+                          <td>${escapeHtml(u.status || "-")}</td>
+                          <td>${
+                            canWrite
+                              ? `<button type="button" class="btn btn-text btn-sm" data-rm-user="${escapeHtml(u.id)}" style="color:var(--color-danger)">移除</button>`
+                              : ""
+                          }</td>
+                        </tr>`
+                      )
+                      .join("")
+                  : `<tr><td colspan="4" class="text-muted">暂无成员</td></tr>`
+              }
+            </tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="ht-runs-toolbar">
+            <h3 class="card-title">关联知识库</h3>
+            ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnAddKb">关联知识库</button>` : ""}
+          </div>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>名称</th><th>可见性</th><th>状态</th><th></th></tr></thead>
+            <tbody>
+              ${
+                kbs.length
+                  ? kbs
+                      .map(
+                        (k) => `<tr>
+                          <td>${escapeHtml(k.name)}</td>
+                          <td>${k.visibility === "public" ? `<span class="badge badge-success">公开(访客可见)</span>` : `<span class="badge">部门内</span>`}</td>
+                          <td>${escapeHtml(k.status || "-")}</td>
+                          <td style="white-space:nowrap">
+                            <button type="button" class="btn btn-text btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">打开</button>
+                            ${
+                              canWrite
+                                ? `<button type="button" class="btn btn-text btn-sm" data-rm-kb="${escapeHtml(k.id)}" style="color:var(--color-danger)">解除</button>`
+                                : ""
+                            }
+                          </td>
+                        </tr>`
+                      )
+                      .join("")
+                  : `<tr><td colspan="4" class="text-muted">暂无关联知识库</td></tr>`
+              }
+            </tbody>
+          </table></div>
+        </div>
+      </div>`;
+
+    document.querySelectorAll("[data-go]").forEach((btn) => {
+      btn.onclick = () => navigate(btn.getAttribute("data-go"));
+    });
+
+    const btnEdit = document.getElementById("btnEditDept");
+    if (btnEdit) {
+      btnEdit.onclick = () =>
+        openDepartmentForm({
+          title: `编辑「${d.name}」`,
+          dept: d,
+          onSave: async (payload) => {
+            await api.put(`/departments/${d.id}`, payload);
+            toast("部门已更新", "success");
+          },
+        });
+    }
+
+    const btnAddMember = document.getElementById("btnAddMember");
+    if (btnAddMember) {
+      btnAddMember.onclick = async () => {
+        try {
+          const usersData = await api.get("/users?page=1&page_size=100");
+          const users = (usersData.items || []).filter(
+            (u) => String(u.department || "").toUpperCase() !== String(d.code).toUpperCase()
+          );
+          if (!users.length) {
+            toast("没有可添加的用户（均已属于本部门或列表为空）", "error");
+            return;
+          }
+          const options = users
+            .map(
+              (u) =>
+                `<label style="display:block;margin:4px 0"><input type="checkbox" name="uid" value="${escapeHtml(u.id)}" /> ${escapeHtml(u.nickname || u.username)} <small class="text-muted">${escapeHtml(u.username)}${u.department ? ` · 当前 ${escapeHtml(u.department)}` : ""}</small></label>`
+            )
+            .join("");
+          const mask = document.createElement("div");
+          mask.className = "modal-mask";
+          mask.innerHTML = `
+            <form class="modal" style="width:min(480px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+              <div class="modal-header"><h3>添加成员到「${escapeHtml(d.name)}」</h3></div>
+              <div class="modal-body">${options}</div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close>取消</button>
+                <button type="submit" class="btn btn-primary">加入</button>
+              </div>
+            </form>`;
+          document.body.appendChild(mask);
+          mask.querySelector("[data-close]").onclick = () => mask.remove();
+          mask.addEventListener("click", (e) => {
+            if (e.target === mask) mask.remove();
+          });
+          mask.querySelector("form").onsubmit = async (ev) => {
+            ev.preventDefault();
+            const ids = [...ev.currentTarget.querySelectorAll('input[name="uid"]:checked')].map((el) => el.value);
+            if (!ids.length) {
+              toast("请至少选择一名用户", "error");
+              return;
+            }
+            try {
+              await api.post(`/departments/${d.id}/members`, { user_ids: ids });
+              toast("成员已加入", "success");
+              mask.remove();
+              pageDepartmentDetail(deptId);
+            } catch (err) {
+              toast(err.message || "添加失败", "error");
+            }
+          };
+        } catch (e) {
+          toast(e.message || "加载用户失败", "error");
+        }
+      };
+    }
+
+    document.querySelectorAll("[data-rm-user]").forEach((btn) => {
+      btn.onclick = async () => {
+        const ok = await confirmDialog({
+          title: "移除成员",
+          message: "确定将该用户移出本部门？",
+          confirmText: "移除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await api.delete(`/departments/${d.id}/members/${btn.getAttribute("data-rm-user")}`);
+          toast("已移除", "success");
+          pageDepartmentDetail(deptId);
+        } catch (e) {
+          toast(e.message || "移除失败", "error");
+        }
+      };
+    });
+
+    const btnAddKb = document.getElementById("btnAddKb");
+    if (btnAddKb) {
+      btnAddKb.onclick = async () => {
+        try {
+          const kbData = await api.get("/knowledge-bases?page=1&page_size=100");
+          const list = (kbData.items || []).filter(
+            (k) => String(k.department || "").toUpperCase() !== String(d.code).toUpperCase()
+          );
+          if (!list.length) {
+            toast("没有可关联的知识库", "error");
+            return;
+          }
+          const options = list
+            .map(
+              (k) =>
+                `<label style="display:block;margin:4px 0"><input type="checkbox" name="kid" value="${escapeHtml(k.id)}" /> ${escapeHtml(k.name)} <small class="text-muted">${k.department ? `当前 ${escapeHtml(k.department)}` : "不限部门"}</small></label>`
+            )
+            .join("");
+          const mask = document.createElement("div");
+          mask.className = "modal-mask";
+          mask.innerHTML = `
+            <form class="modal" style="width:min(480px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+              <div class="modal-header"><h3>关联知识库到「${escapeHtml(d.name)}」</h3></div>
+              <div class="modal-body">${options}</div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close>取消</button>
+                <button type="submit" class="btn btn-primary">关联</button>
+              </div>
+            </form>`;
+          document.body.appendChild(mask);
+          mask.querySelector("[data-close]").onclick = () => mask.remove();
+          mask.addEventListener("click", (e) => {
+            if (e.target === mask) mask.remove();
+          });
+          mask.querySelector("form").onsubmit = async (ev) => {
+            ev.preventDefault();
+            const ids = [...ev.currentTarget.querySelectorAll('input[name="kid"]:checked')].map((el) => el.value);
+            if (!ids.length) {
+              toast("请至少选择一个知识库", "error");
+              return;
+            }
+            try {
+              await api.post(`/departments/${d.id}/knowledge-bases`, { kb_ids: ids });
+              toast("知识库已关联", "success");
+              mask.remove();
+              pageDepartmentDetail(deptId);
+            } catch (err) {
+              toast(err.message || "关联失败", "error");
+            }
+          };
+        } catch (e) {
+          toast(e.message || "加载知识库失败", "error");
+        }
+      };
+    }
+
+    document.querySelectorAll("[data-rm-kb]").forEach((btn) => {
+      btn.onclick = async () => {
+        const ok = await confirmDialog({
+          title: "解除关联",
+          message: "确定解除该知识库与本部门的关联？",
+          confirmText: "解除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await api.delete(`/departments/${d.id}/knowledge-bases/${btn.getAttribute("data-rm-kb")}`);
+          toast("已解除", "success");
+          pageDepartmentDetail(deptId);
+        } catch (e) {
+          toast(e.message || "解除失败", "error");
+        }
+      };
+    });
+  } catch (e) {
+    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+  }
+}
+
 /* ========== 大模型管理 ========== */
+function openModelForm({ title, model = null, onSave }) {
+  closeAllModals();
+  const dialogId = `modelForm-${Date.now()}`;
+  const m = model || {};
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div id="${dialogId}" class="modal-backdrop" style="display:flex">
+      <form class="modal" style="max-width:560px;width:92%">
+        <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
+        <div class="modal-body">
+          <label class="form-label">显示名称</label>
+          <input class="form-control" name="name" required value="${escapeHtml(m.name || "")}" />
+          <label class="form-label" style="margin-top:10px">类型</label>
+          <select class="form-control" name="model_type" ${model ? "disabled" : ""}>
+            ${["llm", "embedding", "rerank"]
+              .map((t) => `<option value="${t}" ${m.model_type === t ? "selected" : ""}>${t}</option>`)
+              .join("")}
+          </select>
+          <label class="form-label" style="margin-top:10px">提供方</label>
+          <input class="form-control" name="provider" value="${escapeHtml(m.provider || "")}" placeholder="openai / dashscope / …" />
+          <label class="form-label" style="margin-top:10px">模型名称</label>
+          <input class="form-control" name="model_name" required value="${escapeHtml(m.model_name || "")}" placeholder="如 qwen-plus" />
+          <label class="form-label" style="margin-top:10px">API Base URL</label>
+          <input class="form-control" name="base_url" value="${escapeHtml(m.base_url || "")}" placeholder="https://…" />
+          <label class="form-label" style="margin-top:10px">API Key 环境变量名</label>
+          <input class="form-control" name="api_key_env" value="${escapeHtml(m.api_key_env || "")}" placeholder="如 LLM_API_KEY（密钥写在 .env）" />
+          <label class="form-label" style="margin-top:10px">优先级（数值越小越优先）</label>
+          <input class="form-control" name="priority" type="number" min="0" max="10000" value="${escapeHtml(String(m.priority ?? 100))}" />
+          <label style="display:flex;gap:8px;align-items:center;margin-top:12px">
+            <input type="checkbox" name="is_default" ${m.is_default ? "checked" : ""} /> 设为同类型默认
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close>取消</button>
+          <button class="btn btn-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>`
+  );
+  const root = document.getElementById(dialogId);
+  root.querySelector("[data-close]").onclick = () => root.remove();
+  root.onclick = (e) => {
+    if (e.target === root) root.remove();
+  };
+  root.querySelector("form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const payload = {
+      name: String(form.get("name") || "").trim(),
+      model_type: String(form.get("model_type") || m.model_type || "llm"),
+      provider: String(form.get("provider") || "").trim() || "custom",
+      model_name: String(form.get("model_name") || "").trim(),
+      base_url: String(form.get("base_url") || "").trim() || null,
+      api_key_env: String(form.get("api_key_env") || "").trim() || null,
+      priority: Number(form.get("priority") || 100),
+      is_default: form.get("is_default") === "on",
+      is_enabled: true,
+    };
+    try {
+      await onSave(payload);
+      root.remove();
+      pageModels();
+    } catch (error) {
+      toast(error.message || "保存失败", "error");
+    }
+  };
+}
+
 async function pageModels() {
   if (!requirePerm("model:read", "大模型管理")) return;
+  const canWrite = hasPermission("model:write");
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载模型配置…</div>`;
   try {
     const data = await api.get("/models?page=1&page_size=50");
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
       <div class="card">
-        <h2 class="card-title">LLM / Embedding / Rerank</h2>
+        <div class="toolbar">
+          <strong>LLM / Embedding / Rerank</strong>
+          <span class="spacer"></span>
+          ${
+            canWrite
+              ? `<button class="btn btn-sm" id="btnNewModel">添加模型</button>`
+              : `<span class="text-muted">仅超级管理员可配置密钥与优先级（需 model:write）</span>`
+          }
+        </div>
+        <p class="text-muted" style="margin:0 0 12px">API Key 通过环境变量名引用（写入 .env），不在库中明文存储。同类型按优先级升序选用。</p>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>名称</th><th>类型</th><th>提供方</th><th>启用</th><th>默认</th><th>操作</th></tr></thead>
+          <thead><tr><th>名称</th><th>类型</th><th>模型</th><th>URL</th><th>Key 环境变量</th><th>优先级</th><th>启用</th><th>默认</th><th>操作</th></tr></thead>
           <tbody>
             ${items
               .map(
                 (m) => `<tr>
                   <td>${escapeHtml(m.name)}</td>
                   <td><span class="badge">${escapeHtml(m.model_type)}</span></td>
-                  <td>${escapeHtml(m.provider || "-")}</td>
+                  <td>${escapeHtml(m.model_name || "-")}</td>
+                  <td class="text-muted" style="max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(m.base_url || "")}">${escapeHtml(m.base_url || "-")}</td>
+                  <td><code>${escapeHtml(m.api_key_env || "-")}</code>${m.has_api_key ? ' <span class="badge badge-success">已配置</span>' : ""}</td>
+                  <td>${escapeHtml(m.priority ?? 100)}</td>
                   <td>${m.is_enabled ? `<span class="badge badge-success">是</span>` : `<span class="badge">否</span>`}</td>
                   <td>${m.is_default ? "✓" : "-"}</td>
-                  <td><button class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button></td>
+                  <td>
+                    ${
+                      canWrite
+                        ? `<button class="btn btn-text btn-sm" data-edit="${escapeHtml(m.id)}">编辑</button>
+                           <button class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>
+                           ${!m.is_default ? `<button class="btn btn-text btn-sm" data-default="${escapeHtml(m.id)}">设默认</button>` : ""}`
+                        : `<span class="text-muted">—</span>`
+                    }
+                  </td>
                 </tr>`
               )
               .join("")}
           </tbody>
         </table></div>
+      </div>
+      <div class="card" id="usageCard" style="margin-top:16px">
+        <div class="toolbar">
+          <strong>模型用量监测（Langfuse）</strong>
+          <span class="spacer"></span>
+          <select class="form-control" id="usageModel" style="width:auto;min-width:180px">
+            <option value="">全部模型</option>
+            ${Array.from(new Set(items.map((m) => m.model_name).filter(Boolean)))
+              .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+              .join("")}
+          </select>
+          <select class="form-control" id="usageDays" style="width:auto;margin-left:8px">
+            <option value="7">近 7 天</option>
+            <option value="30" selected>近 30 天</option>
+            <option value="90">近 90 天</option>
+          </select>
+          <button class="btn btn-sm" id="usageRefresh" style="margin-left:8px">刷新</button>
+        </div>
+        <div id="usageBody"><div class="loading">加载用量…</div></div>
       </div>`;
+
+    const usageModelSel = document.getElementById("usageModel");
+    const usageDaysSel = document.getElementById("usageDays");
+    const usageRefreshBtn = document.getElementById("usageRefresh");
+    const loadUsage = () =>
+      renderModelUsage(usageModelSel.value, Number(usageDaysSel.value || 30));
+    if (usageModelSel) usageModelSel.onchange = loadUsage;
+    if (usageDaysSel) usageDaysSel.onchange = loadUsage;
+    if (usageRefreshBtn) usageRefreshBtn.onclick = loadUsage;
+    loadUsage();
+
+    const btnNew = document.getElementById("btnNewModel");
+    if (btnNew) {
+      btnNew.onclick = () =>
+        openModelForm({
+          title: "添加模型",
+          onSave: async (payload) => {
+            await api.post("/models", payload);
+            toast("模型已添加", "success");
+          },
+        });
+    }
+
+    document.querySelectorAll("[data-edit]").forEach((btn) => {
+      btn.onclick = () => {
+        const model = items.find((x) => x.id === btn.getAttribute("data-edit"));
+        if (!model) return;
+        openModelForm({
+          title: `编辑「${model.name}」`,
+          model,
+          onSave: async (payload) => {
+            const { model_type, ...rest } = payload;
+            await api.put(`/models/${model.id}`, rest);
+            if (payload.is_default) await api.put(`/models/${model.id}/default`, { is_default: true });
+            toast("模型已更新", "success");
+          },
+        });
+      };
+    });
+
     document.querySelectorAll("[data-toggle]").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.getAttribute("data-toggle");
@@ -460,8 +1342,112 @@ async function pageModels() {
         }
       };
     });
+
+    document.querySelectorAll("[data-default]").forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          await api.put(`/models/${btn.getAttribute("data-default")}/default`, { is_default: true });
+          toast("已设为默认", "success");
+          pageModels();
+        } catch (e) {
+          toast(e.message || "设置失败", "error");
+        }
+      };
+    });
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function fmtNum(n) {
+  const v = Number(n || 0);
+  return v.toLocaleString("zh-CN");
+}
+
+async function renderModelUsage(model, days) {
+  const body = document.getElementById("usageBody");
+  if (!body) return;
+  body.innerHTML = `<div class="loading">加载用量…</div>`;
+  try {
+    const qs = new URLSearchParams({ days: String(days || 30) });
+    if (model) qs.set("model", model);
+    const data = await api.get(`/models/usage?${qs.toString()}`);
+    if (!data.enabled) {
+      body.innerHTML = `<p class="text-muted">未启用 Langfuse 监测：请在 <code>.env</code> 配置 <code>LANGFUSE_PUBLIC_KEY</code> / <code>LANGFUSE_SECRET_KEY</code> 后重启后端。</p>`;
+      return;
+    }
+    const t = data.totals || {};
+    const models = data.models || [];
+    const rangeLabel = `${(data.range && data.range.days) || days} 天`;
+    const noticeHtml = data.notice
+      ? `<div style="background:#fff7e6;border:1px solid #ffe0a3;color:#8a5a00;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px">⚠ ${escapeHtml(data.notice)}</div>`
+      : "";
+
+    const statCard = (label, value) =>
+      `<div style="flex:1;min-width:120px;background:var(--surface-2,#f6f7f9);border-radius:8px;padding:12px 14px">
+         <div class="text-muted" style="font-size:12px">${label}</div>
+         <div style="font-size:20px;font-weight:600;margin-top:4px">${value}</div>
+       </div>`;
+
+    let html = `
+      ${noticeHtml}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+        ${statCard("总 Token", fmtNum(t.total_tokens))}
+        ${statCard("输入 Token", fmtNum(t.input_tokens))}
+        ${statCard("输出 Token", fmtNum(t.output_tokens))}
+        ${statCard("调用次数", fmtNum(t.total_observations))}
+        ${statCard("会话数", fmtNum(t.total_traces))}
+        ${statCard("成本 (USD)", "$" + (t.total_cost || 0).toFixed(4))}
+      </div>
+      <p class="text-muted" style="margin:0 0 10px">统计范围：最近 ${rangeLabel}${model ? `，模型：<code>${escapeHtml(model)}</code>` : "（全部模型）"}</p>`;
+
+    if (!models.length) {
+      html += `<p class="text-muted">该时间范围内暂无用量数据。发起几次问答后再刷新即可看到统计。</p>`;
+      body.innerHTML = html;
+      return;
+    }
+
+    html += `<div class="table-wrap"><table class="table">
+      <thead><tr><th>模型</th><th>输入 Token</th><th>输出 Token</th><th>总 Token</th><th>调用次数</th><th>会话数</th><th>成本 (USD)</th></tr></thead>
+      <tbody>
+        ${models
+          .map(
+            (mu) => `<tr>
+              <td><code>${escapeHtml(mu.model)}</code></td>
+              <td>${fmtNum(mu.input_tokens)}</td>
+              <td>${fmtNum(mu.output_tokens)}</td>
+              <td>${fmtNum(mu.total_tokens)}</td>
+              <td>${fmtNum(mu.total_observations)}</td>
+              <td>${fmtNum(mu.total_traces)}</td>
+              <td>$${(mu.total_cost || 0).toFixed(4)}</td>
+            </tr>`
+          )
+          .join("")}
+      </tbody></table></div>`;
+
+    if (model && models.length === 1 && (models[0].daily || []).length) {
+      const daily = models[0].daily;
+      html += `<h4 style="margin:16px 0 8px">每日趋势</h4>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>日期</th><th>输入 Token</th><th>输出 Token</th><th>总 Token</th><th>调用次数</th></tr></thead>
+          <tbody>
+            ${daily
+              .map(
+                (d) => `<tr>
+                  <td>${escapeHtml(d.date || "-")}</td>
+                  <td>${fmtNum(d.input_tokens)}</td>
+                  <td>${fmtNum(d.output_tokens)}</td>
+                  <td>${fmtNum(d.total_tokens)}</td>
+                  <td>${fmtNum(d.observations)}</td>
+                </tr>`
+              )
+              .join("")}
+          </tbody></table></div>`;
+    }
+
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<p class="text-danger">用量加载失败：${escapeHtml(e.message || "未知错误")}</p>`;
   }
 }
 
@@ -480,14 +1466,14 @@ async function pageKbList() {
           ${hasPermission("kb:write") ? `<button class="btn btn-sm" id="btnCreateKb">创建知识库</button>` : `<span class="text-muted">只读</span>`}
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>名称</th><th>类型</th><th>可见性</th><th>文档数</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>名称</th><th>类型</th><th>访问范围</th><th>文档数</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
           <tbody>
             ${items
               .map(
                 (k) => `<tr>
                   <td>${escapeHtml(k.name)}</td>
                   <td>${escapeHtml(k.type || "-")}</td>
-                  <td>${k.visibility === "public" ? `<span class="badge badge-success">公开</span>` : `<span class="badge">受限</span>`}</td>
+                  <td>${accessScopeBadge(k)}</td>
                   <td>${escapeHtml(k.doc_count ?? 0)}</td>
                   <td>${escapeHtml(k.status || "-")}</td>
                   <td>${formatDateTime(k.updated_at)}</td>
@@ -505,24 +1491,81 @@ async function pageKbList() {
     const btnCreate = document.getElementById("btnCreateKb");
     if (btnCreate) {
       btnCreate.onclick = async () => {
-        const name = prompt("知识库名称");
-        if (!name) return;
-        try {
-          const kb = await api.post("/knowledge-bases", {
-            name,
-            type: "general",
-            visibility: "restricted",
-            description: "",
-            tags: [],
-            embedding_model: "text-embedding-v3",
-            chunk_size: 500,
-            chunk_overlap: 50,
-          });
-          toast("创建成功", "success");
-          navigate(`/admin/knowledge-bases/${kb.id || ""}`);
-        } catch (e) {
-          toast(e.message || "创建失败", "error");
-        }
+        const departments = await loadDepartmentOptions();
+        const deptOptions = departmentSelectHtml(departments, "", { emptyLabel: "私有（仅创建者/授权可见）" });
+        const mask = document.createElement("div");
+        mask.className = "modal-mask";
+        mask.innerHTML = `
+          <form class="modal" style="width:min(520px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+            <div class="modal-header"><h3>创建知识库</h3></div>
+            <div class="modal-body">
+              <label class="form-label">名称 <span style="color:var(--color-danger)">*</span></label>
+              <input class="form-control" name="name" required maxlength="200" placeholder="知识库名称" />
+              <label class="form-label" style="margin-top:10px">类型</label>
+              <select class="form-control" name="type">
+                <option value="general">通用知识</option>
+                <option value="technical">技术文档</option>
+                <option value="product">产品手册</option>
+                <option value="faq">FAQ</option>
+              </select>
+              <label class="form-label" style="margin-top:10px">访问范围（所属部门）</label>
+              <select class="form-control" name="department">${deptOptions}</select>
+              <p class="text-muted" style="margin:6px 0 0;font-size:12px">访客专用=所有人可见；某部门=仅该部门员工与管理员；私有=仅创建者/被授权者与管理员。</p>
+              <label class="form-label" style="margin-top:10px">标签（逗号分隔）</label>
+              <input class="form-control" name="tags" maxlength="500" placeholder="可选" />
+              <label class="form-label" style="margin-top:10px">描述</label>
+              <textarea class="form-control" name="description" rows="3" maxlength="2000" placeholder="可选"></textarea>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-close>取消</button>
+              <button type="submit" class="btn btn-primary">创建</button>
+            </div>
+          </form>`;
+        document.body.appendChild(mask);
+        mask.querySelector("[data-close]").onclick = () => mask.remove();
+        mask.addEventListener("click", (e) => {
+          if (e.target === mask) mask.remove();
+        });
+        mask.querySelector("form").onsubmit = async (ev) => {
+          ev.preventDefault();
+          const fd = new FormData(ev.currentTarget);
+          const kbName = String(fd.get("name") || "").trim();
+          const dept = String(fd.get("department") || "").trim().toUpperCase() || null;
+          const tags = String(fd.get("tags") || "")
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean);
+          if (!kbName) {
+            toast("请填写名称", "error");
+            return;
+          }
+          const submitBtn = ev.currentTarget.querySelector('button[type="submit"]');
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "创建中…";
+          }
+          try {
+            const kb = await api.post("/knowledge-bases", {
+              name: kbName,
+              type: String(fd.get("type") || "general"),
+              description: String(fd.get("description") || "").trim(),
+              tags,
+              department: dept,
+              embedding_model: "text-embedding-v3",
+              chunk_size: 500,
+              chunk_overlap: 50,
+            });
+            toast("创建成功", "success");
+            mask.remove();
+            navigate(`/admin/knowledge-bases/${kb.id || ""}`);
+          } catch (e) {
+            toast(e.message || "创建失败", "error");
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = "创建";
+            }
+          }
+        };
       };
     }
   } catch (e) {
@@ -553,7 +1596,7 @@ async function pageKbDetail(id) {
             <h3 class="card-title">${escapeHtml(k.name)}</h3>
             <p>${escapeHtml(k.description || "无简介")}</p>
             <p class="text-muted">类型：${escapeHtml(k.type)} · 标签：${escapeHtml((k.tags || []).join(", ") || "-")}</p>
-            <p>可见性：${escapeHtml(k.visibility)} · 状态：${escapeHtml(k.status)}</p>
+            <p>访问范围：${accessScopeBadge(k)} · 状态：${escapeHtml(k.status)}</p>
             <p>Embedding：${escapeHtml(k.embedding_model)} · 索引版本：${escapeHtml(k.current_index_version)}</p>
             <p>分段：size=${escapeHtml(k.chunk_size)} overlap=${escapeHtml(k.chunk_overlap)}</p>
           </div>
@@ -564,8 +1607,8 @@ async function pageKbDetail(id) {
               <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
             </div>
             <p class="text-muted">创建：${formatDateTime(k.created_at)}<br/>更新：${formatDateTime(k.updated_at)}</p>
-            <h4>权限配置说明</h4>
-            <p class="text-muted">可为用户/角色配置只读、上传、维护、回退等资源级权限；变更将记审计日志。前端隐藏菜单不能替代后端鉴权。</p>
+            <h4>权限与部门</h4>
+            <p class="text-muted">知识库可绑定部门（A/B）；员工仅能上传本部门或授权库。管理员与超管不受部门隔离。</p>
           </div>
         </div>`;
 
@@ -574,6 +1617,7 @@ async function pageKbDetail(id) {
       const btnEdit = document.getElementById("btnEditKb");
       if (btnEdit) {
         btnEdit.onclick = async () => {
+          const departments = await loadDepartmentOptions();
           const result = await openWideModal({
             title: "编辑知识库",
             bodyHtml: `
@@ -586,11 +1630,11 @@ async function pageKbDetail(id) {
                 <option value="faq" ${k.type === "faq" ? "selected" : ""}>FAQ</option>
                 <option value="general" ${k.type === "general" ? "selected" : ""}>通用知识</option>
               </select>
-              <label class="text-muted">可见性</label>
-              <select class="form-control" id="editVisibility" style="margin:6px 0 12px">
-                <option value="public" ${k.visibility === "public" ? "selected" : ""}>公开</option>
-                <option value="restricted" ${k.visibility === "restricted" ? "selected" : ""}>受限</option>
+              <label class="text-muted">访问范围（所属部门）</label>
+              <select class="form-control" id="editDepartment" style="margin:6px 0 12px">
+                ${departmentSelectHtml(departments, k.department, { emptyLabel: "私有（仅创建者/授权可见）" })}
               </select>
+              <p class="text-muted" style="margin:0 0 12px;font-size:12px">访客专用=所有人可见；某部门=仅该部门员工与管理员；私有=仅创建者/被授权者与管理员。</p>
               <label class="text-muted">标签（逗号分隔）</label>
               <input class="form-control" id="editTags" maxlength="500" value="${escapeHtml((k.tags || []).join(", "))}" style="margin:6px 0 12px" />
               <label class="text-muted">描述</label>
@@ -602,7 +1646,7 @@ async function pageKbDetail(id) {
           if (!result) return;
           const name = result.root.querySelector("#editName")?.value?.trim();
           const type = result.root.querySelector("#editType")?.value;
-          const visibility = result.root.querySelector("#editVisibility")?.value;
+          const department = result.root.querySelector("#editDepartment")?.value || "";
           const tags = result.root.querySelector("#editTags")?.value?.split(",").map((t) => t.trim()).filter(Boolean) || [];
           const description = result.root.querySelector("#editDesc")?.value?.trim() || undefined;
           result.root.remove();
@@ -611,7 +1655,13 @@ async function pageKbDetail(id) {
             return;
           }
           try {
-            await api.put(`/knowledge-bases/${id}`, { name, type, visibility, tags, description });
+            await api.put(`/knowledge-bases/${id}`, {
+              name,
+              type,
+              tags,
+              description,
+              department: department || null,
+            });
             toast("已更新", "success");
             await render();
           } catch (e) {
@@ -643,18 +1693,65 @@ async function pageKbDetail(id) {
       const btnRevec = document.getElementById("btnRevec");
       if (btnRevec) {
         btnRevec.onclick = async () => {
-          const ok = await confirmDialog({
+          const result = await openWideModal({
             title: "重新向量化",
-            message: "将创建变更快照并后台重建索引，期间在线问答不中断。确定开始？",
-            confirmText: "开始",
-            danger: false,
+            bodyHtml: `
+              <p class="text-muted" style="margin-top:0">将先创建变更快照，再按下方分段规则重切并重建索引；在线问答不中断。</p>
+              <label class="text-muted">分段长度 chunk_size（100–5000）</label>
+              <input class="form-control" id="rvChunkSize" type="number" min="100" max="5000" value="${escapeHtml(k.chunk_size ?? 500)}" style="margin:6px 0 12px" />
+              <label class="text-muted">分段重叠 chunk_overlap（0–1000）</label>
+              <input class="form-control" id="rvChunkOverlap" type="number" min="0" max="1000" value="${escapeHtml(k.chunk_overlap ?? 50)}" style="margin:6px 0 12px" />
+              <label class="text-muted">分段模式</label>
+              <select class="form-control" id="rvSplitMode" style="margin:6px 0 12px">
+                <option value="fixed">固定长度 fixed</option>
+                <option value="sliding">滑动窗口 sliding</option>
+                <option value="paragraph">按段落 paragraph</option>
+                <option value="heading">按标题 heading</option>
+              </select>
+              <label class="text-muted">嵌入模型（可留空沿用当前：${escapeHtml(k.embedding_model || "-")}）</label>
+              <input class="form-control" id="rvEmbed" value="" placeholder="留空则不改" style="margin:6px 0 12px" />
+              <label style="display:flex;gap:8px;align-items:center;margin:8px 0">
+                <input type="checkbox" id="rvApplyDocs" checked /> 同步规则到库内全部待处理文档
+              </label>
+              <label style="display:flex;gap:8px;align-items:center;margin:8px 0">
+                <input type="checkbox" id="rvForceAll" /> 强制处理全部文档（含非 ready）
+              </label>`,
+            actionsHtml: `
+              <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+              <button type="button" class="btn" data-act="ok">开始重建</button>`,
           });
-          if (!ok) return;
+          if (!result) return;
+          const chunk_size = Number(result.root.querySelector("#rvChunkSize")?.value || 0);
+          const chunk_overlap = Number(result.root.querySelector("#rvChunkOverlap")?.value || 0);
+          const split_mode = result.root.querySelector("#rvSplitMode")?.value || "fixed";
+          const embedding_model = (result.root.querySelector("#rvEmbed")?.value || "").trim();
+          const apply_to_documents = Boolean(result.root.querySelector("#rvApplyDocs")?.checked);
+          const force_all = Boolean(result.root.querySelector("#rvForceAll")?.checked);
+          result.root.remove();
+          if (!Number.isFinite(chunk_size) || chunk_size < 100 || chunk_size > 5000) {
+            toast("分段长度须在 100–5000", "error");
+            return;
+          }
+          if (!Number.isFinite(chunk_overlap) || chunk_overlap < 0 || chunk_overlap > 1000) {
+            toast("分段重叠须在 0–1000", "error");
+            return;
+          }
           try {
-            await api.post(`/knowledge-bases/${id}/re-vectorize`, {});
-            toast("已提交向量化任务", "success");
+            const task = await api.post(`/knowledge-bases/${id}/re-vectorize`, {
+              chunk_size,
+              chunk_overlap,
+              split_mode,
+              apply_to_documents,
+              force_all,
+              ...(embedding_model ? { embedding_model } : {}),
+            });
+            toast(
+              `已提交重建任务（${task?.total_count ?? 0} 篇文档）${task?.target_version ? " · " + task.target_version : ""}`,
+              "success"
+            );
+            await render();
           } catch (e) {
-            toast(e.message || "已模拟提交任务", "success");
+            toast(e.message || "提交失败", "error");
           }
         };
       }
@@ -670,6 +1767,118 @@ async function pageKbDetail(id) {
 async function pageDocuments(kbId) {
   if (!requirePerm("doc:read", "文档管理")) return;
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载文档…</div>`;
+
+  const formatSize = (n) => {
+    const v = Number(n);
+    if (!Number.isFinite(v) || v < 0) return "-";
+    if (v < 1024) return `${v} B`;
+    if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+    return `${(v / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const openDocPreview = async (docId, filenameHint) => {
+    try {
+      const [content, chunksPage] = await Promise.all([
+        api.get(`/knowledge-bases/${kbId}/documents/${docId}/content`),
+        api
+          .get(`/knowledge-bases/${kbId}/documents/${docId}/chunks?page=1&page_size=50`)
+          .catch(() => ({ items: [], total: 0 })),
+      ]);
+      const bodyText =
+        content.preview_source === "raw_text"
+          ? content.raw_text
+          : content.normalized_text || content.raw_text || "";
+      const chunks = chunksPage.items || [];
+      const rules = content.segment_rules || {};
+      const emptyHint =
+        content.preview_source === "empty"
+          ? `<p class="text-muted">尚无解析正文（状态：${escapeHtml(content.status)}）。上传后流水线完成后可预览。</p>`
+          : "";
+
+      const mask = document.createElement("div");
+      mask.className = "modal-mask";
+      mask.innerHTML = `
+        <div class="modal" role="dialog" aria-modal="true" style="width:min(820px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+          <h3 class="modal-title">预览 · ${escapeHtml(filenameHint || content.filename || "文档")}</h3>
+          <div class="modal-body">
+            <p class="text-muted" style="margin-top:0">
+              状态 <span class="badge">${escapeHtml(content.status)}</span>
+              · 分段 ${escapeHtml(content.chunk_count ?? 0)}
+              · 清洗 ${escapeHtml(content.normalized_char_count ?? 0)} 字
+              · 原文 ${escapeHtml(content.raw_char_count ?? 0)} 字
+              ${content.truncated ? " · <span class='badge badge-warning'>内容已截断</span>" : ""}
+              ${content.error_message ? ` · <span class="text-danger">${escapeHtml(content.error_message)}</span>` : ""}
+            </p>
+            <p class="text-muted" style="margin:0 0 10px">
+              分段规则：size=${escapeHtml(rules.chunk_size ?? "-")}
+              overlap=${escapeHtml(rules.chunk_overlap ?? "-")}
+              mode=${escapeHtml(rules.split_mode || "fixed")}
+            </p>
+            <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+              <button type="button" class="btn btn-sm" data-tab="normalized">清洗正文</button>
+              <button type="button" class="btn btn-sm btn-secondary" data-tab="raw">解析原文</button>
+              <button type="button" class="btn btn-sm btn-secondary" data-tab="chunks">分段列表（${escapeHtml(chunksPage.total ?? chunks.length)}）</button>
+            </div>
+            ${emptyHint}
+            <pre id="docPreviewBody" style="background:var(--color-bg-tint,#f8f9fa);padding:12px;border-radius:8px;overflow:auto;max-height:420px;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;margin:0"></pre>
+            <div id="docPreviewChunks" style="display:none;max-height:420px;overflow:auto">
+              ${
+                chunks.length
+                  ? chunks
+                      .map(
+                        (c) => `<div style="border:1px solid var(--color-border,#e0e0e0);border-radius:8px;padding:10px;margin-bottom:8px">
+                          <div class="text-muted" style="font-size:12px;margin-bottom:6px">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字${c.is_enabled === false ? " · 已禁用" : ""}</div>
+                          <div style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.45">${escapeHtml(c.content || "")}</div>
+                        </div>`
+                      )
+                      .join("")
+                  : `<p class="text-muted">暂无分段</p>`
+              }
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" data-close>关闭</button>
+          </div>
+        </div>`;
+      document.body.appendChild(mask);
+
+      const bodyEl = mask.querySelector("#docPreviewBody");
+      const chunksEl = mask.querySelector("#docPreviewChunks");
+      bodyEl.textContent = bodyText || "（无内容）";
+
+      const setActiveTab = (tab) => {
+        mask.querySelectorAll("[data-tab]").forEach((b) => {
+          const on = b.getAttribute("data-tab") === tab;
+          b.className = on ? "btn btn-sm" : "btn btn-sm btn-secondary";
+        });
+        if (tab === "chunks") {
+          bodyEl.style.display = "none";
+          chunksEl.style.display = "block";
+          return;
+        }
+        bodyEl.style.display = "block";
+        chunksEl.style.display = "none";
+        bodyEl.textContent =
+          tab === "raw"
+            ? content.raw_text || "（无原文）"
+            : content.normalized_text || content.raw_text || "（无内容）";
+      };
+
+      mask.querySelectorAll("[data-tab]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setActiveTab(btn.getAttribute("data-tab"));
+        });
+      });
+      mask.querySelector("[data-close]").onclick = () => mask.remove();
+      mask.addEventListener("click", (e) => {
+        if (e.target === mask) mask.remove();
+      });
+    } catch (e) {
+      toast(e.message || "预览失败", "error");
+    }
+  };
+
   try {
     const data = await api.get(`/knowledge-bases/${kbId}/documents?page=1&page_size=50`);
     const items = data.items || [];
@@ -683,16 +1892,20 @@ async function pageDocuments(kbId) {
       <div class="card">
         <h3 class="card-title">文档列表 · 分段 / 预处理 / 向量化状态</h3>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>文件名</th><th>大小</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>文件名</th><th>大小</th><th>分段</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
           <tbody>
             ${items
               .map(
                 (d) => `<tr>
                   <td>${escapeHtml(d.filename || d.name)}</td>
-                  <td>${escapeHtml(d.size ?? "-")}</td>
+                  <td>${escapeHtml(formatSize(d.file_size ?? d.size))}</td>
+                  <td>${escapeHtml(d.chunk_count ?? 0)}</td>
                   <td><span class="badge">${escapeHtml(d.status)}</span></td>
                   <td>${formatDateTime(d.created_at)}</td>
-                  <td><button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button></td>
+                  <td>
+                    <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">预览</button>
+                    ${hasPermission("doc:write") ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
+                  </td>
                 </tr>`
               )
               .join("")}
@@ -710,9 +1923,12 @@ async function pageDocuments(kbId) {
         toast("上传成功", "success");
         pageDocuments(kbId);
       } catch (e) {
-        toast(e.message || "演示模式：已模拟上传", "success");
+        toast(e.message || "上传失败", "error");
       }
     };
+    document.querySelectorAll("[data-preview]").forEach((btn) => {
+      btn.onclick = () => openDocPreview(btn.getAttribute("data-preview"), btn.getAttribute("data-name"));
+    });
     document.querySelectorAll("[data-del]").forEach((btn) => {
       btn.onclick = async () => {
         const ok = await confirmDialog({ title: "删除文档", message: "将删除文档及其向量数据，确定？", confirmText: "删除" });
@@ -1121,43 +2337,655 @@ async function pageSnapshots(kbId) {
 /* ========== 命中率测试 ========== */
 async function pageHitTest() {
   if (!requirePerm("test:read", "命中率测试")) return;
+  const canWrite = hasPermission("test:write");
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载测试数据…</div>`;
+
+  const pct = (v) => {
+    if (v == null || Number.isNaN(Number(v))) return "-";
+    return `${Math.round(Number(v) * 1000) / 10}%`;
+  };
+
+  const strategyLabel = (s) =>
+    ({ vector: "向量", fulltext: "全文", hybrid: "混合" }[s] || s || "-");
+
+  const openRunDetail = async (runId) => {
+    try {
+      const detail = await api.get(`/hit-tests/runs/${runId}`);
+      const summary = detail.summary || detail;
+      const results = detail.results || [];
+      const mask = document.createElement("div");
+      mask.className = "modal-mask";
+      mask.innerHTML = `
+        <div class="modal" role="dialog" style="width:min(900px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+          <h3 class="modal-title">运行详情</h3>
+          <div class="modal-body">
+            <p class="text-muted" style="margin-top:0">
+              策略 ${escapeHtml(strategyLabel(summary.strategy))}
+              · TopK ${escapeHtml(summary.top_k)}
+              · 命中 ${escapeHtml(summary.hit_count)}/${escapeHtml(summary.total_questions)}
+              （${pct(summary.hit_rate ?? summary.recall_at_k)}）
+              · MRR ${summary.mrr != null ? Number(summary.mrr).toFixed(3) : "-"}
+              · 均耗时 ${summary.avg_elapsed_ms != null ? Math.round(summary.avg_elapsed_ms) + "ms" : "-"}
+            </p>
+            <div class="table-wrap"><table class="table">
+              <thead><tr><th>问题</th><th>命中</th><th>排名</th><th>分数</th><th>耗时</th><th>召回摘要</th></tr></thead>
+              <tbody>
+                ${
+                  results.length
+                    ? results
+                        .map((r) => {
+                          const chunks = r.actual_chunks || [];
+                          const tip = chunks
+                            .slice(0, 2)
+                            .map((c) => `${c.doc_name || c.doc_id || ""}#${c.chunk_index ?? ""}`)
+                            .join("；");
+                          return `<tr>
+                            <td style="max-width:220px">${escapeHtml(r.question)}</td>
+                            <td>${r.is_hit ? `<span class="badge badge-success">是</span>` : `<span class="badge badge-danger">否</span>`}</td>
+                            <td>${escapeHtml(r.hit_rank ?? "-")}</td>
+                            <td>${r.score != null ? Number(r.score).toFixed(3) : "-"}</td>
+                            <td>${escapeHtml(r.elapsed_ms != null ? r.elapsed_ms + "ms" : "-")}</td>
+                            <td class="text-muted" style="max-width:240px;font-size:12px">${escapeHtml(tip || "无召回")}</td>
+                          </tr>`;
+                        })
+                        .join("")
+                    : `<tr><td colspan="6" class="text-muted">无明细</td></tr>`
+                }
+              </tbody>
+            </table></div>
+          </div>
+          <div class="modal-actions">
+            <a class="btn btn-secondary" href="/api/v1/hit-tests/runs/${escapeHtml(runId)}/export" id="btnExportCsv" target="_blank" rel="noopener">导出 CSV</a>
+            <button type="button" class="btn btn-secondary" data-close>关闭</button>
+          </div>
+        </div>`;
+      document.body.appendChild(mask);
+      mask.querySelector("[data-close]").onclick = () => mask.remove();
+      mask.addEventListener("click", (e) => {
+        if (e.target === mask) mask.remove();
+      });
+      // 带 token 下载 CSV（a[href] 无法带 Authorization）
+      const exportBtn = mask.querySelector("#btnExportCsv");
+      if (exportBtn) {
+        exportBtn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          try {
+            const { getAccessToken } = await import("/assets/js/auth.js");
+            const res = await fetch(`/api/v1/hit-tests/runs/${runId}/export`, {
+              headers: { Authorization: `Bearer ${getAccessToken()}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `hit_test_run_${runId}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          } catch (err) {
+            toast(err.message || "导出失败", "error");
+          }
+        });
+      }
+    } catch (e) {
+      toast(e.message || "加载详情失败", "error");
+    }
+  };
+
+  const openCreateCase = async (docsByKb) => {
+    const kbOptions = Object.keys(docsByKb)
+      .map((id) => {
+        const meta = docsByKb[id];
+        return `<option value="${escapeHtml(id)}">${escapeHtml(meta.name)}</option>`;
+      })
+      .join("");
+    const mask = document.createElement("div");
+    mask.className = "modal-mask";
+    mask.innerHTML = `
+      <form class="modal" style="width:min(640px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+        <div class="modal-header"><h3>新建测试用例</h3></div>
+        <div class="modal-body">
+          <label class="form-label">用例名称</label>
+          <input class="form-control" name="name" required placeholder="如：员工手册回归集" />
+          <label class="form-label" style="margin-top:10px">说明</label>
+          <input class="form-control" name="description" placeholder="可选" />
+          <label class="form-label" style="margin-top:10px">关联知识库（用于选择期望文档）</label>
+          <select class="form-control" id="caseKbPick">${kbOptions || "<option value=''>暂无知识库</option>"}</select>
+          <label class="form-label" style="margin-top:10px">问题列表（每行一题；可用「|文档名关键字」标注期望文档）</label>
+          <textarea class="form-control" name="questions" rows="8" required placeholder="试用期年假怎么折算？|年假
+加班如何申请调休？|考勤
+礼品超过多少需要上交？|合规"></textarea>
+          <p class="text-muted" style="margin:8px 0 0;font-size:12px">示例：问题文本|文档名关键字。关键字会匹配该库文档文件名，自动填入 expected_doc_ids。</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close>取消</button>
+          <button type="submit" class="btn btn-primary">创建</button>
+        </div>
+      </form>`;
+    document.body.appendChild(mask);
+    mask.querySelector("[data-close]").onclick = () => mask.remove();
+    mask.addEventListener("click", (e) => {
+      if (e.target === mask) mask.remove();
+    });
+    mask.querySelector("form").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.currentTarget);
+      const name = String(fd.get("name") || "").trim();
+      const description = String(fd.get("description") || "").trim() || null;
+      const kbId = mask.querySelector("#caseKbPick")?.value || "";
+      const docs = (docsByKb[kbId] && docsByKb[kbId].docs) || [];
+      const lines = String(fd.get("questions") || "")
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (!name || !lines.length) {
+        toast("请填写名称与至少一个问题", "error");
+        return;
+      }
+      const questions = lines.map((line) => {
+        const [q, hint] = line.split("|").map((s) => s.trim());
+        let expected_doc_ids = null;
+        if (hint) {
+          const matched = docs.filter((d) => String(d.filename || "").includes(hint));
+          if (matched.length) expected_doc_ids = matched.map((d) => d.id);
+        }
+        return { question: q || line, expected_doc_ids, expected_chunk_ids: null };
+      });
+      try {
+        await api.post("/hit-tests/cases", { name, description, questions });
+        toast("用例已创建", "success");
+        mask.remove();
+        pageHitTest();
+      } catch (e) {
+        toast(e.message || "创建失败", "error");
+      }
+    };
+  };
+
   try {
-    const cases = await api.get("/hit-tests/cases?page=1&page_size=20");
-    const runs = await api.get("/hit-tests/runs?page=1&page_size=20");
+    const [casesData, runsData, kbData] = await Promise.all([
+      api.get("/hit-tests/cases?page=1&page_size=50"),
+      api.get("/hit-tests/runs?page=1&page_size=30"),
+      api.get("/knowledge-bases?page=1&page_size=50"),
+    ]);
+    // 兼容 data 解包异常或直接返回数组
+    const cases = Array.isArray(casesData)
+      ? casesData
+      : Array.isArray(casesData?.items)
+        ? casesData.items
+        : [];
+    const runs = Array.isArray(runsData)
+      ? runsData
+      : Array.isArray(runsData?.items)
+        ? runsData.items
+        : [];
+    const kbs = Array.isArray(kbData)
+      ? kbData
+      : Array.isArray(kbData?.items)
+        ? kbData.items
+        : [];
+
+    // 预加载各库文档（创建用例时匹配期望文档）
+    const docsByKb = {};
+    await Promise.all(
+      kbs.map(async (kb) => {
+        try {
+          const d = await api.get(`/knowledge-bases/${kb.id}/documents?page=1&page_size=100`);
+          docsByKb[String(kb.id)] = { name: kb.name, docs: d.items || [] };
+        } catch {
+          docsByKb[String(kb.id)] = { name: kb.name, docs: [] };
+        }
+      })
+    );
+
+    const HT_CASE_KEY = "htSelectedCaseIds";
+    let selectedCaseIds = [];
+    try {
+      const raw = sessionStorage.getItem(HT_CASE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        const valid = new Set(cases.map((c) => String(c.id)));
+        selectedCaseIds = parsed.map(String).filter((id) => valid.has(id));
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const caseNameOf = (caseId) => {
+      const c = cases.find((x) => String(x.id) === String(caseId || ""));
+      return c ? c.name : caseId ? "（用例已删）" : "临时问题";
+    };
+
     document.getElementById("pageRoot").innerHTML = `
-      <div class="detail-grid">
+      <div class="card" style="margin-bottom:12px">
+        <div class="toolbar">
+          <strong>执行命中率测试</strong>
+          <span class="spacer"></span>
+          ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnNewCase">新建用例</button>` : `<span class="text-muted">只读</span>`}
+        </div>
+        <p class="text-muted" style="margin:0 0 12px">在下方用例列表可<strong>多选</strong>后执行；将按选用顺序逐个跑完。不选用时可填临时问题。</p>
+        <div id="htSelectedBanner" class="text-muted" style="margin-bottom:12px;padding:8px 10px;background:var(--color-bg-tint,#f8f9fa);border-radius:8px">
+          当前：未选用用例（将使用临时问题）
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+          <div>
+            <label class="form-label">知识库</label>
+            <select class="form-control" id="htKb" ${kbs.length ? "" : "disabled"}>
+              ${
+                kbs.length
+                  ? kbs
+                      .map((k) => `<option value="${escapeHtml(String(k.id))}">${escapeHtml(k.name)}</option>`)
+                      .join("")
+                  : `<option value="">暂无知识库</option>`
+              }
+            </select>
+          </div>
+          <div>
+            <label class="form-label">检索策略</label>
+            <select class="form-control" id="htStrategy">
+              <option value="hybrid">混合 hybrid</option>
+              <option value="vector">向量 vector</option>
+              <option value="fulltext">全文 fulltext</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Top K</label>
+            <input class="form-control" id="htTopK" type="number" min="1" max="20" value="5" />
+          </div>
+          <div>
+            <label class="form-label">相似度阈值</label>
+            <input class="form-control" id="htThreshold" type="number" min="0" max="1" step="0.05" value="0.15" />
+          </div>
+        </div>
+        <div id="htTempWrap" style="margin-top:12px">
+          <label class="form-label">临时问题（未选用例时使用，每行一题）</label>
+          <textarea class="form-control" id="htQuestions" rows="4" placeholder="试用期员工有年假吗？&#10;加班费如何计算？&#10;礼品超过多少必须上交？"></textarea>
+        </div>
+        <div style="margin-top:12px">
+          ${
+            canWrite
+              ? `<button type="button" class="btn" id="btnRunTest">执行测试</button>
+                 <button type="button" class="btn btn-secondary" id="btnCompare" style="margin-left:8px">多策略对比</button>
+                 <button type="button" class="btn btn-text" id="btnClearCase" style="margin-left:8px">清除已选</button>`
+              : `<span class="text-muted">需要 test:write 才能执行</span>`
+          }
+        </div>
+      </div>
+
+      <div class="ht-layout">
         <div class="card">
-          <h3 class="card-title">测试用例</h3>
-          <div class="table-wrap"><table class="table">
-            <thead><tr><th>问题</th><th>期望文档</th><th>创建时间</th></tr></thead>
-            <tbody>${(cases.items || [])
-              .map((c) => `<tr><td>${escapeHtml(c.question)}</td><td>${escapeHtml(c.expect_doc || "-")}</td><td>${formatDateTime(c.created_at)}</td></tr>`)
-              .join("")}</tbody>
+          <div class="ht-runs-toolbar">
+            <h3 class="card-title">测试用例</h3>
+            ${
+              cases.length
+                ? `<button type="button" class="btn btn-text btn-sm" id="btnSelectAllCases">全选</button>
+                   <button type="button" class="btn btn-text btn-sm" id="btnInvertCases">反选</button>`
+                : ""
+            }
+          </div>
+          <div class="table-wrap"><table class="table" id="htCaseTable">
+            <thead><tr><th style="width:96px">选用</th><th>名称</th><th>题数</th><th>说明</th><th></th></tr></thead>
+            <tbody>
+              ${
+                cases.length
+                  ? cases
+                      .map((c) => {
+                        const cid = String(c.id);
+                        return `<tr class="ht-case-row" data-case-row="${escapeHtml(cid)}">
+                          <td>
+                            <label class="ht-pick" data-pick-wrap="${escapeHtml(cid)}">
+                              <input type="checkbox" value="${escapeHtml(cid)}" data-pick-case="${escapeHtml(cid)}" />
+                              <span data-pick-label>选用</span>
+                            </label>
+                          </td>
+                          <td>${escapeHtml(c.name)}</td>
+                          <td>${escapeHtml(c.question_count)}</td>
+                          <td class="text-muted" style="max-width:180px">${escapeHtml(c.description || "-")}</td>
+                          <td style="white-space:nowrap">
+                            <button type="button" class="btn btn-text btn-sm" data-view-case="${escapeHtml(cid)}">查看</button>
+                            ${canWrite ? `<button type="button" class="btn btn-text btn-sm" data-del-case="${escapeHtml(cid)}" style="color:var(--color-danger)">删除</button>` : ""}
+                          </td>
+                        </tr>`;
+                      })
+                      .join("")
+                  : `<tr><td colspan="5" class="text-muted">暂无用例，请点右上角「新建用例」</td></tr>`
+              }
+            </tbody>
           </table></div>
-          <button class="btn btn-sm" id="btnRunTest" style="margin-top:12px">执行测试</button>
         </div>
         <div class="card">
-          <h3 class="card-title">运行记录</h3>
-          <div class="table-wrap"><table class="table">
-            <thead><tr><th>ID</th><th>命中率</th><th>题目数</th><th>状态</th><th>时间</th></tr></thead>
-            <tbody>${(runs.items || [])
-              .map(
-                (r) => `<tr><td>${escapeHtml(r.id)}</td><td>${Math.round((r.hit_rate || 0) * 100)}%</td><td>${escapeHtml(r.total ?? "-")}</td><td>${escapeHtml(r.status)}</td><td>${formatDateTime(r.created_at)}</td></tr>`
-              )
-              .join("")}</tbody>
+          <div class="ht-runs-toolbar">
+            <h3 class="card-title">运行记录</h3>
+            ${
+              canWrite && runs.length
+                ? `<button type="button" class="btn btn-text btn-sm" id="btnClearAllRuns" style="color:var(--color-danger)">清除全部</button>`
+                : ""
+            }
+          </div>
+          <div class="table-wrap"><table class="table" id="htRunTable">
+            <thead><tr><th>用例</th><th>命中率</th><th>命中</th><th>策略</th><th>时间</th><th></th></tr></thead>
+            <tbody>
+              ${
+                runs.length
+                  ? runs
+                      .map((r) => {
+                        const rate = r.hit_rate != null ? r.hit_rate : r.recall_at_k;
+                        return `<tr data-run-row="${escapeHtml(String(r.id))}">
+                          <td style="max-width:140px">${escapeHtml(caseNameOf(r.case_id))}</td>
+                          <td><strong>${pct(rate)}</strong></td>
+                          <td>${escapeHtml(r.hit_count)}/${escapeHtml(r.total_questions)}</td>
+                          <td>${escapeHtml(strategyLabel(r.strategy))}</td>
+                          <td>${formatDateTime(r.completed_at || r.created_at)}</td>
+                          <td style="white-space:nowrap">
+                            <button type="button" class="btn btn-text btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
+                            ${canWrite ? `<button type="button" class="btn btn-text btn-sm" data-del-run="${escapeHtml(String(r.id))}" style="color:var(--color-danger)">清除</button>` : ""}
+                          </td>
+                        </tr>`;
+                      })
+                      .join("")
+                  : `<tr><td colspan="6" class="text-muted">暂无运行记录</td></tr>`
+              }
+            </tbody>
           </table></div>
         </div>
       </div>`;
-    document.getElementById("btnRunTest").onclick = async () => {
-      try {
-        await api.post("/hit-tests/runs", { questions: ["平台主色是什么？"] });
-        toast("测试任务已受理", "success");
-        pageHitTest();
-      } catch (e) {
-        toast(e.message || "已模拟执行", "success");
+
+    const banner = document.getElementById("htSelectedBanner");
+    const tempWrap = document.getElementById("htTempWrap");
+    const questionsEl = document.getElementById("htQuestions");
+
+    const syncSelectionUi = ({ persist = true } = {}) => {
+      if (persist) {
+        try {
+          if (selectedCaseIds.length) sessionStorage.setItem(HT_CASE_KEY, JSON.stringify(selectedCaseIds));
+          else sessionStorage.removeItem(HT_CASE_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
+      const selected = new Set(selectedCaseIds);
+      document.querySelectorAll(".ht-case-row").forEach((tr) => {
+        const on = selected.has(tr.getAttribute("data-case-row"));
+        tr.classList.toggle("is-selected", on);
+      });
+      document.querySelectorAll("[data-pick-case]").forEach((input) => {
+        const on = selected.has(input.value);
+        input.checked = on;
+        const wrap = input.closest(".ht-pick");
+        if (wrap) {
+          wrap.classList.toggle("is-on", on);
+          const label = wrap.querySelector("[data-pick-label]");
+          if (label) label.textContent = on ? "已选" : "选用";
+        }
+      });
+      const picked = selectedCaseIds
+        .map((id) => cases.find((c) => String(c.id) === id))
+        .filter(Boolean);
+      if (picked.length) {
+        const totalQ = picked.reduce((s, c) => s + Number(c.question_count || 0), 0);
+        const names = picked.map((c) => escapeHtml(c.name)).join("、");
+        banner.innerHTML = `当前已选用 <strong>${picked.length}</strong> 个用例（共 ${totalQ} 题）：${names}。执行测试将按顺序逐个运行。`;
+        banner.style.background = "rgba(52,168,83,0.12)";
+        tempWrap.style.opacity = "0.45";
+        questionsEl.disabled = true;
+        questionsEl.value = "";
+      } else {
+        banner.textContent = "当前：未选用用例（将使用临时问题）";
+        banner.style.background = "var(--color-bg-tint,#f8f9fa)";
+        tempWrap.style.opacity = "1";
+        questionsEl.disabled = false;
       }
     };
+
+    const setCaseSelected = (caseId, on) => {
+      const id = String(caseId || "");
+      if (!id) return;
+      const idx = selectedCaseIds.indexOf(id);
+      if (on && idx < 0) selectedCaseIds.push(id);
+      if (!on && idx >= 0) selectedCaseIds.splice(idx, 1);
+      syncSelectionUi();
+    };
+
+    // 事件委托：避免按钮/标签点击失效
+    const caseTable = document.getElementById("htCaseTable");
+    if (caseTable) {
+      caseTable.addEventListener("change", (e) => {
+        const input = e.target.closest("[data-pick-case]");
+        if (!input) return;
+        setCaseSelected(input.value, !!input.checked);
+      });
+      caseTable.addEventListener("click", (e) => {
+        const viewBtn = e.target.closest("[data-view-case]");
+        if (viewBtn) {
+          const c = cases.find((x) => String(x.id) === viewBtn.getAttribute("data-view-case"));
+          if (!c) return;
+          const qs = (c.questions || [])
+            .map((q, i) => `${i + 1}. ${q.question}${q.expected_doc_ids?.length ? " 〔有期望文档〕" : ""}`)
+            .join("\n");
+          openWideModal({
+            title: c.name,
+            bodyHtml: `<pre style="white-space:pre-wrap;font-size:13px;margin:0">${escapeHtml(qs || "无问题")}</pre>`,
+            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
+          });
+          return;
+        }
+        const delBtn = e.target.closest("[data-del-case]");
+        if (delBtn) {
+          (async () => {
+            const ok = await confirmDialog({
+              title: "删除用例",
+              message: "确定删除该测试用例？",
+              confirmText: "删除",
+              danger: true,
+            });
+            if (!ok) return;
+            try {
+              await api.delete(`/hit-tests/cases/${delBtn.getAttribute("data-del-case")}`);
+              toast("已删除", "success");
+              pageHitTest();
+            } catch (err) {
+              toast(err.message || "删除失败", "error");
+            }
+          })();
+        }
+      });
+    }
+
+    syncSelectionUi({ persist: false });
+
+    const btnSelectAll = document.getElementById("btnSelectAllCases");
+    if (btnSelectAll) {
+      btnSelectAll.onclick = () => {
+        selectedCaseIds = cases.map((c) => String(c.id));
+        syncSelectionUi();
+      };
+    }
+    const btnInvert = document.getElementById("btnInvertCases");
+    if (btnInvert) {
+      btnInvert.onclick = () => {
+        const cur = new Set(selectedCaseIds);
+        selectedCaseIds = cases.map((c) => String(c.id)).filter((id) => !cur.has(id));
+        syncSelectionUi();
+      };
+    }
+
+    const btnClear = document.getElementById("btnClearCase");
+    if (btnClear) {
+      btnClear.onclick = () => {
+        selectedCaseIds = [];
+        syncSelectionUi();
+      };
+    }
+
+    const btnNew = document.getElementById("btnNewCase");
+    if (btnNew) btnNew.onclick = () => openCreateCase(docsByKb);
+
+    const runTable = document.getElementById("htRunTable");
+    if (runTable) {
+      runTable.addEventListener("click", (e) => {
+        const detailBtn = e.target.closest("[data-run]");
+        if (detailBtn) {
+          openRunDetail(detailBtn.getAttribute("data-run"));
+          return;
+        }
+        const delBtn = e.target.closest("[data-del-run]");
+        if (delBtn) {
+          (async () => {
+            const ok = await confirmDialog({
+              title: "清除运行记录",
+              message: "确定清除这条运行记录？",
+              confirmText: "清除",
+              danger: true,
+            });
+            if (!ok) return;
+            try {
+              await api.delete(`/hit-tests/runs/${delBtn.getAttribute("data-del-run")}`);
+              toast("已清除", "success");
+              pageHitTest();
+            } catch (err) {
+              toast(err.message || "清除失败", "error");
+            }
+          })();
+        }
+      });
+    }
+
+    const btnClearAllRuns = document.getElementById("btnClearAllRuns");
+    if (btnClearAllRuns) {
+      btnClearAllRuns.onclick = async () => {
+        const ok = await confirmDialog({
+          title: "清除全部运行记录",
+          message: "将删除全部历史运行记录，不可恢复。确定继续？",
+          confirmText: "全部清除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          const res = await api.delete("/hit-tests/runs");
+          const n = res?.deleted;
+          toast(n != null ? `已清除 ${n} 条运行记录` : "已清除全部记录", "success");
+          pageHitTest();
+        } catch (err) {
+          toast(err.message || "清除失败", "error");
+        }
+      };
+    }
+
+    const buildBasePayload = () => {
+      const kbId = document.getElementById("htKb").value;
+      if (!kbId) throw new Error("请选择知识库");
+      return {
+        kb_ids: [kbId],
+        strategy: document.getElementById("htStrategy").value || "hybrid",
+        top_k: Number(document.getElementById("htTopK").value || 5),
+        similarity_threshold: Number(document.getElementById("htThreshold").value || 0.15),
+      };
+    };
+
+    const btnRun = document.getElementById("btnRunTest");
+    if (btnRun) {
+      btnRun.onclick = async () => {
+        btnRun.disabled = true;
+        const prev = btnRun.textContent;
+        try {
+          const base = buildBasePayload();
+          if (selectedCaseIds.length) {
+            const summaries = [];
+            for (let i = 0; i < selectedCaseIds.length; i += 1) {
+              const caseId = selectedCaseIds[i];
+              btnRun.textContent = `执行中 ${i + 1}/${selectedCaseIds.length}…`;
+              const run = await api.post("/hit-tests/runs", { ...base, case_id: caseId });
+              summaries.push(
+                `${caseNameOf(caseId)} ${run.hit_count}/${run.total_questions}（${pct(run.hit_rate ?? run.recall_at_k)}）`
+              );
+            }
+            toast(`已完成 ${summaries.length} 个用例：${summaries.join("；")}`, "success");
+          } else {
+            btnRun.textContent = "执行中…";
+            const questions = String(document.getElementById("htQuestions").value || "")
+              .split(/\r?\n/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+            if (!questions.length) {
+              throw new Error(cases.length ? "请先勾选测试用例，或填写临时问题" : "请填写临时问题");
+            }
+            const run = await api.post("/hit-tests/runs", { ...base, questions });
+            toast(
+              `临时问题完成：命中 ${run.hit_count}/${run.total_questions}（${pct(run.hit_rate ?? run.recall_at_k)}）`,
+              "success"
+            );
+          }
+          pageHitTest();
+        } catch (e) {
+          toast(e.message || "执行失败", "error");
+          btnRun.disabled = false;
+          btnRun.textContent = prev || "执行测试";
+        }
+      };
+    }
+
+    const btnCompare = document.getElementById("btnCompare");
+    if (btnCompare) {
+      btnCompare.onclick = async () => {
+        if (!selectedCaseIds.length) {
+          toast("多策略对比需要先勾选至少一个测试用例", "error");
+          return;
+        }
+        btnCompare.disabled = true;
+        try {
+          const base = buildBasePayload();
+          const sections = [];
+          for (let i = 0; i < selectedCaseIds.length; i += 1) {
+            const caseId = selectedCaseIds[i];
+            btnCompare.textContent = `对比中 ${i + 1}/${selectedCaseIds.length}…`;
+            const result = await api.post("/hit-tests/compare", {
+              case_id: caseId,
+              kb_ids: base.kb_ids,
+              strategies: ["vector", "fulltext", "hybrid"],
+              top_k: base.top_k,
+              similarity_threshold: base.similarity_threshold,
+            });
+            const rows = result.side_by_side || [];
+            sections.push(`
+              <h4 style="margin:16px 0 8px">${escapeHtml(caseNameOf(caseId))}</h4>
+              <div class="table-wrap"><table class="table">
+                <thead><tr><th>问题</th><th>向量</th><th>全文</th><th>混合</th></tr></thead>
+                <tbody>
+                  ${rows
+                    .map((row) => {
+                      const map = Object.fromEntries((row.by_strategy || []).map((x) => [x.strategy, x]));
+                      const cell = (s) => {
+                        const x = map[s];
+                        if (!x) return "-";
+                        return `${x.is_hit ? "✓" : "✗"} ${x.score != null ? Number(x.score).toFixed(2) : ""}`;
+                      };
+                      return `<tr>
+                        <td>${escapeHtml(row.question)}</td>
+                        <td>${escapeHtml(cell("vector"))}</td>
+                        <td>${escapeHtml(cell("fulltext"))}</td>
+                        <td>${escapeHtml(cell("hybrid"))}</td>
+                      </tr>`;
+                    })
+                    .join("")}
+                </tbody>
+              </table></div>`);
+          }
+          await openWideModal({
+            title: `多策略对比（${selectedCaseIds.length} 个用例）`,
+            bodyHtml: `
+              <p class="text-muted" style="margin-top:0">对已选用例分别对比向量 / 全文 / 混合；每个用例会产生 3 条运行记录。</p>
+              ${sections.join("")}`,
+            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
+          });
+          pageHitTest();
+        } catch (e) {
+          toast(e.message || "对比失败", "error");
+        } finally {
+          btnCompare.disabled = false;
+          btnCompare.textContent = "多策略对比";
+        }
+      };
+    }
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
@@ -1179,9 +3007,18 @@ const AUDIT_ACTION_LABELS = {
   "doc.delete": "删除文档",
   "doc.normalize": "规范化文档",
   "doc.resegment": "重分段",
+  "role.create": "创建角色",
+  "role.update": "更新角色",
+  "role.delete": "删除角色",
   "role.permissions": "变更角色权限",
+  "user.create": "创建用户",
   "user.update": "更新用户",
   "user.status": "变更用户状态",
+  "user.roles": "变更用户角色",
+  "auth.login": "登录",
+  "auth.logout": "登出",
+  "model.create": "创建模型配置",
+  "model.update": "更新模型配置",
 };
 
 const AUDIT_RESOURCE_LABELS = {
@@ -1273,12 +3110,19 @@ async function pageAudit() {
     if (resourceEl) resourceEl.value = filters.resource_type || "";
     if (resultEl) resultEl.value = filters.result || "";
 
-    document.getElementById("btnAuditFilter").onclick = () =>
+    const applyFilters = () =>
       load({
-        action: actionEl.value || undefined,
-        resource_type: resourceEl.value || undefined,
-        result: resultEl.value || undefined,
+        action: (actionEl && actionEl.value) || undefined,
+        resource_type: (resourceEl && resourceEl.value) || undefined,
+        result: (resultEl && resultEl.value) || undefined,
       });
+
+    const btnFilter = document.getElementById("btnAuditFilter");
+    if (btnFilter) btnFilter.onclick = applyFilters;
+    // 下拉框变更即筛选（避免「点了没反应」）
+    [actionEl, resourceEl, resultEl].forEach((el) => {
+      if (el) el.onchange = applyFilters;
+    });
 
     document.querySelectorAll("[data-audit]").forEach((btn) => {
       btn.onclick = async () => {
@@ -1377,29 +3221,31 @@ async function pageMonitor() {
     </div>
     <div class="card">
       <h3 class="card-title">Grafana 面板</h3>
-      <p class="text-muted">经 Nginx 反代嵌入本地 Grafana（Prometheus 数据源）。直连：
-        <a href="http://localhost:8080/grafana/" target="_blank" rel="noopener">http://localhost:8080/grafana/</a>
-        或 <a href="http://localhost:3001/" target="_blank" rel="noopener">:3001</a>
+      <p class="text-muted" style="margin-bottom:8px">经 Nginx 反代嵌入本地 Grafana（匿名只读）。若下方空白，请用新标签打开：
+        <a href="/grafana/d/rag-overview/overview?orgId=1&kiosk&theme=light" target="_blank" rel="noopener">打开 Overview</a>
+        · <a href="/grafana/" target="_blank" rel="noopener">Grafana 首页</a>
+        · <a href="http://127.0.0.1:3001/" target="_blank" rel="noopener">直连 :3001</a>
       </p>
       <div class="embed-frame" style="padding:0;min-height:640px">
         <iframe
           title="Grafana"
-          src="/grafana/d/rag-overview?orgId=1&kiosk"
-          style="width:100%;height:640px;border:0;border-radius:8px;background:#0b1220"
+          src="/grafana/d/rag-overview/overview?orgId=1&kiosk&theme=light"
+          style="width:100%;height:640px;border:0;border-radius:8px;background:#f7f8fa"
           loading="lazy"
-          referrerpolicy="no-referrer"
+          referrerpolicy="same-origin"
+          allow="fullscreen"
         ></iframe>
       </div>
     </div>`;
 }
 
 /* ========== 启动 ========== */
-document.addEventListener("rag:demo-mode", syncDemoBanner);
-
 [
   "/admin",
   "/admin/users",
   "/admin/roles",
+  "/admin/departments",
+  "/admin/departments/:id",
   "/admin/models",
   "/admin/knowledge-bases",
   "/admin/knowledge-bases/:id",
@@ -1416,4 +3262,3 @@ if (!location.hash || location.hash === "#" || location.hash === "#/") {
   location.hash = "#/admin";
 }
 startRouter();
-syncDemoBanner();

@@ -150,20 +150,29 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         extra: Optional[dict[str, Any]] = None,
+        usage_sink: Optional[dict[str, Any]] = None,
     ) -> AsyncIterator[str]:
         """
         流式对话：逐段 yield 增量文本（delta.content）。
 
         调用方应组装为 SSE event: chunk 推送给前端。
+
+        传入 ``usage_sink`` 字典时，会请求上游返回 token 用量
+        （OpenAI 兼容的 ``stream_options.include_usage``），并在收到
+        usage 块后写入 ``usage_sink``（prompt_tokens/completion_tokens/total_tokens），
+        供 Langfuse 用量追踪使用。
         """
         client = await self._get_client()
         url = f"{self.api_base}/chat/completions"
+        stream_extra = dict(extra or {})
+        if usage_sink is not None:
+            stream_extra.setdefault("stream_options", {"include_usage": True})
         payload = self._build_payload(
             messages,
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
-            extra=extra,
+            extra=stream_extra,
         )
 
         try:
@@ -194,6 +203,10 @@ class LLMService:
                     except json.JSONDecodeError:
                         logger.warning("LLM 流式块 JSON 解析失败: %s", data_str[:200])
                         continue
+                    if usage_sink is not None:
+                        usage = chunk.get("usage")
+                        if isinstance(usage, dict) and usage:
+                            usage_sink.update(usage)
                     delta = self._extract_delta_content(chunk)
                     if delta:
                         yield delta

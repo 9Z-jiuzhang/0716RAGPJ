@@ -17,7 +17,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_BATCH_SIZE = 16
+# 默认批大小取自配置；阿里云 DashScope text-embedding-v3 单次上限为 10 条
+_DEFAULT_BATCH_SIZE = max(1, settings.EMBEDDING_BATCH_SIZE)
 
 
 # ---------- 同步接口（文档模块） ----------

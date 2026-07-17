@@ -6,7 +6,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -15,6 +15,13 @@ from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.router import api_router
 from .core.chroma import close_chroma, init_chroma
 from .core.config import settings
+from .core.constants import (
+    GUEST_DEPARTMENT_CODE,
+    GUEST_DEPARTMENT_DESC,
+    GUEST_DEPARTMENT_NAME,
+    VISIBILITY_PUBLIC,
+    VISIBILITY_RESTRICTED,
+)
 from .core.database import (
     SessionLocal,
     engine,
@@ -29,6 +36,8 @@ from .core.seed_data import BUILTIN_PERMISSIONS, BUILTIN_ROLES
 from .middleware.access_log import ObservabilityMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .models import Base, Permission, Role, User
+from .models.department import Department
+from .models.knowledge_base import KnowledgeBase
 from .models.model_config import ModelConfig
 from .services.embedding import embedding_service
 from .services.langfuse_service import get_langfuse
@@ -40,7 +49,7 @@ async def _all_permissions(db: AsyncSession) -> list[Permission]:
 
 
 async def seed_identity_data() -> None:
-    """创建内置权限、角色及演示管理员；已有记录不会被覆盖。"""
+    """创建/同步内置权限、角色及管理员账号；内置角色权限每次启动对齐种子。"""
     async with SessionLocal() as db:
         existing_codes = {p.code for p in await _all_permissions(db)}
         for code, (name, scope) in BUILTIN_PERMISSIONS.items():
@@ -56,7 +65,6 @@ async def seed_identity_data() -> None:
                 await db.scalars(select(Role).options(selectinload(Role.permissions)))
             ).all()
         }
-        newly_created: set[str] = set()
 
         for role_name, (description, codes) in BUILTIN_ROLES.items():
             if role_name not in roles:
@@ -64,10 +72,8 @@ async def seed_identity_data() -> None:
                     name=role_name, description=description, is_builtin=True
                 )
                 db.add(roles[role_name])
-                newly_created.add(role_name)
         await db.flush()
 
-        # flush 后重新加载，避免访问未预加载的 permissions 触发懒加载
         roles = {
             r.name: r
             for r in (
@@ -75,15 +81,28 @@ async def seed_identity_data() -> None:
             ).all()
         }
 
-        for role_name, (_, codes) in BUILTIN_ROLES.items():
-            role = roles[role_name]
-            if role_name not in newly_created and role.permissions:
+        # 内置角色权限与描述对齐种子（区分超管/管理员）
+        for role_name, (description, codes) in BUILTIN_ROLES.items():
+            role = roles.get(role_name)
+            if not role:
                 continue
+            role.description = description
+            role.is_builtin = True
             if codes == ["*"]:
                 role.permissions = list(all_perms)
             else:
                 role.permissions = [perm_by_code[c] for c in codes if c in perm_by_code]
 
+        if not await db.scalar(select(User).where(User.username == "super")):
+            db.add(
+                User(
+                    username="super",
+                    email="super@example.com",
+                    nickname="超级管理员",
+                    hashed_password=hash_password("Super123!"),
+                    roles=[roles["super_admin"]],
+                )
+            )
         if not await db.scalar(select(User).where(User.username == "admin")):
             db.add(
                 User(
@@ -94,6 +113,128 @@ async def seed_identity_data() -> None:
                     roles=[roles["admin"]],
                 )
             )
+        else:
+            # 若旧库 admin 误绑超管能力：保持用户名 admin，角色纠正为 admin（不强制覆盖已有多角色）
+            admin_user = await db.scalar(
+                select(User)
+                .options(selectinload(User.roles))
+                .where(User.username == "admin")
+            )
+            if admin_user and not any(r.name == "admin" for r in admin_user.roles):
+                if "admin" in roles:
+                    admin_user.roles = [roles["admin"]]
+
+        # 演示员工：带部门，便于上传隔离联调
+        if "staff" in roles:
+            for uname, email, nick, dept in (
+                ("staff_a", "staff_a@example.com", "A部门员工", "A"),
+                ("staff_b", "staff_b@example.com", "B部门员工", "B"),
+            ):
+                existing = await db.scalar(
+                    select(User)
+                    .options(selectinload(User.roles))
+                    .where(User.username == uname)
+                )
+                if not existing:
+                    db.add(
+                        User(
+                            username=uname,
+                            email=email,
+                            nickname=nick,
+                            department=dept,
+                            hashed_password=hash_password("Staff123!"),
+                            roles=[roles["staff"]],
+                        )
+                    )
+                else:
+                    existing.department = existing.department or dept
+                    if not any(r.name == "staff" for r in existing.roles):
+                        existing.roles = [roles["staff"]]
+
+        # 废弃旧「user」角色：迁移到 guest 后删除（与访客功能重复）
+        legacy_user_role = await db.scalar(
+            select(Role).where(Role.name == "user")
+        )
+        if legacy_user_role and "guest" in roles:
+            from .models.identity import user_roles
+
+            bound_user_ids = (
+                await db.scalars(
+                    select(user_roles.c.user_id).where(
+                        user_roles.c.role_id == legacy_user_role.id
+                    )
+                )
+            ).all()
+            for uid in bound_user_ids:
+                u = await db.scalar(
+                    select(User)
+                    .options(selectinload(User.roles))
+                    .where(User.id == uid)
+                )
+                if not u:
+                    continue
+                remaining = [r for r in u.roles if r.name != "user"]
+                if not any(r.name == "guest" for r in remaining):
+                    remaining.append(roles["guest"])
+                u.roles = remaining or [roles["guest"]]
+            await db.delete(legacy_user_role)
+
+        await db.commit()
+
+
+async def seed_departments() -> None:
+    """幂等写入固定“访客专用”部门与演示部门 A / B，并迁移历史 public 库。"""
+    defaults = (
+        (
+            GUEST_DEPARTMENT_CODE,
+            GUEST_DEPARTMENT_NAME,
+            GUEST_DEPARTMENT_DESC,
+        ),
+        ("A", "A 部门", "负责业务线 A 相关制度与日常协作。"),
+        ("B", "B 部门", "负责业务线 B 相关制度与日常协作。"),
+    )
+    async with SessionLocal() as db:
+        for code, name, description in defaults:
+            exists = await db.scalar(select(Department).where(Department.code == code))
+            if exists:
+                if not exists.description:
+                    exists.description = description
+                if not exists.name:
+                    exists.name = name
+                continue
+            db.add(
+                Department(
+                    code=code,
+                    name=name,
+                    description=description,
+                    is_enabled=True,
+                )
+            )
+        await db.flush()
+
+        # 迁移：历史 public 知识库归入“访客专用”部门（部门驱动的统一访问控制）
+        await db.execute(
+            update(KnowledgeBase)
+            .where(
+                KnowledgeBase.visibility == VISIBILITY_PUBLIC,
+                KnowledgeBase.department.is_distinct_from(GUEST_DEPARTMENT_CODE),
+            )
+            .values(department=GUEST_DEPARTMENT_CODE)
+        )
+        # 归一化：确保 visibility 与部门一致（GUEST -> public，其余 -> restricted）
+        await db.execute(
+            update(KnowledgeBase)
+            .where(KnowledgeBase.department == GUEST_DEPARTMENT_CODE)
+            .values(visibility=VISIBILITY_PUBLIC)
+        )
+        await db.execute(
+            update(KnowledgeBase)
+            .where(
+                KnowledgeBase.department.is_distinct_from(GUEST_DEPARTMENT_CODE),
+                KnowledgeBase.visibility == VISIBILITY_PUBLIC,
+            )
+            .values(visibility=VISIBILITY_RESTRICTED)
+        )
         await db.commit()
 
 
@@ -158,6 +299,7 @@ async def lifespan(_: FastAPI):
         await connection.run_sync(Base.metadata.create_all)
     await ensure_schema_patches()
     await seed_identity_data()
+    await seed_departments()
     await seed_model_configs()
     await init_redis()
     try:

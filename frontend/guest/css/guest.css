@@ -123,10 +123,10 @@
   white-space: pre-wrap;
 }
 
-/* 右侧推理流程面板：默认可折叠 */
+/* 问答主区：单列布局（已移除右侧推理流程面板） */
 .qa-layout {
-  max-width: 1100px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  max-width: 880px;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 1fr;
   align-items: stretch;
 }
@@ -279,6 +279,38 @@
   margin-bottom: 4px;
 }
 
+/* 引用原文默认折叠：summary 作为可点击标题 */
+details.citation-item > summary.citation-meta {
+  cursor: pointer;
+  margin-bottom: 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+
+details.citation-item > summary.citation-meta::-webkit-details-marker {
+  display: none;
+}
+
+details.citation-item > summary.citation-meta::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--color-primary);
+  transition: transform var(--transition);
+}
+
+details.citation-item[open] > summary.citation-meta::before {
+  transform: rotate(90deg);
+}
+
+.citation-content {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  color: var(--color-text-secondary);
+}
+
 .confidence {
   margin-top: 10px;
   padding: 6px 10px;
@@ -392,22 +424,6 @@
   margin: 0 0 14px;
   font-size: 13px;
   line-height: 1.5;
-}
-
-.auth-demo-hint {
-  margin-top: 16px;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-tint);
-  border-radius: var(--radius);
-  border: 1px dashed var(--color-border);
-}
-
-.auth-demo-hint code {
-  color: var(--color-primary-dark);
-  font-weight: 600;
 }
 
 .auth-wrap {

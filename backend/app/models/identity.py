@@ -55,6 +55,9 @@ class User(TimestampMixin, Base):
     nickname: Mapped[str | None] = mapped_column(String(100))
     hashed_password: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default="active")
+    department: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, comment="所属部门，如 A / B"
+    )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     roles: Mapped[list["Role"]] = relationship(secondary=user_roles, lazy="selectin")
 

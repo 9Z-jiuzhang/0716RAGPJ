@@ -44,7 +44,7 @@ async def register(
         )
     ):
         raise HTTPException(status_code=409, detail="用户名或邮箱已存在")
-    role = await db.scalar(select(Role).where(Role.name == "user"))
+    role = await db.scalar(select(Role).where(Role.name == "guest"))
     if not role:
         raise HTTPException(status_code=503, detail="系统初始角色尚未创建")
     user = User(

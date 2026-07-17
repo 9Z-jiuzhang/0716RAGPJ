@@ -252,7 +252,11 @@ async def _vectorize(
                     "id": c.id,
                     "content": c.content,
                     "chunk_index": c.chunk_index,
-                    "metadata": c.chunk_metadata or {},
+                    "metadata": {
+                        **(c.chunk_metadata or {}),
+                        "doc_name": doc.filename or "",
+                        "filename": doc.filename or "",
+                    },
                 }
                 for c in enabled
             ],

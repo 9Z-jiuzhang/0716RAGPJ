@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_NAME: str = "text-embedding-v3"
     EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     EMBEDDING_TIMEOUT_SECONDS: int = 60
+    # 每次向量化请求的最大文本条数；阿里云 DashScope text-embedding-v3 上限为 10
+    EMBEDDING_BATCH_SIZE: int = 10
 
     # ---------- Rerank（可选） ----------
     RERANK_PROVIDER: str = ""

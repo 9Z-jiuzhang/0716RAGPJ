@@ -27,6 +27,7 @@ class CreateModelConfigRequest(BaseModel):
     )
     is_default: bool = False
     is_enabled: bool = True
+    priority: int = Field(100, ge=0, le=10000, description="优先级，数值越小越优先")
 
 
 class UpdateModelConfigRequest(BaseModel):
@@ -39,6 +40,9 @@ class UpdateModelConfigRequest(BaseModel):
     config: Optional[dict[str, Any]] = None
     timeout_seconds: Optional[int] = Field(None, ge=5, le=600)
     api_key_env: Optional[str] = Field(None, max_length=100)
+    priority: Optional[int] = Field(None, ge=0, le=10000)
+    is_enabled: Optional[bool] = None
+    is_default: Optional[bool] = None
 
 
 class ModelStatusRequest(BaseModel):
@@ -60,6 +64,7 @@ class ModelConfigResponse(BaseModel):
     base_url: Optional[str] = None
     is_default: bool
     is_enabled: bool
+    priority: int = 100
     config: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: int
     api_key_env: Optional[str] = None

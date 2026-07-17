@@ -36,6 +36,7 @@ from app.models.qa import QAMessage, QASession
 from app.retrieval import hybrid_retriever, resolve_kb_targets
 from app.retrieval.types import RetrievalHit, RetrievalStrategy
 from app.schemas.qa import AskRequest
+from app.services.langfuse_service import get_langfuse
 from app.services.llm import LLMServiceError, llm_service
 from app.services.web_search import format_web_results, search_web
 from app.utils.tracing import PerformanceTracker, new_request_id
@@ -156,6 +157,7 @@ class QAPipeline:
         事件类型：chunk / citations / done / error
         """
         tracker = PerformanceTracker(request_id=request_id or new_request_id())
+        lf = get_langfuse()
 
         try:
             question = request.question.strip()
@@ -165,6 +167,18 @@ class QAPipeline:
             is_guest = user is None
             if is_guest and not guest_id:
                 guest_id = str(uuid.uuid4())
+
+            # Langfuse 全链路追踪：记录模型用量（token/次数），供模型管理页展示
+            lf_trace = lf.start_trace(
+                name="qa_ask",
+                user_id=(str(user.id) if user else (guest_id or None)),
+                metadata={
+                    "strategy": str(request.strategy),
+                    "request_id": tracker.request_id,
+                    "is_guest": is_guest,
+                },
+                input_text=question,
+            )
 
             # [1] 会话解析与隔离校验
             with tracker.track("session"):
@@ -227,6 +241,8 @@ class QAPipeline:
                     temperature=request.temperature,
                     retrieval_meta=retrieval_meta,
                     tracker=tracker,
+                    lf=lf,
+                    lf_trace=lf_trace,
                 ):
                     answer_text += piece
                     yield self._event("chunk", content=piece)
@@ -275,6 +291,8 @@ class QAPipeline:
                         temperature=request.temperature,
                         retrieval_meta=retrieval_meta,
                         tracker=tracker,
+                        lf=lf,
+                        lf_trace=lf_trace,
                     ):
                         answer_text += piece
                         yield self._event("chunk", content=piece)
@@ -290,12 +308,21 @@ class QAPipeline:
                             hits=retrieval.hits,
                             history_messages=memory.to_llm_messages(),
                         )
+                        usage_sink: dict[str, Any] = {}
                         async for delta in llm_service.stream_chat(
                             messages,
                             temperature=request.temperature,
+                            usage_sink=usage_sink,
                         ):
                             answer_text += delta
                             yield self._event("chunk", content=delta)
+                        self._record_generation(
+                            lf,
+                            lf_trace,
+                            messages=messages,
+                            completion=answer_text,
+                            usage=usage_sink,
+                        )
 
             if not answer_text.strip():
                 answer_text = _NO_EVIDENCE_REPLY
@@ -321,6 +348,12 @@ class QAPipeline:
                     guest_id=guest_id,
                     kb_ids=request.kb_ids,
                 )
+
+            try:
+                lf_trace.update(output=answer_text[:500])
+            except Exception:
+                pass
+            lf.flush()
 
             yield self._event(
                 "done",
@@ -481,6 +514,8 @@ class QAPipeline:
         temperature: float,
         retrieval_meta: dict[str, Any],
         tracker: PerformanceTracker,
+        lf: Any = None,
+        lf_trace: Any = None,
     ) -> AsyncIterator[str]:
         """无知识库命中：先声明，再可选 LLM/联网生成参考答案（citations 保持空）。"""
         yield _NO_EVIDENCE_NOTICE + "\n\n"
@@ -507,9 +542,22 @@ class QAPipeline:
                 history_messages=history_messages,
                 web_results=web_results,
             )
+            usage_sink: dict[str, Any] = {}
+            reference_text = ""
             try:
-                async for delta in llm_service.stream_chat(messages, temperature=temperature):
+                async for delta in llm_service.stream_chat(
+                    messages, temperature=temperature, usage_sink=usage_sink
+                ):
+                    reference_text += delta
                     yield delta
+                if lf is not None and lf_trace is not None:
+                    self._record_generation(
+                        lf,
+                        lf_trace,
+                        messages=messages,
+                        completion=reference_text,
+                        usage=usage_sink,
+                    )
             except LLMServiceError as exc:
                 logger.warning("无命中参考答案生成失败：%s", exc)
                 retrieval_meta["fallback_mode"] = "notice_only_llm_error"
@@ -517,6 +565,31 @@ class QAPipeline:
                     "参考答案暂时无法生成（大模型服务不可用）。"
                     "请稍后重试，或联系管理员确认知识库文档是否已入库。"
                 )
+
+    @staticmethod
+    def _record_generation(
+        lf: Any,
+        lf_trace: Any,
+        *,
+        messages: list[dict[str, str]],
+        completion: str,
+        usage: dict[str, Any],
+    ) -> None:
+        """将一次 LLM 生成的模型用量写入 Langfuse（含 token 统计）。"""
+        try:
+            prompt = "\n".join(m.get("content", "") for m in messages)
+            input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+            output_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
+            lf.span_generation(
+                lf_trace,
+                model=llm_service.model,
+                prompt=prompt,
+                completion=completion,
+                input_tokens=int(input_tokens) if input_tokens else None,
+                output_tokens=int(output_tokens) if output_tokens else None,
+            )
+        except Exception:
+            logger.debug("langfuse 生成埋点失败", exc_info=True)
 
     def _build_reference_messages(
         self,

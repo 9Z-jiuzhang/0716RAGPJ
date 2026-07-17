@@ -29,6 +29,9 @@ class ModelConfig(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    priority: Mapped[int] = mapped_column(
+        Integer, default=100, nullable=False, comment="优先级，数值越小越优先"
+    )
     config: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, comment="temperature/max_tokens 等"
     )

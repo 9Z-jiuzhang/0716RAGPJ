@@ -1,8 +1,30 @@
 """认证与用户相关展示辅助（供 API 层复用）。"""
 
 from app.core.config import settings
+from app.core.seed_data import ROLE_DISPLAY_NAMES
 from app.models import User
 from app.schemas.identity import TokenResponse, UserResponse
+
+# 角色等级：越高权限越大。操作者仅可管理/删除等级严格低于自己的用户。
+ROLE_RANK: dict[str, int] = {
+    "super_admin": 100,
+    "admin": 50,
+    "staff": 20,
+    "kb_admin": 20,
+    "guest": 10,
+    "user": 10,
+}
+
+
+def role_rank(name: str) -> int:
+    return ROLE_RANK.get(name, 5)
+
+
+def max_role_rank(user: User) -> int:
+    names = [r.name for r in (user.roles or []) if r.is_enabled]
+    if not names:
+        return 0
+    return max(role_rank(n) for n in names)
 
 
 def permission_codes_for(user: User) -> list[str]:
@@ -11,16 +33,41 @@ def permission_codes_for(user: User) -> list[str]:
     return sorted(codes)
 
 
+def role_names_for(user: User) -> list[str]:
+    return [r.name for r in user.roles if r.is_enabled]
+
+
+def is_super_admin_user(user: User) -> bool:
+    return any(r.name == "super_admin" and r.is_enabled for r in user.roles)
+
+
+def is_platform_admin_user(user: User) -> bool:
+    """超级管理员或普通管理员：平台级知识库/管理能力。"""
+    names = {r.name for r in user.roles if r.is_enabled}
+    if "super_admin" in names or "admin" in names:
+        return True
+    codes = permission_codes_for(user)
+    return "*" in codes or "admin:*" in codes
+
+
+def display_name_for_role(name: str) -> str:
+    return ROLE_DISPLAY_NAMES.get(name, name)
+
+
 def present_user(user: User) -> UserResponse:
     """ORM 用户 -> API 响应（含角色名与权限标识）。"""
+    roles = role_names_for(user)
     return UserResponse(
         id=str(user.id),
         username=user.username,
         email=user.email,
         nickname=user.nickname,
         status=user.status,
-        roles=[r.name for r in user.roles],
+        roles=roles,
+        role_labels=[display_name_for_role(n) for n in roles],
         permissions=permission_codes_for(user),
+        department=getattr(user, "department", None),
+        is_super_admin=is_super_admin_user(user),
         created_at=user.created_at,
         last_login_at=user.last_login_at,
     )

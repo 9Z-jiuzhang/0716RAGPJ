@@ -3,6 +3,7 @@
 from .base import Base
 from .document import Document, DocumentChunk, KbChunkRule
 from .hit_tests import TestCases, TestQuestions, TestResults, TestRuns
+from .department import Department
 from .identity import AuditLog, Permission, Role, User
 from .index_version import IndexVersion
 from .knowledge_base import KBPermission, KnowledgeBase
@@ -17,6 +18,7 @@ __all__ = [
     "Role",
     "Permission",
     "AuditLog",
+    "Department",
     "KnowledgeBase",
     "KBPermission",
     "TestCases",

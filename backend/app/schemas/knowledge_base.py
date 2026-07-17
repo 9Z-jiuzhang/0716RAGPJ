@@ -10,7 +10,11 @@ class KnowledgeBaseCreate(BaseModel):
     type: KnowledgeBaseType = Field(..., description="知识库类型")
     tags: List[str] = Field(default=[], description="标签列表")
     description: Optional[str] = Field(None, description="简介/描述")
-    visibility: Visibility = Field(..., description="可见性")
+    # 可见性由部门派生（访客专用 GUEST -> public，其余 -> restricted），此字段可省略
+    visibility: Optional[Visibility] = Field(None, description="可见性（由部门派生，可省略）")
+    department: Optional[str] = Field(
+        None, description="访问范围/所属部门：GUEST=访客专用(所有人)，其余部门=部门隔离，空=私有"
+    )
     embedding_model: str = Field(..., description="使用的 Embedding 模型名称")
     chunk_size: int = Field(500, description="默认分段大小（字符数）")
     chunk_overlap: int = Field(50, description="默认分段重叠（字符数）")
@@ -22,6 +26,7 @@ class KnowledgeBaseUpdate(BaseModel):
     tags: Optional[List[str]] = Field(None, description="标签列表")
     description: Optional[str] = Field(None, description="简介/描述")
     visibility: Optional[Visibility] = Field(None, description="可见性")
+    department: Optional[str] = Field(None, description="所属部门 A/B")
     embedding_model: Optional[str] = Field(
         None, description="使用的 Embedding 模型名称"
     )
@@ -36,6 +41,7 @@ class KnowledgeBaseResponse(BaseModel):
     tags: List[str] = Field(..., description="标签列表")
     description: Optional[str] = Field(None, description="简介/描述")
     visibility: Visibility = Field(..., description="可见性")
+    department: Optional[str] = Field(None, description="所属部门")
     embedding_model: str = Field(..., description="使用的 Embedding 模型名称")
     chunk_size: int = Field(..., description="默认分段大小（字符数）")
     chunk_overlap: int = Field(..., description="默认分段重叠（字符数）")
@@ -68,6 +74,36 @@ class VectorizeStatusResponse(BaseModel):
     error_message: Optional[str] = Field(None, description="错误信息")
     started_at: Optional[datetime] = Field(None, description="开始时间")
     completed_at: Optional[datetime] = Field(None, description="完成时间")
+    target_version: Optional[str] = Field(None, description="目标索引版本")
+
+
+class ReVectorizeRequest(BaseModel):
+    """重新向量化可选参数：可同时更新分段规则后再重建。"""
+
+    chunk_size: Optional[int] = Field(
+        None, ge=100, le=5000, description="分段长度；不传则沿用知识库当前值"
+    )
+    chunk_overlap: Optional[int] = Field(
+        None, ge=0, le=1000, description="分段重叠；不传则沿用知识库当前值"
+    )
+    split_mode: Optional[str] = Field(
+        None,
+        description="分段模式：fixed / sliding / paragraph / heading",
+    )
+    separators: Optional[List[str]] = Field(
+        None, description="分隔符列表（fixed 模式）"
+    )
+    embedding_model: Optional[str] = Field(
+        None, max_length=200, description="可选：切换嵌入模型后重建"
+    )
+    apply_to_documents: bool = Field(
+        True,
+        description="是否将分段规则同步到库内全部文档（推荐开启）",
+    )
+    force_all: bool = Field(
+        False,
+        description="为 True 时处理全部未删除文档；默认仅 ready/error/pending_segment",
+    )
 
 
 class KnowledgeBaseFilter(BaseModel):

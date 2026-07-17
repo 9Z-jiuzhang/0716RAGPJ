@@ -5,10 +5,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.helpers import ok, resolve_request_id
 from app.core.database import get_db
-from app.core.dependencies import require_permission
+from app.core.dependencies import is_super_admin, require_permission
+from app.core.seed_data import ROLE_DISPLAY_NAMES
 from app.models import AuditLog, Permission, Role, User
 from app.schemas.common import BaseResponse
 from app.schemas.identity import (
@@ -26,11 +28,18 @@ def present_role(role: Role) -> RoleResponse:
     return RoleResponse(
         id=str(role.id),
         name=role.name,
+        display_name=ROLE_DISPLAY_NAMES.get(role.name, role.name),
         description=role.description,
         is_builtin=role.is_builtin,
         is_enabled=role.is_enabled,
         permissions=[p.code for p in role.permissions],
     )
+
+
+def _guard_super_role_edit(operator: User, role: Role) -> None:
+    """普通管理员不可修改超级管理员角色。"""
+    if role.name == "super_admin" and not is_super_admin(operator):
+        raise HTTPException(status_code=403, detail="无权修改超级管理员角色")
 
 
 @router.get("", response_model=BaseResponse)
@@ -103,6 +112,10 @@ async def create_role(
     )
     await db.commit()
     await db.refresh(role)
+    # 重新加载权限关联，避免返回空 permissions
+    role = await db.scalar(
+        select(Role).where(Role.id == role.id).options(selectinload(Role.permissions))
+    )
     return ok(present_role(role), request_id=request_id, message="创建成功")
 
 
@@ -117,6 +130,7 @@ async def update_role(
     role = await db.get(Role, uuid.UUID(role_id))
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
+    _guard_super_role_edit(operator, role)
     if role.is_builtin and data.name != role.name:
         raise HTTPException(status_code=400, detail="内置角色不可改名")
     role.name, role.description, role.is_enabled = (
@@ -177,6 +191,9 @@ async def set_permissions(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
+    """仅超级管理员可配置角色权限。"""
+    if not is_super_admin(operator):
+        raise HTTPException(status_code=403, detail="仅超级管理员可配置角色权限")
     role = await db.get(Role, uuid.UUID(role_id))
     permissions = (
         await db.scalars(
@@ -185,6 +202,7 @@ async def set_permissions(
     ).all()
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
+    _guard_super_role_edit(operator, role)
     if len(permissions) != len(data.permission_codes):
         raise HTTPException(status_code=400, detail="包含不存在的权限")
     role.permissions = list(permissions)

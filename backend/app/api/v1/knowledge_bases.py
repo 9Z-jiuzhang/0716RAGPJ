@@ -20,6 +20,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
     KBPermissionUpdate,
+    ReVectorizeRequest,
     VectorizeStatusResponse,
 )
 from app.services.knowledge_base import KnowledgeBaseService
@@ -31,7 +32,7 @@ def _raise_api(exc: APIException) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
-@router.post("/", response_model=APIResponse[KnowledgeBaseResponse])
+@router.post("", response_model=APIResponse[KnowledgeBaseResponse], status_code=201)
 async def create_knowledge_base(
     data: KnowledgeBaseCreate = Body(...),
     current_user: User = Depends(require_permissions("kb:write")),
@@ -45,7 +46,7 @@ async def create_knowledge_base(
     return APIResponse(data=result)
 
 
-@router.get("/", response_model=APIResponse[PageResponse[KnowledgeBaseResponse]])
+@router.get("", response_model=APIResponse[PageResponse[KnowledgeBaseResponse]])
 async def list_knowledge_bases(
     filter: KnowledgeBaseFilter = Depends(),
     page: int = Query(1, ge=1),
@@ -110,12 +111,16 @@ async def delete_knowledge_base(
 )
 async def re_vectorize_knowledge_base(
     kb_id: UUID = Path(..., description="知识库ID"),
+    data: ReVectorizeRequest | None = Body(default=None),
     current_user: User = Depends(require_kb_permission("kb:vectorize")),
     db: AsyncSession = Depends(get_db),
 ):
+    """重新向量化；请求体可携带分段规则（chunk_size/overlap/split_mode 等）。"""
     service = KnowledgeBaseService(db)
     try:
-        result = await service.re_vectorize_kb(str(kb_id), current_user.id)
+        result = await service.re_vectorize_kb(
+            str(kb_id), current_user.id, options=data or ReVectorizeRequest()
+        )
     except APIException as exc:
         _raise_api(exc)
     return APIResponse(data=result)

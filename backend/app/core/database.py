@@ -82,6 +82,42 @@ async def ensure_schema_patches() -> None:
         )
         """,
         "CREATE INDEX IF NOT EXISTS ix_model_configs_model_type ON model_configs (model_type)",
+        "ALTER TABLE model_configs ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 100",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(50) NULL",
+        "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS department VARCHAR(50) NULL",
+        # 快照表：旧库可能缺统计/分段规则列（create_all 不会 ALTER）
+        "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS document_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS chunk_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS segment_rules JSONB NOT NULL DEFAULT '{}'::jsonb",
+        # 向量化任务表：旧库缺 TimestampMixin.updated_at
+        "ALTER TABLE vectorize_tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NULL",
+        "UPDATE vectorize_tasks SET updated_at = COALESCE(updated_at, created_at, NOW()) WHERE updated_at IS NULL",
+        """
+        DO $$ BEGIN
+          ALTER TABLE vectorize_tasks
+            ALTER COLUMN updated_at SET DEFAULT NOW();
+        EXCEPTION WHEN others THEN NULL;
+        END $$;
+        """,
+        """
+        DO $$ BEGIN
+          ALTER TABLE vectorize_tasks
+            ALTER COLUMN updated_at SET NOT NULL;
+        EXCEPTION WHEN others THEN NULL;
+        END $$;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS departments (
+          id UUID PRIMARY KEY,
+          code VARCHAR(50) NOT NULL UNIQUE,
+          name VARCHAR(100) NOT NULL,
+          description TEXT NULL,
+          is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_departments_code ON departments (code)",
     ]
     async with engine.begin() as conn:
         for stmt in statements:
