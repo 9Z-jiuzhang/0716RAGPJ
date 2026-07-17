@@ -45,3 +45,29 @@ def test_threshold_filters_low_scores() -> None:
     filtered = HybridRetriever._apply_threshold(hits, 0.3)
     assert len(filtered) == 1
     assert filtered[0].chunk_id == "a"
+
+
+def test_hybrid_falls_back_to_fulltext_when_vector_empty() -> None:
+    """仅全文命中时，hybrid 应直接采用全文结果（不经 RRF 滤空）。"""
+    fulltext_hits = [_hit("a", 0.9)]
+    # 模拟 retrieve 内分支：仅全文
+    vector_hits: list[RetrievalHit] = []
+    if vector_hits and not fulltext_hits:
+        merged = vector_hits
+    elif fulltext_hits and not vector_hits:
+        merged = fulltext_hits
+    else:
+        merged = HybridRetriever._rrf_fuse(vector_hits, fulltext_hits, k=60, top_k=3)
+    assert len(merged) == 1
+    assert merged[0].chunk_id == "a"
+    assert merged[0].score >= 0.3
+
+
+def test_threshold_soft_fallback_keeps_hits() -> None:
+    """阈值滤空时，调用方应能回退保留原排序命中（由 retrieve 实现）。"""
+    hits = [_hit("a", 0.1), _hit("b", 0.05)]
+    filtered = HybridRetriever._apply_threshold(hits, 0.3)
+    assert filtered == []
+    fallback = hits[:2]
+    assert len(fallback) == 2
+

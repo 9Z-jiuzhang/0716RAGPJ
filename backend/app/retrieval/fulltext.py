@@ -15,7 +15,7 @@ import re
 from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import Float, cast, func, literal, or_, select
+from sqlalchemy import Float, cast, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document, DocumentChunk
@@ -57,8 +57,8 @@ class FulltextRetriever:
         top_k: int,
     ) -> list[RetrievalHit]:
         """使用 plainto_tsquery + ts_rank_cd 检索。"""
-        # plainto_tsquery 对空/纯标点可能生成空查询，需兜底
-        ts_query = func.plainto_tsquery(literal("simple"), query)
+        # 显式 regconfig，避免 asyncpg 将 'simple' 推断为 varchar 导致函数不存在
+        ts_query = func.plainto_tsquery(literal_column("'simple'::regconfig"), query)
         rank = func.ts_rank_cd(DocumentChunk.content_tsv, ts_query)
 
         stmt = (
@@ -82,7 +82,9 @@ class FulltextRetriever:
         )
 
         try:
-            rows = (await db.execute(stmt)).all()
+            # SAVEPOINT：失败时不影响外层会话事务（问答会话已写入）
+            async with db.begin_nested():
+                rows = (await db.execute(stmt)).all()
         except Exception as exc:
             # content_tsv 尚未迁移时降级为空，由 trigram 路径兜底
             logger.warning("tsvector 检索失败，将尝试 trigram：%s", exc)
@@ -149,7 +151,8 @@ class FulltextRetriever:
         )
 
         try:
-            rows = (await db.execute(stmt)).all()
+            async with db.begin_nested():
+                rows = (await db.execute(stmt)).all()
         except Exception as exc:
             logger.warning("trigram 检索失败：%s", exc)
             # 最后降级：纯 ILIKE，无相似度分
@@ -158,6 +161,8 @@ class FulltextRetriever:
         hits: list[RetrievalHit] = []
         for row in rows:
             sim_score = float(row.sim_score or 0.0)
+            # 中文 similarity 往往偏低；既已 ILIKE 命中，抬到可过默认阈值的底分
+            score = max(sim_score, 0.55)
             hits.append(
                 RetrievalHit(
                     chunk_id=str(row.id),
@@ -166,7 +171,7 @@ class FulltextRetriever:
                     kb_id=str(row.kb_id),
                     chunk_index=int(row.chunk_index),
                     content=row.content or "",
-                    score=max(0.0, min(1.0, sim_score)),
+                    score=max(0.0, min(1.0, score)),
                     source="fulltext",
                     raw_score=sim_score,
                     metadata={"channel": "trgm"},
@@ -183,6 +188,12 @@ class FulltextRetriever:
         top_k: int,
     ) -> list[RetrievalHit]:
         """无 pg_trgm 时的 ILIKE 降级路径。"""
+        tokens = self._extract_tokens(query)
+        like_filters = [DocumentChunk.content.ilike(f"%{query}%")]
+        for tok in tokens:
+            if tok != query:
+                like_filters.append(DocumentChunk.content.ilike(f"%{tok}%"))
+
         stmt = (
             select(
                 DocumentChunk.id,
@@ -196,15 +207,20 @@ class FulltextRetriever:
             .where(
                 DocumentChunk.is_enabled.is_(True),
                 DocumentChunk.kb_id.in_(list(kb_ids)),
-                DocumentChunk.content.ilike(f"%{query}%"),
+                or_(*like_filters),
             )
             .limit(top_k)
         )
-        rows = (await db.execute(stmt)).all()
+        try:
+            async with db.begin_nested():
+                rows = (await db.execute(stmt)).all()
+        except Exception as exc:
+            logger.warning("ILIKE 降级检索失败：%s", exc)
+            return []
         # 无真实分数时按命中顺序递减赋分，保证排序稳定
         hits: list[RetrievalHit] = []
         for i, row in enumerate(rows):
-            score = max(0.1, 1.0 - i * 0.05)
+            score = max(0.55, 1.0 - i * 0.05)
             hits.append(
                 RetrievalHit(
                     chunk_id=str(row.id),

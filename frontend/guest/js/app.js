@@ -30,8 +30,50 @@ import { resolveDemoLoginUser, isBuiltinDemoUsername } from "/assets/js/mock.js"
 let currentSessionId = null;
 /** 流式请求控制器 */
 let askAbort = null;
-/** 推理面板是否折叠 */
-let reasoningCollapsed = false;
+/** 推理面板默认折叠 */
+let reasoningCollapsed = true;
+
+/**
+ * 拆分模型推理标签与最终回答。
+ * 兼容 <think> / <think> / <thinking>，含流式未闭合。
+ */
+function splitModelReasoning(raw) {
+  const text = String(raw || "");
+  const openRe = /<(?:redacted_thinking|think|thinking)>/i;
+  const closeRe = /<\/(?:redacted_thinking|think|thinking)>/i;
+  const openMatch = openRe.exec(text);
+  if (!openMatch) {
+    return { reasoning: "", answer: text, reasoningOpen: false };
+  }
+  const before = text.slice(0, openMatch.index);
+  const afterOpen = text.slice(openMatch.index + openMatch[0].length);
+  const closeMatch = closeRe.exec(afterOpen);
+  if (!closeMatch) {
+    return {
+      reasoning: afterOpen,
+      answer: before,
+      reasoningOpen: true,
+    };
+  }
+  const reasoning = afterOpen.slice(0, closeMatch.index);
+  const answer = `${before}${afterOpen.slice(closeMatch.index + closeMatch[0].length)}`.trim();
+  return { reasoning: reasoning.trim(), answer, reasoningOpen: false };
+}
+
+/** 渲染助手气泡：推理默认折叠，正文在外 */
+function renderAssistantBubbleHtml(rawText, extrasHtml = "") {
+  const { reasoning, answer, reasoningOpen } = splitModelReasoning(rawText);
+  const answerHtml = escapeHtml((answer || "").trim() || (reasoningOpen ? "（模型推理中…）" : ""));
+  let reasoningHtml = "";
+  if (reasoning) {
+    const label = reasoningOpen ? "推理过程（生成中）" : "推理过程";
+    reasoningHtml = `<details class="model-reasoning"${reasoningOpen ? " open" : ""}>
+      <summary>${label}</summary>
+      <pre class="model-reasoning-body">${escapeHtml(reasoning)}</pre>
+    </details>`;
+  }
+  return `${reasoningHtml}<div class="msg-answer">${answerHtml}</div>${extrasHtml || ""}`;
+}
 
 /** 显示/隐藏演示横幅 */
 function syncDemoBanner() {
@@ -212,6 +254,11 @@ function pageChat() {
 
   window.addEventListener("resize", handleResize);
   handleResize();
+  // 默认折叠推理侧栏
+  panel.classList.add("collapsed");
+  panel.classList.remove("visible");
+  toggle.textContent = "▶";
+  toggleHeader.textContent = "▶";
 }
 
 /** 追加一条消息气泡 */
@@ -365,6 +412,7 @@ async function sendQuestion() {
   let citationsHtml = "";
   let confidenceTip = "";
   let hasTraces = false;
+  let rawAssistantText = "";
 
   const handleTrace = (trace) => {
     hasTraces = true;
@@ -406,10 +454,11 @@ async function sendQuestion() {
             traces.forEach((t) => handleTrace(t));
             return;
           }
-          // 增量文本（打字机 + 光标样式）
+          // 增量文本：拆分模型推理标签，正文展示，推理默认折叠
           if (event === "chunk") {
             bubble.classList.add("streaming-cursor");
-            bubble.textContent += data.content || data || "";
+            rawAssistantText += data.content || data || "";
+            bubble.innerHTML = renderAssistantBubbleHtml(rawAssistantText);
             document.getElementById("msgList").scrollTop = document.getElementById("msgList").scrollHeight;
           }
           // 引用来源
@@ -435,7 +484,7 @@ async function sendQuestion() {
             const conf = data.confidence || "medium";
             const map = { high: "高", medium: "中", low: "低" };
             confidenceTip = `<div class="confidence">置信提示：${map[conf] || conf}（仅供参考，请结合引文核对）</div>`;
-            bubble.innerHTML = `${escapeHtml(bubble.textContent)}${citationsHtml}${confidenceTip}`;
+            bubble.innerHTML = renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}`);
           }
           // 错误
           if (event === "error") {
@@ -626,10 +675,18 @@ async function pageHistory() {
             list.innerHTML = "";
             (detail.messages || []).forEach((m) => {
               const html =
-                m.role === "assistant" && m.citations
-                  ? `${escapeHtml(m.content)}<div class="citations">${(m.citations || [])
-                      .map((c) => `<div class="citation-item"><div class="citation-meta">${escapeHtml(c.doc_name)} · #${c.chunk_index}</div>${escapeHtml(c.content || "")}</div>`)
-                      .join("")}</div>`
+                m.role === "assistant"
+                  ? `${renderAssistantBubbleHtml(
+                      m.content || "",
+                      m.citations
+                        ? `<div class="citations">${(m.citations || [])
+                            .map(
+                              (c) =>
+                                `<div class="citation-item"><div class="citation-meta">${escapeHtml(c.doc_name)} · #${c.chunk_index}</div>${escapeHtml(c.content || "")}</div>`
+                            )
+                            .join("")}</div>`
+                        : ""
+                    )}`
                   : escapeHtml(m.content);
               appendMessage(m.role === "user" ? "user" : "assistant", html);
             });

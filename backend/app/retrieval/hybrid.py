@@ -62,28 +62,52 @@ class HybridRetriever:
         fulltext_hits: list[RetrievalHit] = []
 
         if strategy in ("vector", "hybrid"):
-            vector_hits = await vector_retriever.search(
-                search_text, targets, top_k=effective_k
-            )
+            try:
+                vector_hits = await vector_retriever.search(
+                    search_text, targets, top_k=effective_k
+                )
+            except Exception as exc:  # noqa: BLE001 — 向量失败不得阻断全文路
+                logger.warning("向量检索失败，将仅使用全文结果：%s", exc)
+                vector_hits = []
+
         if strategy in ("fulltext", "hybrid"):
-            fulltext_hits = await fulltext_retriever.search(
-                db, search_text, targets, top_k=effective_k
-            )
+            try:
+                fulltext_hits = await fulltext_retriever.search(
+                    db, search_text, targets, top_k=effective_k
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("全文检索失败：%s", exc)
+                fulltext_hits = []
 
         if strategy == "vector":
             merged = vector_hits
         elif strategy == "fulltext":
             merged = fulltext_hits
         else:
-            merged = self._rrf_fuse(
-                vector_hits,
-                fulltext_hits,
-                k=settings.QA_RRF_K,
-                top_k=effective_k,
-            )
+            # 单路有结果时直接采用该路，避免 RRF 归一化 + 阈值把唯一命中滤空
+            if vector_hits and not fulltext_hits:
+                merged = vector_hits
+            elif fulltext_hits and not vector_hits:
+                merged = fulltext_hits
+            else:
+                merged = self._rrf_fuse(
+                    vector_hits,
+                    fulltext_hits,
+                    k=settings.QA_RRF_K,
+                    top_k=effective_k,
+                )
 
         before_filter = len(merged)
         filtered = self._apply_threshold(merged, threshold)
+        # 软兜底：阈值过严导致全灭时，保留融合/单路排序后的前几条，避免有召回却显示「未命中」
+        if not filtered and merged:
+            logger.info(
+                "相关性阈值 %.2f 滤空 %d 条命中，回退保留 top-%d",
+                threshold,
+                before_filter,
+                min(effective_k, len(merged)),
+            )
+            filtered = merged[:effective_k]
         filtered_out = before_filter - len(filtered)
 
         return RetrievalResult(
