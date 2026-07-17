@@ -14,7 +14,7 @@ from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.router import api_router
 from .core.chroma import close_chroma, init_chroma
 from .core.config import settings
-from .core.database import SessionLocal, engine, ensure_schema_patches
+from .core.database import SessionLocal, engine, ensure_postgres_extensions, ensure_schema_patches
 from .core.logging import setup_logging
 from .core.metrics import metrics_payload
 from .core.redis import close_redis, init_redis
@@ -140,6 +140,8 @@ async def seed_model_configs() -> None:
 async def lifespan(_: FastAPI):
     setup_logging()
     get_langfuse()
+    # CI/裸库需先装扩展，再 create_all（否则 gin_trgm_ops 索引会失败）
+    await ensure_postgres_extensions()
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     await ensure_schema_patches()

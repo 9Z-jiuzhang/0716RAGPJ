@@ -19,11 +19,23 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 AsyncSessionLocal = SessionLocal
 
 
+async def ensure_postgres_extensions() -> None:
+    """
+    安装业务所需扩展（幂等）。
+
+    CI 的 Postgres service 不会执行 docker/postgres/init.sql，
+    必须在 create_all 之前装好 pg_trgm，否则 gin_trgm_ops 索引会失败。
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
+        await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "pg_trgm"'))
+
+
 async def ensure_schema_patches() -> None:
     """
     对已有库补齐 create_all 无法自动 ALTER 的列（幂等）。
 
-    本地/CI 早期用 create_all 建表后模型演进时，避免缺列导致 500。
+    须在 create_all 之后调用。
     """
     statements = [
         "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL",
