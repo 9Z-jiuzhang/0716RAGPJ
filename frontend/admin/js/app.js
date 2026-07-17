@@ -173,7 +173,8 @@ async function pageUsers() {
     document.getElementById("pageRoot").innerHTML = `
       <div class="card">
         <div class="toolbar"><strong>用户列表</strong><span class="spacer"></span>
-          <span class="text-muted">${canWrite ? "可启用/禁用与重置密码" : "只读（需超级管理员 user:write）"}</span>
+          <span class="text-muted">${canWrite ? "可新增用户、启用/禁用与变更角色" : "只读（需超级管理员 user:write）"}</span>
+          ${canWrite ? `<button class="btn btn-sm" id="btnNewUser">新增用户</button>` : ""}
           <input class="form-control" id="userKw" style="width:200px;height:32px" placeholder="搜索账号/昵称" />
         </div>
         <div class="table-wrap"><table class="table">
@@ -184,7 +185,7 @@ async function pageUsers() {
                 const st = u.status === "active" ? `<span class="badge badge-success">活跃</span>` : u.status === "disabled" ? `<span class="badge badge-danger">禁用</span>` : `<span class="badge badge-warning">待验证</span>`;
                 const ops = canWrite
                   ? `<button class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
-                    <button class="btn btn-text btn-sm" data-reset="${escapeHtml(u.id)}">重置密码</button>`
+                    <button class="btn btn-text btn-sm" data-role="${escapeHtml(u.id)}">变更角色</button>`
                   : `<span class="text-muted">—</span>`;
                 return `<tr data-id="${escapeHtml(u.id)}">
                   <td>${escapeHtml(u.username)}</td>
@@ -227,26 +228,77 @@ async function pageUsers() {
       };
     });
 
-    // 重置密码
-    document.querySelectorAll("[data-reset]").forEach((btn) => {
+    // 角色变更：管理员只能分配已有角色，密码仍由用户本人管理。
+    document.querySelectorAll("[data-role]").forEach((btn) => {
       btn.onclick = async () => {
-        const id = btn.getAttribute("data-reset");
-        const ok = await confirmDialog({ title: "重置密码", message: "将把密码重置为临时口令 Temp@123456，确定？", confirmText: "重置" });
-        if (!ok) return;
+        const id = btn.getAttribute("data-role");
         try {
-          await api.post(`/users/${id}/reset-password`, { new_password: "Temp@123456" });
-          toast("已重置密码", "success");
+          const roleData = await api.get("/roles?page=1&page_size=100");
+          const choices = (roleData.items || []).map((role) => `${role.id} = ${role.name}`).join("\n");
+          const picked = prompt(`输入要分配的角色 ID（可从下列选择一个）：\n${choices}`);
+          if (!picked) return;
+          await api.put(`/users/${id}/roles`, { role_ids: [picked.trim()] });
+          toast("用户角色已更新", "success");
+          pageUsers();
         } catch (e) {
-          toast(e.message || "演示模式已记录操作", "success");
+          toast(e.message || "角色更新失败", "error");
         }
       };
     });
+
+    const btnNewUser = document.getElementById("btnNewUser");
+    if (btnNewUser) btnNewUser.onclick = async () => {
+      const username = prompt("新用户账号（3-50 位）：");
+      if (!username) return;
+      const email = prompt("新用户邮箱：");
+      const password = prompt("初始密码（至少 8 位）：");
+      if (!email || !password) return;
+      const nickname = prompt("昵称（可留空）：") || username;
+      try {
+        await api.post("/users", { username, email, password, nickname });
+        toast("用户创建成功，已自动分配注册用户角色", "success");
+        pageUsers();
+      } catch (e) {
+        toast(e.message || "用户创建失败", "error");
+      }
+    };
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
 }
 
 /* ========== 角色管理 ========== */
+function openRolePermissionForm({ title, role = null, permissionData, onSave }) {
+  const dialogId = `roleForm-${Date.now()}`;
+  const selected = new Set(role?.permissions || []);
+  document.body.insertAdjacentHTML("beforeend", `
+    <div id="${dialogId}" class="modal-backdrop" style="display:flex">
+      <form class="modal" style="max-width:680px;width:92%">
+        <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
+        <div class="modal-body">
+          <label class="form-label">角色名称</label>
+          <input class="form-control" name="name" value="${escapeHtml(role?.name || "")}" ${role ? "readonly" : "required"} />
+          <label class="form-label" style="margin-top:12px">角色说明</label>
+          <input class="form-control" name="description" value="${escapeHtml(role?.description || "")}" />
+          <p class="text-muted" style="margin-top:14px">功能权限（可不勾选，创建无权限角色）</p>
+          <div class="checkbox-grid">${permissionData.map((item) => `<label><input type="checkbox" name="permission" value="${escapeHtml(item.code)}" ${selected.has(item.code) ? "checked" : ""}> ${escapeHtml(item.name)} <small>${escapeHtml(item.code)}</small></label>`).join("")}</div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>取消</button><button class="btn btn-primary" type="submit">保存</button></div>
+      </form>
+    </div>`);
+  const root = document.getElementById(dialogId);
+  root.querySelector("[data-close]").onclick = () => root.remove();
+  root.querySelector("form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      await onSave({ name: String(form.get("name") || "").trim(), description: String(form.get("description") || "").trim(), permission_codes: form.getAll("permission") });
+      root.remove();
+      pageRoles();
+    } catch (error) { toast(error.message || "保存失败", "error"); }
+  };
+}
+
 async function pageRoles() {
   if (!requirePerm("role:read", "角色管理")) return;
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载角色…</div>`;
@@ -266,11 +318,12 @@ async function pageRoles() {
                 (r) => `<tr>
                   <td>${escapeHtml(r.name)}</td>
                   <td>${escapeHtml(r.description || "")}</td>
-                  <td>${r.builtin ? `<span class="badge">内置</span>` : "-"}</td>
-                  <td>${(r.permission_codes || []).length}</td>
+                  <td>${r.is_builtin ? `<span class="badge">内置</span>` : "-"}</td>
+                  <td>${(r.permissions || []).length}</td>
                   <td>
                     <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
-                    ${!r.builtin && hasPermission("role:write") ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
+                    ${hasPermission("role:write") ? `<button class="btn btn-text btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
+                    ${!r.is_builtin && hasPermission("role:write") ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
                   </td>
                 </tr>`
               )
@@ -282,22 +335,23 @@ async function pageRoles() {
     const btnNew = document.getElementById("btnNewRole");
     if (btnNew) {
       btnNew.onclick = async () => {
-        const name = prompt("角色名称");
-        if (!name) return;
-        try {
-          await api.post("/roles", { name, description: "", permission_codes: ["qa:ask"] });
-          toast("已创建", "success");
-          pageRoles();
-        } catch (e) {
-          toast(e.message || "创建失败（演示可忽略）", "error");
-        }
+        const permissionData = await api.get("/roles/permissions");
+        openRolePermissionForm({ title: "新建角色", permissionData, onSave: async (data) => { await api.post("/roles", data); toast("角色创建成功", "success"); } });
       };
     }
 
     document.querySelectorAll("[data-view]").forEach((btn) => {
       btn.onclick = () => {
         const r = items.find((x) => x.id === btn.getAttribute("data-view"));
-        alert((r?.permission_codes || []).join("\n") || "无");
+        alert((r?.permissions || []).join("\n") || "无");
+      };
+    });
+
+    document.querySelectorAll("[data-edit-perms]").forEach((btn) => {
+      btn.onclick = async () => {
+        const role = items.find((item) => item.id === btn.getAttribute("data-edit-perms"));
+        const permissionData = await api.get("/roles/permissions");
+        openRolePermissionForm({ title: `配置“${role.name}”权限`, role, permissionData, onSave: async (data) => { await api.put(`/roles/${role.id}/permissions`, { permission_codes: data.permission_codes }); toast("角色权限已更新", "success"); } });
       };
     });
 

@@ -54,8 +54,13 @@ class UserRolesRequest(BaseModel):
     role_ids: list[str]
 
 
-class ResetPasswordRequest(BaseModel):
-    new_password: str = Field(min_length=8, max_length=128)
+class AdminCreateUserRequest(BaseModel):
+    """管理员创建用户；默认授予注册用户角色。"""
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=8, max_length=128)
+    email: EmailStr
+    nickname: str | None = Field(default=None, max_length=100)
+    role_ids: list[str] = Field(default_factory=list)
 
 
 class UserListResponse(PaginationResponse[UserResponse]):
@@ -66,6 +71,7 @@ class RoleRequest(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     description: str | None = None
     is_enabled: bool = True
+    permission_codes: list[str] = Field(default_factory=list)
 
 
 class RolePermissionsRequest(BaseModel):

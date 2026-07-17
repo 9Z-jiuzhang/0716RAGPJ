@@ -11,10 +11,44 @@ from app.core.dependencies import require_permission
 from app.core.security import hash_password
 from app.models import AuditLog, Role, User
 from app.schemas.common import BaseResponse
-from app.schemas.identity import ResetPasswordRequest, UserListResponse, UserRolesRequest, UserStatusRequest, UserUpdateRequest
+from app.schemas.identity import AdminCreateUserRequest, UserListResponse, UserRolesRequest, UserStatusRequest, UserUpdateRequest
 from app.utils.identity_helpers import present_user
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
+
+
+@router.post("", response_model=BaseResponse, status_code=201)
+async def create_user(
+    data: AdminCreateUserRequest,
+    operator: User = Depends(require_permission("user:write")),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(resolve_request_id),
+) -> BaseResponse:
+    """管理员新增用户；未指定角色时自动分配注册用户角色。"""
+    if await db.scalar(select(User).where((User.username == data.username) | (User.email == data.email))):
+        raise HTTPException(status_code=409, detail="用户名或邮箱已存在")
+    if data.role_ids:
+        roles = (await db.scalars(select(Role).where(Role.id.in_([uuid.UUID(item) for item in data.role_ids])))).all()
+        if len(roles) != len(data.role_ids):
+            raise HTTPException(status_code=400, detail="包含不存在的角色")
+    else:
+        default_role = await db.scalar(select(Role).where(Role.name == "user"))
+        if not default_role:
+            raise HTTPException(status_code=503, detail="默认注册用户角色不存在")
+        roles = [default_role]
+    user = User(
+        username=data.username,
+        email=data.email,
+        nickname=data.nickname or data.username,
+        hashed_password=hash_password(data.password),
+        roles=list(roles),
+    )
+    db.add(user)
+    await db.flush()
+    db.add(AuditLog(user_id=operator.id, action="user.create", resource_type="user", resource_id=str(user.id), detail={"role_ids": [str(role.id) for role in roles]}))
+    await db.commit()
+    await db.refresh(user)
+    return ok(present_user(user), request_id=request_id, message="用户创建成功")
 
 
 @router.get("", response_model=BaseResponse)
@@ -63,7 +97,6 @@ async def get_user(
         raise HTTPException(status_code=404, detail="用户不存在")
     return ok(present_user(user), request_id=request_id)
 
-
 @router.put("/{user_id}", response_model=BaseResponse)
 async def update_user(
     user_id: str,
@@ -93,8 +126,6 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     return ok(present_user(user), request_id=request_id)
-
-
 @router.patch("/{user_id}/status", response_model=BaseResponse)
 async def set_status(
     user_id: str,
@@ -150,27 +181,3 @@ async def set_roles(
     await db.commit()
     await db.refresh(user)
     return ok(present_user(user), request_id=request_id)
-
-
-@router.post("/{user_id}/reset-password", response_model=BaseResponse)
-async def reset_password(
-    user_id: str,
-    data: ResetPasswordRequest,
-    operator: User = Depends(require_permission("user:write")),
-    db: AsyncSession = Depends(get_db),
-    request_id: str = Depends(resolve_request_id),
-) -> BaseResponse:
-    user = await db.get(User, uuid.UUID(user_id))
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    user.hashed_password = hash_password(data.new_password)
-    db.add(
-        AuditLog(
-            user_id=operator.id,
-            action="user.reset_password",
-            resource_type="user",
-            resource_id=user_id,
-        )
-    )
-    await db.commit()
-    return ok({"message": "密码已重置"}, request_id=request_id)

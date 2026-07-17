@@ -50,6 +50,17 @@ async def list_roles(
     return ok(data, request_id=request_id)
 
 
+@router.get("/permissions", response_model=BaseResponse)
+async def list_permissions(
+    _: User = Depends(require_permission("role:read")),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(resolve_request_id),
+) -> BaseResponse:
+    """提供角色编辑页的可勾选权限清单。"""
+    rows = (await db.scalars(select(Permission).order_by(Permission.code))).all()
+    return ok([{"code": item.code, "name": item.name, "scope": item.scope} for item in rows], request_id=request_id)
+
+
 @router.post("", response_model=BaseResponse, status_code=status.HTTP_201_CREATED)
 async def create_role(
     data: RoleRequest,
@@ -59,7 +70,10 @@ async def create_role(
 ) -> BaseResponse:
     if await db.scalar(select(Role).where(Role.name == data.name)):
         raise HTTPException(status_code=409, detail="角色名称已存在")
-    role = Role(**data.model_dump())
+    permissions = (await db.scalars(select(Permission).where(Permission.code.in_(data.permission_codes)))).all()
+    if len(permissions) != len(data.permission_codes):
+        raise HTTPException(status_code=400, detail="包含不存在的权限")
+    role = Role(**data.model_dump(exclude={"permission_codes"}), permissions=list(permissions))
     db.add(role)
     db.add(
         AuditLog(
