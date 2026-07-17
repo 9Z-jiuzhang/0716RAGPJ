@@ -794,8 +794,8 @@ async function handleUpload(file) {
   fd.append("file", file);
 
   try {
-    // 契约路径：POST /knowledge-bases/{id}/documents
-    await api.upload(`/knowledge-bases/${kbId}/documents`, fd);
+    // 契约路径：POST /knowledge-bases/{id}/documents/upload
+    await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
     bar.style.width = "100%";
     prog.innerHTML = `<span class="text-success">上传成功，已进入预处理/向量化队列</span>`;
     toast("上传成功", "success");

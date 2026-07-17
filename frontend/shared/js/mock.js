@@ -362,6 +362,15 @@ export async function handle(path, options = {}) {
       q.page_size
     );
   }
+  if (/\/documents\/upload$/.test(p) && method === "POST") {
+    return {
+      id: uuid(),
+      filename: "uploaded.bin",
+      status: "processing",
+      size: 1024,
+      created_at: new Date().toISOString(),
+    };
+  }
   // ---- 快照（对齐产品手册 5.8 / 真实 API Schema）----
   if (!globalThis.__demoSnapshots) {
     const now = Date.now();

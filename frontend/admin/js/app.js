@@ -524,7 +524,7 @@ async function pageDocuments(kbId) {
       const fd = new FormData();
       fd.append("file", f);
       try {
-        await api.upload(`/knowledge-bases/${kbId}/documents`, fd);
+        await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
         toast("上传成功", "success");
         pageDocuments(kbId);
       } catch (e) {
