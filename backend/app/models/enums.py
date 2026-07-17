@@ -100,6 +100,7 @@ class SnapshotTrigger(str, Enum):
     AUTO_RESEGMENT = "auto_resegment"
     AUTO_REVECTORIZE = "auto_revectorize"
     AUTO_PERMISSION = "auto_permission"
+    AUTO_SEGMENT_RULES = "auto_segment_rules"
     AUTO_NORMALIZE = "auto_normalize"
     MANUAL = "manual"
     ROLLBACK_PROTECTION = "rollback_protection"

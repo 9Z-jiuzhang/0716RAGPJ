@@ -15,12 +15,15 @@ from app.schemas.snapshot import (
     RollbackPreviewResponse,
     RollbackRequest,
     RollbackResultResponse,
+    SnapshotCleanupResponse,
     SnapshotDetailResponse,
     SnapshotListResponse,
     SnapshotResponse,
 )
+from app.services.audit import AuditService
+from app.services.document_pipeline import run_rollback_rebuild
 from app.services.snapshot import SnapshotService
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -57,6 +60,7 @@ async def list_snapshots(
 ) -> BaseResponse:
     """获取快照列表。"""
     data: SnapshotListResponse = await SnapshotService(db).list_snapshots(kb_id, page, page_size)
+    await db.commit()  # 可能回填了遗留计数
     return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
 
 
@@ -80,6 +84,33 @@ async def create_snapshot(
     data: SnapshotResponse = await SnapshotService(db).create_manual(
         kb_id,
         body,
+        current_user.id,
+        request_id=request_id,
+        ip_address=ip,
+        user_agent=ua,
+    )
+    await db.commit()
+    return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
+
+
+@router.post(
+    "/cleanup",
+    response_model=BaseResponse,
+    status_code=status.HTTP_200_OK,
+    summary="按策略清理快照",
+    description="按保留天数与最大数量策略清理本知识库快照（产品手册 5.8.4）。",
+)
+async def cleanup_snapshots(
+    kb_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_kb_access("snapshot:write")),
+    request_id: str = Depends(_request_id),
+) -> BaseResponse:
+    """手动触发快照策略清理。"""
+    ip, ua = _client_meta(request)
+    data: SnapshotCleanupResponse = await SnapshotService(db).run_policy_cleanup(
+        kb_id,
         current_user.id,
         request_id=request_id,
         ip_address=ip,
@@ -139,7 +170,7 @@ async def preview_rollback(
     summary="回退到指定快照",
     description=(
         "将知识库恢复到指定快照：自动创建回退前保护快照，恢复文档/配置元数据，"
-        "生成 building 状态的新索引版本；向量重建完成后由向量化模块原子激活。"
+        "生成 building 状态的新索引版本；提交后异步重建向量并原子激活。"
         "confirm 必须为 true。"
     ),
 )
@@ -148,22 +179,56 @@ async def rollback_snapshot(
     snapshot_id: UUID,
     body: RollbackRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_kb_access("snapshot:restore")),
     request_id: str = Depends(_request_id),
 ) -> BaseResponse:
     """执行回退。"""
     ip, ua = _client_meta(request)
-    data: RollbackResultResponse = await SnapshotService(db).rollback(
-        kb_id,
-        snapshot_id,
-        body,
-        current_user.id,
+    try:
+        data: RollbackResultResponse = await SnapshotService(db).rollback(
+            kb_id,
+            snapshot_id,
+            body,
+            current_user.id,
+            request_id=request_id,
+            ip_address=ip,
+            user_agent=ua,
+        )
+        await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as exc:
+        await db.rollback()
+        # 失败审计单独提交，避免与回退事务一并回滚
+        try:
+            await AuditService(db).log(
+                action="snapshot.rollback",
+                resource_type="snapshot",
+                resource_id=str(snapshot_id),
+                user_id=current_user.id,
+                detail={"kb_id": str(kb_id), "from_snapshot": str(snapshot_id)},
+                request_id=request_id,
+                ip_address=ip,
+                user_agent=ua,
+                result="failure",
+                error_message=str(exc)[:2000],
+            )
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            await db.rollback()
+        raise
+
+    background_tasks.add_task(
+        run_rollback_rebuild,
+        kb_id=kb_id,
+        target_version=data.after_version,
+        document_ids=list(data.restored_document_ids or []),
+        operator_id=current_user.id,
         request_id=request_id,
-        ip_address=ip,
-        user_agent=ua,
     )
-    await db.commit()
     return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
 
 

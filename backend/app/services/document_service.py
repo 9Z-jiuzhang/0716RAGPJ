@@ -361,6 +361,14 @@ async def update_segment_rules(
     user: User,
 ) -> Document:
     doc = await get_document_detail(db, kb_id, doc_id)
+    # 5.8.1：分段规则变更前自动快照
+    await take_auto_snapshot(
+        db,
+        kb_id,
+        SnapshotTrigger.AUTO_SEGMENT_RULES,
+        user.id,
+        name=f"segment_rules:{doc.filename}",
+    )
     patch: dict[str, Any] = {
         "chunk_size": body.chunk_size,
         "chunk_overlap": body.chunk_overlap,

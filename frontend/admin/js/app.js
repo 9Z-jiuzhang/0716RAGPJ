@@ -736,6 +736,7 @@ const SNAPSHOT_TRIGGER_LABELS = {
   auto_resegment: "重分段前自动",
   auto_revectorize: "重向量化前自动",
   auto_permission: "权限变更前自动",
+  auto_segment_rules: "分段规则变更前自动",
   auto_normalize: "规范化前自动",
   rollback_protection: "回退保护",
 };
@@ -809,7 +810,8 @@ async function pageSnapshots(kbId) {
         <span class="spacer"></span>
         ${
           canWrite
-            ? `<button class="btn btn-sm" id="btnCreateSnap">手动创建快照</button>`
+            ? `<button class="btn btn-sm" id="btnCreateSnap">手动创建快照</button>
+               <button class="btn btn-secondary btn-sm" id="btnCleanupSnap">策略清理</button>`
             : `<span class="text-muted">只读（创建/删除需 snapshot:write）</span>`
         }
       </div>
@@ -891,6 +893,28 @@ async function pageSnapshots(kbId) {
           await renderList();
         } catch (e) {
           toast(e.message || "创建失败", "error");
+        }
+      };
+    }
+
+    const btnCleanup = document.getElementById("btnCleanupSnap");
+    if (btnCleanup) {
+      btnCleanup.onclick = async () => {
+        const ok = await confirmDialog({
+          title: "策略清理快照",
+          message: "将按默认策略清理：超过 90 天的快照，以及超出 50 条上限的最早非保护快照。确定继续？",
+          confirmText: "开始清理",
+        });
+        if (!ok) return;
+        try {
+          const res = await api.post(`/knowledge-bases/${kbId}/snapshots/cleanup`, {});
+          toast(
+            `清理完成：过期 ${res?.expired_deleted ?? 0}，超额 ${res?.excess_deleted ?? 0}，剩余 ${res?.active_remaining ?? "-"}`,
+            "success"
+          );
+          await renderList();
+        } catch (e) {
+          toast(e.message || "清理失败", "error");
         }
       };
     }
@@ -1140,7 +1164,9 @@ async function pageHitTest() {
 const AUDIT_ACTION_LABELS = {
   "snapshot.create": "创建快照",
   "snapshot.auto_create": "自动创建快照",
+  "snapshot.cleanup": "策略清理快照",
   "snapshot.rollback": "回退快照",
+  "snapshot.rollback_rebuild": "回退重建索引",
   "snapshot.delete": "删除快照",
   "snapshot.index_activate": "激活索引版本",
   "kb.create": "创建知识库",
