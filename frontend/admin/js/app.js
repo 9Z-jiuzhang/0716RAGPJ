@@ -53,6 +53,50 @@ function guard() {
   return true;
 }
 
+/**
+ * 临时联调入口：仅以当前登录人的权限发起只读请求，便于分别验收 5.2 与 5.3。
+ * 项目全部联调完成后，可连同顶部 btnIdentityRoleCheck 按钮一起删除。
+ */
+async function runIdentityRoleCheck() {
+  const button = document.getElementById("btnIdentityRoleCheck");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "联调中…";
+  }
+
+  const checks = [];
+  const verify = async (name, request) => {
+    try {
+      await request();
+      checks.push(`通过：${name}`);
+    } catch (error) {
+      checks.push(`失败：${name}（${error.message || "请求异常"}）`);
+    }
+  };
+
+  if (isDemoMode()) {
+    checks.push("提示：当前为演示模式，以下结果不代表真实后端状态。");
+  }
+  await verify("5.2 当前登录身份", () => api.get("/auth/me"));
+  if (hasPermission("user:read")) {
+    await verify("5.2 用户列表权限", () => api.get("/users?page=1&page_size=1"));
+  } else {
+    checks.push("跳过：5.2 用户列表（当前角色无 user:read 权限）");
+  }
+  if (hasPermission("role:read")) {
+    await verify("5.3 角色列表权限", () => api.get("/roles?page=1&page_size=1"));
+    await verify("5.3 权限清单读取", () => api.get("/roles/permissions"));
+  } else {
+    checks.push("跳过：5.3 角色管理（当前角色无 role:read 权限）");
+  }
+
+  alert(`5.2 / 5.3 联调结果\n\n${checks.join("\n")}`);
+  if (button) {
+    button.disabled = false;
+    button.textContent = "5.2/5.3 联调";
+  }
+}
+
 /** 渲染管理端壳层（顶栏主导 + 全宽内容；右上保留智能对话/退出） */
 function renderShell(title) {
   if (!guard()) return false;
@@ -77,6 +121,7 @@ function renderShell(title) {
         </nav>
         <div class="topnav-actions">
           <span class="text-muted">${roleText}</span>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnIdentityRoleCheck">5.2/5.3 联调</button>
           <a class="btn btn-secondary btn-sm" href="/#/">智能对话</a>
           <button type="button" class="btn btn-text" id="btnLogout">退出</button>
         </div>
@@ -90,6 +135,7 @@ function renderShell(title) {
   document.querySelectorAll("[data-go]").forEach((el) => {
     el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
   });
+  document.getElementById("btnIdentityRoleCheck").onclick = runIdentityRoleCheck;
   document.getElementById("btnLogout").onclick = async () => {
     const ok = await confirmDialog({ title: "退出", message: "确定退出管理端吗？", confirmText: "退出" });
     if (!ok) return;
