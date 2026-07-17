@@ -69,9 +69,10 @@ jobs:
           JWT_SECRET_KEY: pytest-secret-key-change-me-32bytes!!
           LLM_API_KEY: test-key
           EMBEDDING_API_KEY: test-key
+          RATE_LIMIT_ENABLED: "false"
         run: |
           if [ -d backend/tests ] && [ "$(find backend/tests -name 'test_*.py' | wc -l)" -gt 0 ]; then
-            pytest backend/tests -v
+            pytest backend/tests -v --tb=short
           else
             echo "暂无测试用例，跳过 pytest"
           fi

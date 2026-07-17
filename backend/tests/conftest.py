@@ -16,18 +16,35 @@ from httpx import ASGITransport, AsyncClient
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
-os.environ.setdefault("POSTGRES_HOST", "localhost")
-os.environ.setdefault("REDIS_HOST", "localhost")
+# CI / 本地 pytest：将 Docker Compose 服务名映射为 localhost
+for _key, _docker, _local in (
+    ("POSTGRES_HOST", "postgres", "localhost"),
+    ("REDIS_HOST", "redis", "localhost"),
+    ("CHROMA_HOST", "chroma", "localhost"),
+):
+    current = os.environ.get(_key)
+    if not current or current == _docker:
+        os.environ[_key] = _local
+
 os.environ.setdefault("JWT_SECRET_KEY", "pytest-secret-key-change-me-32bytes!!")
 os.environ.setdefault("LLM_API_KEY", "test-key")
 os.environ.setdefault("EMBEDDING_API_KEY", "test-key")
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-# 确保配置单例读取到测试环境变量
+# 确保配置单例与引擎使用测试环境主机名
 try:
     from app.core.config import get_settings
+    import app.core.config as config_module
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    import app.core.database as database_module
 
     get_settings.cache_clear()
+    config_module.settings = get_settings()
+    database_module.engine = create_async_engine(config_module.settings.database_url, pool_pre_ping=True)
+    database_module.SessionLocal = async_sessionmaker(
+        database_module.engine, expire_on_commit=False, class_=AsyncSession
+    )
+    database_module.AsyncSessionLocal = database_module.SessionLocal
 except Exception:
     pass
 
@@ -93,16 +110,18 @@ async def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
         redis_module._redis_client = client
         return client
 
-    monkeypatch.setattr("app.core.redis.init_redis", _init)
-    monkeypatch.setattr("app.core.redis.get_redis_client", lambda: client)
-    monkeypatch.setattr("app.core.redis.ping_redis", AsyncMock(return_value=True))
-
     async def _close() -> None:
         from app.core import redis as redis_module
 
         redis_module._redis_client = None
 
+    # 必须同时 patch app.main 中的绑定名：lifespan 使用 from-import，仅改 core.redis 无效
+    monkeypatch.setattr("app.core.redis.init_redis", _init)
     monkeypatch.setattr("app.core.redis.close_redis", _close)
+    monkeypatch.setattr("app.core.redis.get_redis_client", lambda: client)
+    monkeypatch.setattr("app.core.redis.ping_redis", AsyncMock(return_value=True))
+    monkeypatch.setattr("app.main.init_redis", _init)
+    monkeypatch.setattr("app.main.close_redis", _close)
     return client
 
 
@@ -135,6 +154,8 @@ async def client_mocked(fake_redis: FakeRedis, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("app.main.engine", mock_engine)
     monkeypatch.setattr("app.main.SessionLocal", mock_session_local)
     monkeypatch.setattr("app.main.seed_identity_data", AsyncMock())
+    monkeypatch.setattr("app.main.seed_model_configs", AsyncMock())
+    monkeypatch.setattr("app.main.ensure_schema_patches", AsyncMock())
     monkeypatch.setattr("app.main.init_chroma", lambda: MagicMock())
     monkeypatch.setattr("app.main.close_chroma", lambda: None)
     monkeypatch.setattr("app.core.chroma.ping_chroma", lambda: True)
@@ -154,13 +175,17 @@ async def client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[AsyncClient]:
     """每个测试独立启动应用 lifespan（Postgres 真实；Redis/Chroma 使用替身避免 event loop 冲突）。"""
-    monkeypatch.setattr("app.main.init_chroma", lambda: None)
-    monkeypatch.setattr("app.main.close_chroma", lambda: None)
+    import app.core.database as database_module
+    import app.main as main_mod
+
+    # 确保 main 使用 conftest 重建后的 engine（避免仍指向 docker 主机名）
+    monkeypatch.setattr(main_mod, "engine", database_module.engine)
+    monkeypatch.setattr(main_mod, "SessionLocal", database_module.SessionLocal)
+    monkeypatch.setattr(main_mod, "init_chroma", lambda: None)
+    monkeypatch.setattr(main_mod, "close_chroma", lambda: None)
     monkeypatch.setattr("app.core.chroma.ping_chroma", lambda: True)
 
-    from app.main import app, lifespan
-
-    async with lifespan(app):
-        transport = ASGITransport(app=app)
+    async with main_mod.lifespan(main_mod.app):
+        transport = ASGITransport(app=main_mod.app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
