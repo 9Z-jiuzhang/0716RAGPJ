@@ -30,6 +30,8 @@ import { resolveDemoLoginUser, isBuiltinDemoUsername } from "/assets/js/mock.js"
 let currentSessionId = null;
 /** 流式请求控制器 */
 let askAbort = null;
+/** 推理面板是否折叠 */
+let reasoningCollapsed = false;
 
 /** 显示/隐藏演示横幅 */
 function syncDemoBanner() {
@@ -147,15 +149,27 @@ function pageChat() {
 
   document.getElementById("pageRoot").innerHTML = `
     <div class="qa-layout">
-      <div class="qa-messages" id="msgList">
-        <div class="empty-state" id="msgEmpty">
-          ${tip}<br/>
-          回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。
+      <div class="qa-chat-column">
+        <div class="qa-messages" id="msgList">
+          <div class="empty-state" id="msgEmpty">
+            ${tip}<br/>
+            回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。
+          </div>
+        </div>
+        <div class="qa-composer">
+          <textarea class="form-control" id="questionInput" placeholder="请输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+          <button type="button" class="btn" id="btnSend">发送</button>
         </div>
       </div>
-      <div class="qa-composer">
-        <textarea class="form-control" id="questionInput" placeholder="请输入问题，Enter 发送，Shift+Enter 换行"></textarea>
-        <button type="button" class="btn" id="btnSend">发送</button>
+      <div class="reasoning-panel" id="reasoningPanel">
+        <button type="button" class="reasoning-toggle" id="reasoningToggle" title="切换推理面板">▶</button>
+        <div class="reasoning-header">
+          <div class="reasoning-title">推理过程 <span class="badge">流程示意</span></div>
+          <button type="button" class="reasoning-toggle" id="reasoningToggleHeader">◀</button>
+        </div>
+        <div class="reasoning-steps" id="reasoningSteps">
+          <div class="reasoning-empty">发送问题后，将展示系统处理的每一步推理过程</div>
+        </div>
       </div>
     </div>
   `;
@@ -169,6 +183,35 @@ function pageChat() {
       sendQuestion();
     }
   });
+
+  const toggle = document.getElementById("reasoningToggle");
+  const toggleHeader = document.getElementById("reasoningToggleHeader");
+  const panel = document.getElementById("reasoningPanel");
+
+  const handleToggle = () => {
+    reasoningCollapsed = !reasoningCollapsed;
+    panel.classList.toggle("collapsed", reasoningCollapsed);
+    panel.classList.toggle("visible", !reasoningCollapsed);
+    toggle.textContent = reasoningCollapsed ? "▶" : "◀";
+    toggleHeader.textContent = reasoningCollapsed ? "▶" : "◀";
+  };
+
+  toggle.addEventListener("click", handleToggle);
+  toggleHeader.addEventListener("click", handleToggle);
+
+  const handleResize = () => {
+    const isMobile = window.innerWidth <= 1024;
+    if (isMobile) {
+      panel.classList.remove("collapsed");
+      panel.classList.toggle("visible", !reasoningCollapsed);
+    } else {
+      panel.classList.remove("visible");
+      panel.classList.toggle("collapsed", reasoningCollapsed);
+    }
+  };
+
+  window.addEventListener("resize", handleResize);
+  handleResize();
 }
 
 /** 追加一条消息气泡 */
@@ -186,6 +229,118 @@ function appendMessage(role, contentHtml) {
   return row.querySelector(".msg-bubble");
 }
 
+/** 推理步骤类型图标映射 */
+const reasoningTypeIcons = {
+  rewrite: "✍️",
+  retrieval: "🔍",
+  rerank: "📊",
+  generation: "💡",
+};
+
+/** 推理步骤类型标题映射 */
+const reasoningTypeTitles = {
+  rewrite: "查询改写",
+  retrieval: "多路检索",
+  rerank: "重排与筛选",
+  assembly: "上下文组装",
+  generation: "生成回答",
+};
+
+/** 清空推理面板 */
+function clearReasoningPanel() {
+  const stepsContainer = document.getElementById("reasoningSteps");
+  if (stepsContainer) {
+    stepsContainer.innerHTML = "";
+  }
+}
+
+/** 追加推理步骤卡片 */
+function appendReasoningStep(step) {
+  const stepsContainer = document.getElementById("reasoningSteps");
+  if (!stepsContainer) return;
+
+  const icon = reasoningTypeIcons[step.type] || "📌";
+  const title = reasoningTypeTitles[step.type] || step.content || "处理步骤";
+  const status = step.status || "processing";
+  const isCompleted = status === "completed";
+  const isActive = status === "processing";
+
+  const stepEl = document.createElement("div");
+  stepEl.className = `reasoning-step ${isCompleted ? "completed" : isActive ? "active" : ""}`;
+  stepEl.dataset.step = step.step;
+
+  const statusIcon = isCompleted ? "✅" : isActive ? "◯" : "○";
+
+  stepEl.innerHTML = `
+    <div class="reasoning-step-icon ${isActive ? "loading" : ""}">${statusIcon}</div>
+    <div class="reasoning-step-content">
+      <div class="reasoning-step-title">${icon} ${escapeHtml(title)}</div>
+      <div class="reasoning-step-detail">${escapeHtml(step.detail || "")}</div>
+      ${step.elapsed_ms !== undefined ? `<div class="reasoning-step-time">耗时 ${step.elapsed_ms}ms</div>` : ""}
+    </div>
+  `;
+
+  stepsContainer.appendChild(stepEl);
+  stepsContainer.scrollTop = stepsContainer.scrollHeight;
+
+  return stepEl;
+}
+
+/** 更新推理步骤状态 */
+function updateReasoningStep(stepNum, status, elapsedMs) {
+  const stepsContainer = document.getElementById("reasoningSteps");
+  if (!stepsContainer) return;
+
+  const stepEl = stepsContainer.querySelector(`.reasoning-step[data-step="${stepNum}"]`);
+  if (!stepEl) return;
+
+  stepEl.classList.remove("active", "completed");
+  stepEl.classList.add(status);
+
+  const iconEl = stepEl.querySelector(".reasoning-step-icon");
+  if (iconEl) {
+    iconEl.classList.remove("loading");
+    iconEl.textContent = status === "completed" ? "✅" : "◯";
+  }
+
+  if (elapsedMs !== undefined) {
+    const timeEl = stepEl.querySelector(".reasoning-step-time");
+    if (timeEl) {
+      timeEl.textContent = `耗时 ${elapsedMs}ms`;
+    } else {
+      const contentEl = stepEl.querySelector(".reasoning-step-content");
+      if (contentEl) {
+        contentEl.innerHTML += `<div class="reasoning-step-time">耗时 ${elapsedMs}ms</div>`;
+      }
+    }
+  }
+}
+
+/** 模拟推理过程数据（后端未实现时使用） */
+const mockTraces = [
+  { step: 1, type: "rewrite", content: "查询改写", detail: "将问题改写为标准化检索语句", elapsed_ms: 120, status: "completed" },
+  { step: 2, type: "retrieval", content: "多路检索", detail: "向量检索召回8个片段，全文检索召回5个片段", elapsed_ms: 200, status: "completed" },
+  { step: 3, type: "rerank", content: "重排与筛选", detail: "RRF融合排序，过滤后保留4个片段", elapsed_ms: 150, status: "completed" },
+  { step: 4, type: "assembly", content: "上下文组装", detail: "基于4个检索结果构建LLM输入Prompt", elapsed_ms: 100, status: "completed" },
+  { step: 5, type: "generation", content: "生成回答", detail: "引用2个来源，回答生成完成", elapsed_ms: 600, status: "completed" },
+];
+
+/** 模拟 SSE 流式推送推理步骤 */
+async function simulateReasoningTraces(onTrace) {
+  for (let i = 0; i < mockTraces.length; i++) {
+    const trace = { ...mockTraces[i] };
+    trace.status = "processing";
+    delete trace.elapsed_ms;
+    onTrace(trace);
+
+    await new Promise((resolve) => setTimeout(resolve, 400 + Math.random() * 300));
+
+    trace.status = "completed";
+    trace.elapsed_ms = mockTraces[i].elapsed_ms;
+    onTrace(trace);
+  }
+}
+
 /** 发送问题并 SSE 流式展示（手册交互流程） */
 async function sendQuestion() {
   const input = document.getElementById("questionInput");
@@ -201,12 +356,29 @@ async function sendQuestion() {
   input.value = "";
   // 创建助手气泡（打字机写入）
   const bubble = appendMessage("assistant", "");
+  // 清空推理面板
+  clearReasoningPanel();
   // 取消上一次未完成请求
   if (askAbort) askAbort.abort();
   askAbort = new AbortController();
 
   let citationsHtml = "";
   let confidenceTip = "";
+  let hasTraces = false;
+
+  const handleTrace = (trace) => {
+    hasTraces = true;
+    const existing = document.querySelector(`.reasoning-step[data-step="${trace.step}"]`);
+    if (existing) {
+      updateReasoningStep(trace.step, trace.status, trace.elapsed_ms);
+    } else {
+      appendReasoningStep(trace);
+    }
+  };
+
+  if (isDemoMode()) {
+    simulateReasoningTraces(handleTrace);
+  }
 
   try {
     await askStream(
@@ -218,6 +390,22 @@ async function sendQuestion() {
       {
         signal: askAbort.signal,
         onEvent: (event, data) => {
+          // 推理步骤追踪（后端新事件类型）
+          if (event === "reasoning") {
+            handleTrace(data);
+            return;
+          }
+          // 推理步骤追踪（兼容旧事件类型）
+          if (event === "trace") {
+            handleTrace(data);
+            return;
+          }
+          // 推理步骤列表（批量，兼容旧事件类型）
+          if (event === "traces") {
+            const traces = data.items || data || [];
+            traces.forEach((t) => handleTrace(t));
+            return;
+          }
           // 增量文本（打字机 + 光标样式）
           if (event === "chunk") {
             bubble.classList.add("streaming-cursor");
@@ -429,6 +617,8 @@ async function pageHistory() {
         // 拉取消息预览到问答页
         navigate("/");
         dispatchRender();
+        // 切换会话时清空推理面板
+        setTimeout(() => clearReasoningPanel(), 100);
         try {
           const detail = await api.get(`/qa/sessions/${currentSessionId}`);
           const list = document.getElementById("msgList");

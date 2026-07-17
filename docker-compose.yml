@@ -19,7 +19,7 @@ services:
       redis:
         condition: service_healthy
       chroma:
-        condition: service_healthy
+        condition: service_started
       minio:
         condition: service_started
     healthcheck:
@@ -77,7 +77,7 @@ services:
     networks:
       - kb-network
 
-  # ---------- Chroma 向量库（Client-Server 模式，供多连接并发读取） ----------
+  # ---------- Chroma 向量库 ----------
   chroma:
     image: chromadb/chroma:latest
     ports:
@@ -85,22 +85,12 @@ services:
     environment:
       IS_PERSISTENT: "TRUE"
       PERSIST_DIRECTORY: /chroma/chroma
-      # 允许容器内 api 服务通过服务名访问
       CHROMA_SERVER_HOST: "0.0.0.0"
       CHROMA_SERVER_HTTP_PORT: "8000"
     volumes:
       - ./data/chroma:/chroma/chroma
     healthcheck:
-      # Chroma 基于 Python 镜像，使用标准库探测 heartbeat 端点
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8000/api/v1/heartbeat'')"',
-        ]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
+      disable: true
     networks:
       - kb-network
 
