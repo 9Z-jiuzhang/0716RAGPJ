@@ -549,50 +549,364 @@ async function pageDocuments(kbId) {
   }
 }
 
-/* ========== 快照管理 ========== */
+/* ========== 快照管理（产品手册 5.8） ========== */
+const SNAPSHOT_TRIGGER_LABELS = {
+  manual: "手动创建",
+  auto_upload: "上传前自动",
+  auto_delete: "删除前自动",
+  auto_resegment: "重分段前自动",
+  auto_revectorize: "重向量化前自动",
+  auto_permission: "权限变更前自动",
+  auto_normalize: "规范化前自动",
+  rollback_protection: "回退保护",
+};
+
+const SNAPSHOT_CHANGE_LABELS = {
+  added: "将恢复",
+  removed: "将归档",
+  modified: "将变更",
+  unchanged: "无变化",
+};
+
+const CONFIG_FIELD_LABELS = {
+  name: "知识库名称",
+  chunk_size: "分段长度",
+  chunk_overlap: "分段重叠",
+  embedding_model: "嵌入模型",
+  visibility: "可见性",
+  permissions: "权限配置",
+};
+
+/** 宽弹窗（快照详情 / 差异预览）；确认时不自动卸载，便于读取表单。 */
+function openWideModal({ title, bodyHtml, actionsHtml }) {
+  return new Promise((resolve) => {
+    const mask = document.createElement("div");
+    mask.className = "modal-mask";
+    mask.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(760px,calc(100vw - 24px));max-height:85vh;overflow:auto">
+        <h3 class="modal-title">${escapeHtml(title)}</h3>
+        <div class="modal-body">${bodyHtml}</div>
+        <div class="modal-actions">${actionsHtml}</div>
+      </div>`;
+    mask.addEventListener("click", (e) => {
+      const act = e.target.getAttribute?.("data-act");
+      if (!act) return;
+      if (act === "cancel") {
+        mask.remove();
+        resolve(null);
+        return;
+      }
+      if (act === "ok") {
+        resolve({ ok: true, root: mask });
+      }
+    });
+    document.body.appendChild(mask);
+  });
+}
+
 async function pageSnapshots(kbId) {
   if (!requirePerm("snapshot:read", "快照管理")) return;
+  const canWrite = hasPermission("snapshot:write");
+  const canRestore = hasPermission("snapshot:restore");
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载快照…</div>`;
-  try {
+
+  const triggerBadge = (trigger) => {
+    const label = SNAPSHOT_TRIGGER_LABELS[trigger] || trigger || "-";
+    const cls =
+      trigger === "rollback_protection"
+        ? "badge badge-warning"
+        : trigger === "manual"
+          ? "badge badge-success"
+          : "badge";
+    return `<span class="${cls}">${escapeHtml(label)}</span>`;
+  };
+
+  const renderList = async () => {
     const data = await api.get(`/knowledge-bases/${kbId}/snapshots?page=1&page_size=50`);
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="toolbar"><button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button></div>
+      <div class="toolbar">
+        <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回知识库详情</button>
+        <span class="spacer"></span>
+        ${
+          canWrite
+            ? `<button class="btn btn-sm" id="btnCreateSnap">手动创建快照</button>`
+            : `<span class="text-muted">只读（创建/删除需 snapshot:write）</span>`
+        }
+      </div>
       <div class="card">
         <h3 class="card-title">历史快照与回退</h3>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>版本</th><th>备注</th><th>时间</th><th>操作</th></tr></thead>
+        <p class="text-muted" style="margin-top:-4px;margin-bottom:12px">
+          变更前会自动留存快照；回退前将强制生成「回退保护」快照，并新建索引版本（不覆盖历史）。默认最多保留 50 份 / 90 天。
+        </p>
+        ${
+          items.length
+            ? `<div class="table-wrap"><table class="table">
+          <thead><tr>
+            <th>快照名称</th><th>触发方式</th><th>文档数</th><th>分段数</th><th>说明</th><th>创建时间</th><th>操作</th>
+          </tr></thead>
           <tbody>
             ${items
-              .map(
-                (s) => `<tr>
-                  <td>${escapeHtml(s.version || s.id)}</td>
-                  <td>${escapeHtml(s.note || "")}</td>
+              .map((s) => {
+                const isProtection = s.trigger === "rollback_protection";
+                const ops = [
+                  `<button class="btn btn-text btn-sm" data-detail="${escapeHtml(s.id)}">详情</button>`,
+                  canRestore
+                    ? `<button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(s.id)}">差异预览/回退</button>`
+                    : "",
+                  canWrite && !isProtection
+                    ? `<button class="btn btn-text btn-sm" data-del="${escapeHtml(s.id)}" style="color:var(--color-danger)">删除</button>`
+                    : isProtection
+                      ? `<span class="text-muted" title="保护快照不可手动删除">不可删</span>`
+                      : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+                return `<tr>
+                  <td><strong>${escapeHtml(s.name || "-")}</strong></td>
+                  <td>${triggerBadge(s.trigger)}</td>
+                  <td>${escapeHtml(s.document_count ?? 0)}</td>
+                  <td>${escapeHtml(s.total_chunks ?? 0)}</td>
+                  <td>${escapeHtml(s.description || "—")}</td>
                   <td>${formatDateTime(s.created_at)}</td>
-                  <td><button class="btn btn-secondary btn-sm" data-restore="${escapeHtml(s.id)}">回退到此版本</button></td>
-                </tr>`
-              )
+                  <td style="white-space:nowrap">${ops}</td>
+                </tr>`;
+              })
               .join("")}
           </tbody>
-        </table></div>
+        </table></div>`
+            : `<div class="empty-state">暂无快照。上传/删除文档或点击「手动创建快照」后会出现记录。</div>`
+        }
       </div>`;
-    document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
-    document.querySelectorAll("[data-restore]").forEach((btn) => {
-      btn.onclick = async () => {
-        const ok = await confirmDialog({
-          title: "回退快照",
-          message: "回退将切换当前索引版本，请确认已评估影响。",
-          confirmText: "回退",
+
+    document.querySelectorAll("[data-go]").forEach((b) =>
+      b.addEventListener("click", () => navigate(b.getAttribute("data-go")))
+    );
+
+    const btnCreate = document.getElementById("btnCreateSnap");
+    if (btnCreate) {
+      btnCreate.onclick = async () => {
+        const result = await openWideModal({
+          title: "手动创建快照",
+          bodyHtml: `
+            <p class="text-muted">建议在重大发布、批量重分段或权限调整前手工命名备份，便于事后按名称定位。</p>
+            <label class="text-muted">快照名称</label>
+            <input class="form-control" id="snapName" maxlength="200" placeholder="例如：上线前备份-2026Q3" style="margin:6px 0 12px" />
+            <label class="text-muted">说明（可选）</label>
+            <textarea class="form-control" id="snapDesc" rows="3" maxlength="2000" placeholder="记录创建原因，如：客服 FAQ 改版前"></textarea>`,
+          actionsHtml: `
+            <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+            <button type="button" class="btn" data-act="ok">创建</button>`,
         });
-        if (!ok) return;
+        if (!result) return;
+        const name = result.root.querySelector("#snapName")?.value?.trim();
+        const description = result.root.querySelector("#snapDesc")?.value?.trim() || undefined;
+        result.root.remove();
+        if (!name) {
+          toast("请填写快照名称", "error");
+          return;
+        }
         try {
-          await api.post(`/knowledge-bases/${kbId}/snapshots/${btn.getAttribute("data-restore")}/restore`, {});
-          toast("已提交回退", "success");
+          await api.post(`/knowledge-bases/${kbId}/snapshots`, { name, description });
+          toast("快照已创建", "success");
+          await renderList();
         } catch (e) {
-          toast(e.message || "演示模式：已记录回退请求", "success");
+          toast(e.message || "创建失败", "error");
+        }
+      };
+    }
+
+    document.querySelectorAll("[data-detail]").forEach((btn) => {
+      btn.onclick = async () => {
+        const sid = btn.getAttribute("data-detail");
+        try {
+          const d = await api.get(`/knowledge-bases/${kbId}/snapshots/${sid}`);
+          const docs = d.documents || [];
+          const rules = d.segment_rules || {};
+          const perms = d.permission_snapshot || [];
+          await openWideModal({
+            title: `快照详情 · ${d.name || ""}`,
+            bodyHtml: `
+              <p><span class="text-muted">触发方式：</span>${triggerBadge(d.trigger)}
+                <span class="text-muted" style="margin-left:12px">创建时间：</span>${formatDateTime(d.created_at)}</p>
+              <p class="text-muted">${escapeHtml(d.description || "无说明")}</p>
+              <h4 style="margin:14px 0 8px;font-size:14px">分段规则</h4>
+              <p>分段长度 <code>${escapeHtml(rules.chunk_size ?? "-")}</code> · 重叠
+                <code>${escapeHtml(rules.chunk_overlap ?? "-")}</code></p>
+              <h4 style="margin:14px 0 8px;font-size:14px">权限配置（${perms.length} 条）</h4>
+              ${
+                perms.length
+                  ? `<ul class="list-plain">${perms
+                      .slice(0, 20)
+                      .map(
+                        (p) =>
+                          `<li><code>${escapeHtml(p.permission_code || "-")}</code>
+                            ${p.user_id ? ` · 用户 ${escapeHtml(String(p.user_id).slice(0, 8))}…` : ""}
+                            ${p.role_id ? ` · 角色 ${escapeHtml(String(p.role_id).slice(0, 8))}…` : ""}</li>`
+                      )
+                      .join("")}${perms.length > 20 ? "<li>…</li>" : ""}</ul>`
+                  : `<p class="text-muted">快照时无独立权限授予</p>`
+              }
+              <h4 style="margin:14px 0 8px;font-size:14px">文档清单（${docs.length}）</h4>
+              <div class="table-wrap"><table class="table">
+                <thead><tr><th>文件名</th><th>类型</th><th>分段数</th><th>状态</th></tr></thead>
+                <tbody>${
+                  docs.length
+                    ? docs
+                        .map(
+                          (doc) => `<tr>
+                          <td>${escapeHtml(doc.filename)}</td>
+                          <td>${escapeHtml(doc.file_type || "-")}</td>
+                          <td>${escapeHtml(doc.chunk_count ?? 0)}</td>
+                          <td>${escapeHtml((doc.metadata && doc.metadata.status) || "-")}</td>
+                        </tr>`
+                        )
+                        .join("")
+                    : `<tr><td colspan="4" class="text-muted">无文档</td></tr>`
+                }</tbody>
+              </table></div>`,
+            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
+          });
+        } catch (e) {
+          toast(e.message || "加载详情失败", "error");
         }
       };
     });
+
+    document.querySelectorAll("[data-preview]").forEach((btn) => {
+      btn.onclick = async () => {
+        const sid = btn.getAttribute("data-preview");
+        try {
+          const preview = await api.post(`/knowledge-bases/${kbId}/snapshots/${sid}/preview`, {});
+          const affected = (preview.affected_documents || []).filter((a) => a.change_type !== "unchanged");
+          const configChanges = preview.config_changes || [];
+          const result = await openWideModal({
+            title: `回退差异预览 · ${preview.snapshot_name || ""}`,
+            bodyHtml: `
+              <p class="text-muted">将影响 <strong>${escapeHtml(preview.total_changes ?? affected.length)}</strong> 份文档；
+                回退前会自动创建保护快照；确认后仅恢复元数据并生成 <code>building</code> 索引，向量重建完成后才会原子切换。</p>
+              ${
+                configChanges.length
+                  ? `<h4 style="margin:12px 0 8px;font-size:14px">配置差异</h4>
+                    <ul class="list-plain">${configChanges
+                      .map(
+                        (c) =>
+                          `<li>${escapeHtml(CONFIG_FIELD_LABELS[c.field] || c.field)}：
+                            <code>${escapeHtml(JSON.stringify(c.current))}</code>
+                            → <code>${escapeHtml(JSON.stringify(c.snapshot))}</code></li>`
+                      )
+                      .join("")}</ul>`
+                  : `<p class="text-muted">配置项与当前一致</p>`
+              }
+              <h4 style="margin:12px 0 8px;font-size:14px">文档变更（可勾选做选择性恢复）</h4>
+              <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                <input type="checkbox" id="snapSelective" /> 仅恢复下方勾选的文档（不改整库配置/权限）
+              </label>
+              <div class="table-wrap"><table class="table">
+                <thead><tr><th></th><th>变更</th><th>文件名</th><th>当前分段</th><th>快照分段</th><th>说明</th></tr></thead>
+                <tbody>${
+                  (preview.affected_documents || []).length
+                    ? (preview.affected_documents || [])
+                        .map((a) => {
+                          const canSelect = a.change_type === "added" || a.change_type === "modified";
+                          return `<tr>
+                            <td>${
+                              canSelect
+                                ? `<input type="checkbox" class="snap-doc" value="${escapeHtml(a.document_id)}" ${
+                                    a.change_type !== "unchanged" ? "checked" : ""
+                                  } />`
+                                : ""
+                            }</td>
+                            <td><span class="badge ${
+                              a.change_type === "removed"
+                                ? "badge-danger"
+                                : a.change_type === "added"
+                                  ? "badge-success"
+                                  : a.change_type === "modified"
+                                    ? "badge-warning"
+                                    : ""
+                            }">${escapeHtml(SNAPSHOT_CHANGE_LABELS[a.change_type] || a.change_type)}</span></td>
+                            <td>${escapeHtml(a.filename)}</td>
+                            <td>${escapeHtml(a.current_chunk_count ?? "—")}</td>
+                            <td>${escapeHtml(a.snapshot_chunk_count ?? "—")}</td>
+                            <td class="text-muted">${escapeHtml(a.detail || "")}</td>
+                          </tr>`;
+                        })
+                        .join("")
+                    : `<tr><td colspan="6" class="text-muted">与当前状态无差异</td></tr>`
+                }</tbody>
+              </table></div>
+              <p style="margin-top:12px;color:var(--color-danger)">二次确认后不可撤销为「覆盖原历史」；如需撤销回退，可再回退到刚生成的保护快照。</p>`,
+            actionsHtml: `
+              <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+              ${
+                canRestore
+                  ? `<button type="button" class="btn btn-danger" data-act="ok">确认回退</button>`
+                  : ""
+              }`,
+          });
+          if (!result || !canRestore) {
+            if (result?.root) result.root.remove();
+            return;
+          }
+          const selective = result.root.querySelector("#snapSelective")?.checked;
+          let document_ids;
+          if (selective) {
+            document_ids = [...result.root.querySelectorAll(".snap-doc:checked")].map((el) => el.value);
+            if (!document_ids.length) {
+              result.root.remove();
+              toast("选择性恢复请至少勾选一份文档", "error");
+              return;
+            }
+          }
+          result.root.remove();
+          const ok = await confirmDialog({
+            title: "二次确认回退",
+            message: selective
+              ? `将仅恢复已选 ${document_ids.length} 份文档，并创建回退前保护快照。确定继续？`
+              : "将整库恢复到该快照（含配置/权限），快照外文档将软归档，并创建回退前保护快照。确定继续？",
+            confirmText: "确认回退",
+            danger: true,
+          });
+          if (!ok) return;
+          const body = { confirm: true };
+          if (document_ids) body.document_ids = document_ids;
+          const res = await api.post(`/knowledge-bases/${kbId}/snapshots/${sid}/rollback`, body);
+          toast(
+            res?.message ||
+              `回退已受理：新索引 ${res?.new_index_version || ""}（${res?.index_status || "building"}）`,
+            "success"
+          );
+          await renderList();
+        } catch (e) {
+          toast(e.message || "预览/回退失败", "error");
+        }
+      };
+    });
+
+    document.querySelectorAll("[data-del]").forEach((btn) => {
+      btn.onclick = async () => {
+        const sid = btn.getAttribute("data-del");
+        const ok = await confirmDialog({
+          title: "删除快照",
+          message: "删除后列表中不再展示该快照（软删除）。回退保护快照不可删。确定删除？",
+          confirmText: "删除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await api.delete(`/knowledge-bases/${kbId}/snapshots/${sid}`);
+          toast("快照已删除", "success");
+          await renderList();
+        } catch (e) {
+          toast(e.message || "删除失败", "error");
+        }
+      };
+    });
+  };
+
+  try {
+    await renderList();
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
@@ -643,31 +957,167 @@ async function pageHitTest() {
   }
 }
 
-/* ========== 审计日志 ========== */
+/* ========== 审计日志（产品手册 5.8.5） ========== */
+const AUDIT_ACTION_LABELS = {
+  "snapshot.create": "创建快照",
+  "snapshot.auto_create": "自动创建快照",
+  "snapshot.rollback": "回退快照",
+  "snapshot.delete": "删除快照",
+  "snapshot.index_activate": "激活索引版本",
+  "kb.create": "创建知识库",
+  "kb.update": "更新知识库",
+  "kb.delete": "删除知识库",
+  "doc.upload": "上传文档",
+  "doc.delete": "删除文档",
+  "doc.normalize": "规范化文档",
+  "doc.resegment": "重分段",
+  "role.permissions": "变更角色权限",
+  "user.update": "更新用户",
+  "user.status": "变更用户状态",
+};
+
+const AUDIT_RESOURCE_LABELS = {
+  snapshot: "快照",
+  kb: "知识库",
+  knowledge_base: "知识库",
+  document: "文档",
+  user: "用户",
+  role: "角色",
+};
+
 async function pageAudit() {
   if (!requirePerm("audit:read", "审计日志")) return;
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载审计…</div>`;
-  try {
-    const data = await api.get("/audit/logs?page=1&page_size=50");
+
+  const actionLabel = (code) => AUDIT_ACTION_LABELS[code] || code || "-";
+  const resourceLabel = (code) => AUDIT_RESOURCE_LABELS[code] || code || "-";
+
+  const load = async (filters = {}) => {
+    const qs = new URLSearchParams({ page: "1", page_size: "50" });
+    if (filters.action) qs.set("action", filters.action);
+    if (filters.resource_type) qs.set("resource_type", filters.resource_type);
+    if (filters.result) qs.set("result", filters.result);
+    const data = await api.get(`/audit/logs?${qs.toString()}`);
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
       <div class="card">
-        <h3 class="card-title">操作记录</h3>
+        <div class="toolbar">
+          <strong>操作审计日志</strong>
+          <span class="spacer"></span>
+          <select class="form-control" id="auditAction" style="width:160px;height:32px">
+            <option value="">全部动作</option>
+            <option value="snapshot.">快照相关</option>
+            <option value="doc.">文档相关</option>
+            <option value="kb.">知识库相关</option>
+            <option value="user.">用户相关</option>
+            <option value="role.">角色相关</option>
+          </select>
+          <select class="form-control" id="auditResource" style="width:140px;height:32px">
+            <option value="">全部资源</option>
+            <option value="snapshot">快照</option>
+            <option value="kb">知识库</option>
+            <option value="document">文档</option>
+            <option value="user">用户</option>
+            <option value="role">角色</option>
+          </select>
+          <select class="form-control" id="auditResult" style="width:120px;height:32px">
+            <option value="">全部结果</option>
+            <option value="success">成功</option>
+            <option value="failure">失败</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" id="btnAuditFilter">筛选</button>
+        </div>
+        <p class="text-muted" style="margin:0 0 12px">记录操作者、时间、对象、请求标识与结果；回退类操作的 detail 中含前后索引版本。</p>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>用户</th><th>动作</th><th>资源类型</th><th>结果</th><th>时间</th></tr></thead>
-          <tbody>${items
-            .map(
-              (a) => `<tr>
-                <td>${escapeHtml(a.user_name || a.user_id || "-")}</td>
-                <td>${escapeHtml(a.action)}</td>
-                <td>${escapeHtml(a.resource_type)}</td>
-                <td>${a.result === "success" ? `<span class="badge badge-success">成功</span>` : `<span class="badge badge-danger">${escapeHtml(a.result)}</span>`}</td>
+          <thead><tr>
+            <th>操作者</th><th>动作</th><th>资源</th><th>资源 ID</th><th>请求标识</th><th>结果</th><th>时间</th><th></th>
+          </tr></thead>
+          <tbody>${
+            items.length
+              ? items
+                  .map(
+                    (a) => `<tr>
+                <td>${escapeHtml(a.user_name || (a.user_id ? String(a.user_id).slice(0, 8) + "…" : "系统"))}</td>
+                <td title="${escapeHtml(a.action)}">${escapeHtml(actionLabel(a.action))}</td>
+                <td>${escapeHtml(resourceLabel(a.resource_type))}</td>
+                <td class="text-muted">${escapeHtml(a.resource_id ? String(a.resource_id).slice(0, 8) + "…" : "—")}</td>
+                <td class="text-muted">${escapeHtml(a.request_id ? String(a.request_id).slice(0, 10) + "…" : "—")}</td>
+                <td>${
+                  a.result === "success"
+                    ? `<span class="badge badge-success">成功</span>`
+                    : `<span class="badge badge-danger">${escapeHtml(a.result || "失败")}</span>`
+                }</td>
                 <td>${formatDateTime(a.created_at)}</td>
+                <td><button class="btn btn-text btn-sm" data-audit="${escapeHtml(a.id)}">详情</button></td>
               </tr>`
-            )
-            .join("")}</tbody>
+                  )
+                  .join("")
+              : `<tr><td colspan="8" class="text-muted">暂无符合条件的审计记录</td></tr>`
+          }</tbody>
         </table></div>
+        <p class="text-muted" style="margin-top:8px">共 ${escapeHtml(data.total ?? items.length)} 条</p>
       </div>`;
+
+    const actionEl = document.getElementById("auditAction");
+    const resourceEl = document.getElementById("auditResource");
+    const resultEl = document.getElementById("auditResult");
+    if (actionEl) actionEl.value = filters.action || "";
+    if (resourceEl) resourceEl.value = filters.resource_type || "";
+    if (resultEl) resultEl.value = filters.result || "";
+
+    document.getElementById("btnAuditFilter").onclick = () =>
+      load({
+        action: actionEl.value || undefined,
+        resource_type: resourceEl.value || undefined,
+        result: resultEl.value || undefined,
+      });
+
+    document.querySelectorAll("[data-audit]").forEach((btn) => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute("data-audit");
+        try {
+          const d = await api.get(`/audit/logs/${id}`);
+          const detail = d.detail || {};
+          await openWideModal({
+            title: "审计详情",
+            bodyHtml: `
+              <p><span class="text-muted">动作：</span>${escapeHtml(actionLabel(d.action))}
+                <code style="margin-left:8px">${escapeHtml(d.action)}</code></p>
+              <p><span class="text-muted">操作者：</span>${escapeHtml(d.user_name || d.user_id || "系统")}</p>
+              <p><span class="text-muted">资源：</span>${escapeHtml(resourceLabel(d.resource_type))}
+                · ${escapeHtml(d.resource_id || "—")}</p>
+              <p><span class="text-muted">请求标识：</span>${escapeHtml(d.request_id || "—")}</p>
+              <p><span class="text-muted">IP / UA：</span>${escapeHtml(d.ip_address || "—")}
+                · ${escapeHtml((d.user_agent || "—").slice(0, 80))}</p>
+              <p><span class="text-muted">结果：</span>${
+                d.result === "success"
+                  ? `<span class="badge badge-success">成功</span>`
+                  : `<span class="badge badge-danger">${escapeHtml(d.result || "失败")}</span>`
+              }
+                ${d.error_message ? ` · ${escapeHtml(d.error_message)}` : ""}</p>
+              <p><span class="text-muted">时间：</span>${formatDateTime(d.created_at)}</p>
+              ${
+                detail.before_version || detail.after_version
+                  ? `<p><span class="text-muted">索引版本：</span>
+                    <code>${escapeHtml(detail.before_version || "—")}</code>
+                    → <code>${escapeHtml(detail.after_version || "—")}</code></p>`
+                  : ""
+              }
+              <h4 style="margin:12px 0 8px;font-size:14px">变更明细</h4>
+              <pre style="background:var(--color-bg-tint);padding:12px;border-radius:8px;overflow:auto;max-height:240px;font-size:12px">${escapeHtml(
+                JSON.stringify(detail, null, 2) || "{}"
+              )}</pre>`,
+            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
+          });
+        } catch (e) {
+          toast(e.message || "加载详情失败", "error");
+        }
+      };
+    });
+  };
+
+  try {
+    await load();
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }

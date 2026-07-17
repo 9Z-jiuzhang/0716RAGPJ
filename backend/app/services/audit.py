@@ -50,12 +50,19 @@ class AuditService:
         log = await self.repo.get_by_id(log_id)
         if log is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审计日志不存在")
-        return AuditLogResponse.model_validate(log)
+        data = AuditLogResponse.model_validate(log)
+        data.user_name = await self.repo.resolve_user_name(log.user_id)
+        return data
 
     async def list_logs(self, params: AuditLogFilterParams) -> AuditLogListResponse:
-        items, total = await self.repo.list_filtered(params)
+        rows, total = await self.repo.list_filtered(params)
+        items: list[AuditLogListItem] = []
+        for log, user_name in rows:
+            item = AuditLogListItem.model_validate(log)
+            item.user_name = user_name
+            items.append(item)
         return AuditLogListResponse(
-            items=[AuditLogListItem.model_validate(i) for i in items],
+            items=items,
             total=total,
             page=params.page,
             page_size=params.page_size,

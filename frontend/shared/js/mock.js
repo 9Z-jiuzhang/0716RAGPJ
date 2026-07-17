@@ -362,12 +362,272 @@ export async function handle(path, options = {}) {
       q.page_size
     );
   }
+  // ---- 快照（对齐产品手册 5.8 / 真实 API Schema）----
+  if (!globalThis.__demoSnapshots) {
+    const now = Date.now();
+    globalThis.__demoSnapshots = {
+      "kb-public-1": [
+        {
+          id: "snap-manual-1",
+          kb_id: "kb-public-1",
+          name: "上线前备份",
+          description: "客服 FAQ 改版发布前手工备份",
+          trigger: "manual",
+          status: "active",
+          document_count: 2,
+          total_chunks: 48,
+          creator_id: "u-admin",
+          created_at: new Date(now - 86400000 * 2).toISOString(),
+          updated_at: new Date(now - 86400000 * 2).toISOString(),
+          config_snapshot: {
+            kb: { name: "公开产品手册", chunk_size: 500, chunk_overlap: 50, embedding_model: "bge-m3", visibility: "public" },
+            segment_rules: { chunk_size: 500, chunk_overlap: 50 },
+            permissions: [{ user_id: "u-staff-a", role_id: null, permission_code: "kb:read" }],
+          },
+          documents: [
+            {
+              document_id: "doc-1",
+              filename: "手册V2.1.pdf",
+              file_type: "pdf",
+              chunk_count: 36,
+              content_hash: "h1",
+              metadata: { status: "ready" },
+            },
+            {
+              document_id: "doc-2",
+              filename: "FAQ.md",
+              file_type: "md",
+              chunk_count: 12,
+              content_hash: "h2",
+              metadata: { status: "ready" },
+            },
+          ],
+        },
+        {
+          id: "snap-auto-1",
+          kb_id: "kb-public-1",
+          name: "自动快照-auto_revectorize-20260715",
+          description: "由 auto_revectorize 触发的自动快照",
+          trigger: "auto_revectorize",
+          status: "active",
+          document_count: 2,
+          total_chunks: 45,
+          creator_id: "u-admin",
+          created_at: new Date(now - 86400000).toISOString(),
+          updated_at: new Date(now - 86400000).toISOString(),
+          config_snapshot: {
+            kb: { name: "公开产品手册", chunk_size: 500, chunk_overlap: 50, embedding_model: "bge-m3", visibility: "public" },
+            segment_rules: { chunk_size: 500, chunk_overlap: 50 },
+            permissions: [],
+          },
+          documents: [
+            {
+              document_id: "doc-1",
+              filename: "手册V2.1.pdf",
+              file_type: "pdf",
+              chunk_count: 36,
+              content_hash: "h1",
+              metadata: { status: "ready" },
+            },
+            {
+              document_id: "doc-faq-old",
+              filename: "FAQ-旧版.md",
+              file_type: "md",
+              chunk_count: 9,
+              content_hash: "h-old",
+              metadata: { status: "ready" },
+            },
+          ],
+        },
+      ],
+    };
+  }
+  const demoSnapStore = globalThis.__demoSnapshots;
+
+  const snapKbIdFromPath = (pathName) => {
+    const m = pathName.match(/^\/knowledge-bases\/([^/]+)\/snapshots/);
+    return m ? m[1] : null;
+  };
+  const listSnaps = (kbId) => {
+    if (!(kbId in demoSnapStore)) {
+      const seed = JSON.parse(JSON.stringify(demoSnapStore["kb-public-1"] || []));
+      seed.forEach((s) => {
+        s.kb_id = kbId;
+        s.id = `${String(s.id).slice(0, 24)}-${String(kbId).slice(0, 8)}`;
+      });
+      demoSnapStore[kbId] = seed;
+    }
+    return (demoSnapStore[kbId] || []).filter((s) => s.status !== "deleted");
+  };
+
   if (/\/snapshots$/.test(p) && method === "GET") {
-    return pageOf(
-      [{ id: "snap-1", version: "v7", note: "重向量化前快照", created_at: "2026-07-12T09:00:00Z" }],
-      q.page,
-      q.page_size
-    );
+    const kbId = snapKbIdFromPath(p);
+    const items = listSnaps(kbId).map((s) => ({
+      id: s.id,
+      kb_id: s.kb_id,
+      name: s.name,
+      description: s.description,
+      trigger: s.trigger,
+      status: s.status,
+      document_count: s.document_count,
+      total_chunks: s.total_chunks,
+      creator_id: s.creator_id,
+      created_at: s.created_at,
+    }));
+    return pageOf(items, q.page, q.page_size);
+  }
+  if (/\/snapshots$/.test(p) && method === "POST") {
+    const kbId = snapKbIdFromPath(p);
+    const snap = {
+      id: uuid(),
+      kb_id: kbId,
+      name: body.name || "未命名快照",
+      description: body.description || "",
+      trigger: "manual",
+      status: "active",
+      document_count: 2,
+      total_chunks: 40,
+      creator_id: getUser()?.id || "u-admin",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      config_snapshot: {
+        kb: { chunk_size: 500, chunk_overlap: 50, embedding_model: "bge-m3", visibility: "public" },
+        segment_rules: { chunk_size: 500, chunk_overlap: 50 },
+        permissions: [],
+      },
+      documents: [
+        {
+          document_id: "doc-1",
+          filename: "手册V2.1.pdf",
+          file_type: "pdf",
+          chunk_count: 36,
+          content_hash: "h1",
+          metadata: { status: "ready" },
+        },
+      ],
+    };
+    if (!demoSnapStore[kbId]) demoSnapStore[kbId] = [];
+    demoSnapStore[kbId].unshift(snap);
+    return { ...snap, config_snapshot: snap.config_snapshot };
+  }
+  if (/\/snapshots\/[^/]+$/.test(p) && method === "GET") {
+    const kbId = snapKbIdFromPath(p);
+    const sid = p.split("/").pop();
+    const snap = listSnaps(kbId).find((s) => s.id === sid);
+    if (!snap) {
+      const err = new Error("快照不存在");
+      err.status = 404;
+      throw err;
+    }
+    return {
+      ...snap,
+      documents: snap.documents || [],
+      permission_snapshot: (snap.config_snapshot && snap.config_snapshot.permissions) || [],
+      segment_rules: (snap.config_snapshot && snap.config_snapshot.segment_rules) || {},
+    };
+  }
+  if (/\/snapshots\/[^/]+\/preview$/.test(p) && method === "POST") {
+    const kbId = snapKbIdFromPath(p);
+    const sid = p.split("/")[4];
+    const snap = listSnaps(kbId).find((s) => s.id === sid);
+    if (!snap) {
+      const err = new Error("快照不存在");
+      err.status = 404;
+      throw err;
+    }
+    return {
+      snapshot_id: snap.id,
+      kb_id: kbId,
+      snapshot_name: snap.name,
+      affected_documents: [
+        {
+          document_id: "doc-faq-old",
+          filename: "FAQ-旧版.md",
+          change_type: "added",
+          snapshot_chunk_count: 9,
+          detail: "当前知识库中不存在，回退后将按快照元数据恢复文档记录",
+        },
+        {
+          document_id: "doc-2",
+          filename: "FAQ.md",
+          change_type: "removed",
+          current_chunk_count: 12,
+          detail: "快照中不存在，整库回退后该文档将软归档",
+        },
+        {
+          document_id: "doc-1",
+          filename: "手册V2.1.pdf",
+          change_type: "unchanged",
+          current_chunk_count: 36,
+          snapshot_chunk_count: 36,
+        },
+      ],
+      config_changes: [{ field: "chunk_size", current: 600, snapshot: 500 }],
+      total_changes: 2,
+      will_create_protection_snapshot: true,
+      rebuild_required: true,
+    };
+  }
+  if (/\/snapshots\/[^/]+\/rollback$/.test(p) && method === "POST") {
+    if (body.confirm !== true) {
+      const err = new Error("回退操作必须将 confirm 设为 true");
+      err.status = 422;
+      throw err;
+    }
+    const kbId = snapKbIdFromPath(p);
+    const sid = p.split("/")[4];
+    const snap = listSnaps(kbId).find((s) => s.id === sid);
+    if (!snap) {
+      const err = new Error("快照不存在");
+      err.status = 404;
+      throw err;
+    }
+    const protection = {
+      id: uuid(),
+      kb_id: kbId,
+      name: `回退前保护-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}`,
+      description: `回退到快照 ${snap.name} 前自动创建`,
+      trigger: "rollback_protection",
+      status: "active",
+      document_count: 2,
+      total_chunks: 48,
+      creator_id: getUser()?.id || "u-admin",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      config_snapshot: snap.config_snapshot,
+      documents: snap.documents || [],
+    };
+    if (!demoSnapStore[kbId]) demoSnapStore[kbId] = [];
+    demoSnapStore[kbId].unshift(protection);
+    const version = `v${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}-restore`;
+    return {
+      protection_snapshot_id: protection.id,
+      new_index_version: version,
+      index_status: "building",
+      before_version: "v7",
+      after_version: version,
+      restored_document_count: body.document_ids ? body.document_ids.length : snap.document_count,
+      selective: !!body.document_ids,
+      rebuild_required: true,
+      message: "回退元数据已应用并创建保护快照；索引版本处于 building。请由向量化模块重建后调用 activate_index_version 原子切换。",
+    };
+  }
+  if (/\/snapshots\/[^/]+$/.test(p) && method === "DELETE") {
+    const kbId = snapKbIdFromPath(p);
+    const sid = p.split("/").pop();
+    const snap = listSnaps(kbId).find((s) => s.id === sid);
+    if (!snap) {
+      const err = new Error("快照不存在");
+      err.status = 404;
+      throw err;
+    }
+    if (snap.trigger === "rollback_protection") {
+      const err = new Error("回退保护快照不可手动删除，仅可通过保留策略清理");
+      err.status = 400;
+      throw err;
+    }
+    snap.status = "deleted";
+    return { message: "快照已删除" };
   }
 
   if (p === "/users" && method === "GET") return pageOf(demoUsers, q.page, q.page_size);
@@ -442,14 +702,80 @@ export async function handle(path, options = {}) {
     return { id: uuid(), status: "accepted" };
   }
   if (p === "/audit/logs" && method === "GET") {
-    return pageOf(
-      [
-        { id: "a1", user_name: "super", action: "kb.create", resource_type: "knowledge_base", result: "success", created_at: "2026-07-15T08:00:00Z" },
-        { id: "a2", user_name: "staff_a", action: "doc.upload", resource_type: "document", result: "success", created_at: "2026-07-15T09:00:00Z" },
-      ],
-      q.page,
-      q.page_size
-    );
+    let rows = [
+      {
+        id: "a1",
+        user_id: "u-super",
+        user_name: "超级管理员",
+        action: "kb.create",
+        resource_type: "knowledge_base",
+        resource_id: "kb-public-1",
+        result: "success",
+        request_id: "req-1001",
+        created_at: "2026-07-15T08:00:00Z",
+      },
+      {
+        id: "a2",
+        user_id: "u-staff-a",
+        user_name: "A部门员工",
+        action: "doc.upload",
+        resource_type: "document",
+        resource_id: "doc-1",
+        result: "success",
+        request_id: "req-1002",
+        created_at: "2026-07-15T09:00:00Z",
+      },
+      {
+        id: "a3",
+        user_id: "u-admin",
+        user_name: "普通管理员",
+        action: "snapshot.rollback",
+        resource_type: "snapshot",
+        resource_id: "snap-manual-1",
+        result: "success",
+        request_id: "req-1003",
+        created_at: "2026-07-16T10:30:00Z",
+      },
+      {
+        id: "a4",
+        user_id: "u-admin",
+        user_name: "普通管理员",
+        action: "snapshot.create",
+        resource_type: "snapshot",
+        resource_id: "snap-manual-1",
+        result: "success",
+        request_id: "req-1004",
+        created_at: "2026-07-14T16:00:00Z",
+      },
+    ];
+    if (q.action) rows = rows.filter((r) => String(r.action).startsWith(q.action));
+    if (q.resource_type) rows = rows.filter((r) => r.resource_type === q.resource_type);
+    if (q.result) rows = rows.filter((r) => r.result === q.result);
+    return pageOf(rows, q.page, q.page_size);
+  }
+  if (/^\/audit\/logs\/[^/]+$/.test(p) && method === "GET") {
+    const id = p.split("/").pop();
+    return {
+      id,
+      user_id: "u-admin",
+      user_name: "普通管理员",
+      action: id === "a3" ? "snapshot.rollback" : "snapshot.create",
+      resource_type: "snapshot",
+      resource_id: "snap-manual-1",
+      result: "success",
+      request_id: "req-demo-detail",
+      ip_address: "10.0.0.12",
+      user_agent: "Mozilla/5.0 (演示)",
+      created_at: "2026-07-16T10:30:00Z",
+      detail: {
+        kb_id: "kb-public-1",
+        before_version: "v7",
+        after_version: "v20260716-restore",
+        protection_snapshot_id: "snap-protect-1",
+        total_changes: 2,
+        selective: false,
+      },
+    };
   }
   if (p === "/monitor/stats" && method === "GET") {
     return {
