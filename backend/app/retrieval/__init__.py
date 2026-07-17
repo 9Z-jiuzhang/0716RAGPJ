@@ -10,7 +10,12 @@
 from app.retrieval.fulltext import FulltextRetriever, fulltext_retriever
 from app.retrieval.hybrid import HybridRetriever, hybrid_retriever
 from app.retrieval.scope import resolve_kb_targets
-from app.retrieval.types import KBTarget, RetrievalHit, RetrievalResult, RetrievalStrategy
+from app.retrieval.types import (
+    KBTarget,
+    RetrievalHit,
+    RetrievalResult,
+    RetrievalStrategy,
+)
 from app.retrieval.vector import VectorRetriever, vector_retriever
 
 __all__ = [

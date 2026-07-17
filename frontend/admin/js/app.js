@@ -514,6 +514,9 @@ async function pageKbList() {
             visibility: "restricted",
             description: "",
             tags: [],
+            embedding_model: "text-embedding-v3",
+            chunk_size: 500,
+            chunk_overlap: 50,
           });
           toast("创建成功", "success");
           navigate(`/admin/knowledge-bases/${kb.id || ""}`);

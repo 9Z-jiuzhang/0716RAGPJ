@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 class LLMServiceError(Exception):
     """LLM 调用失败时抛出的业务异常。"""
 
-    def __init__(self, message: str, *, status_code: Optional[int] = None, detail: Any = None):
+    def __init__(
+        self, message: str, *, status_code: Optional[int] = None, detail: Any = None
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.detail = detail
@@ -119,7 +121,9 @@ class LLMService:
         try:
             response = await client.post(url, json=payload)
         except httpx.TimeoutException as exc:
-            raise LLMServiceError(f"LLM 请求超时（>{settings.LLM_TIMEOUT_SECONDS}s）") from exc
+            raise LLMServiceError(
+                f"LLM 请求超时（>{settings.LLM_TIMEOUT_SECONDS}s）"
+            ) from exc
         except httpx.HTTPError as exc:
             raise LLMServiceError(f"LLM 网络错误: {exc}") from exc
 
@@ -134,7 +138,9 @@ class LLMService:
         try:
             content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMServiceError("LLM 响应格式异常，缺少 choices[0].message.content", detail=data) from exc
+            raise LLMServiceError(
+                "LLM 响应格式异常，缺少 choices[0].message.content", detail=data
+            ) from exc
         return (content or "").strip()
 
     async def stream_chat(
@@ -194,7 +200,9 @@ class LLMService:
         except LLMServiceError:
             raise
         except httpx.TimeoutException as exc:
-            raise LLMServiceError(f"LLM 流式请求超时（>{settings.LLM_TIMEOUT_SECONDS}s）") from exc
+            raise LLMServiceError(
+                f"LLM 流式请求超时（>{settings.LLM_TIMEOUT_SECONDS}s）"
+            ) from exc
         except httpx.HTTPError as exc:
             raise LLMServiceError(f"LLM 流式网络错误: {exc}") from exc
 

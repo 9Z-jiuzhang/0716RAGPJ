@@ -8,6 +8,8 @@ from typing import Any
 
 from app.models.hit_tests import TestCases, TestQuestions, TestResults, TestRuns
 from app.schemas.hit_tests import (
+    CompareTestRequest,
+    CompareTestResponse,
     CreateTestCaseRequest,
     TestCaseListResponse,
     TestCaseResponse,
@@ -93,7 +95,9 @@ class HitTestService:
         # 转换为响应格式
         return await self._convert_case_to_response(case)
 
-    async def create_test_case(self, request: CreateTestCaseRequest) -> TestCaseResponse:
+    async def create_test_case(
+        self, request: CreateTestCaseRequest
+    ) -> TestCaseResponse:
         """
         创建测试用例
 
@@ -420,7 +424,9 @@ class HitTestService:
 
         return "\n".join(lines)
 
-    async def compare_strategies(self, request: "CompareTestRequest") -> "CompareTestResponse":
+    async def compare_strategies(
+        self, request: CompareTestRequest
+    ) -> CompareTestResponse:
         """同一用例在多种检索策略下并排对比。"""
         from app.schemas.hit_tests import (
             CompareTestResponse,
@@ -464,9 +470,12 @@ class HitTestService:
                 )
 
         side_by_side = [
-            QuestionCompareRow(question=q, by_strategy=items) for q, items in by_question.items()
+            QuestionCompareRow(question=q, by_strategy=items)
+            for q, items in by_question.items()
         ]
-        return CompareTestResponse(case_id=request.case_id, runs=runs, side_by_side=side_by_side)
+        return CompareTestResponse(
+            case_id=request.case_id, runs=runs, side_by_side=side_by_side
+        )
 
     async def _execute_retrieval(
         self,

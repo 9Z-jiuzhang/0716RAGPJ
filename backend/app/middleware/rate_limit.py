@@ -57,7 +57,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         identity = self._client_key(request)
-        allowed = await self._allow(f"rl:{identity}:{path.split('?')[0]}:{window}", limit, window)
+        allowed = await self._allow(
+            f"rl:{identity}:{path.split('?')[0]}:{window}", limit, window
+        )
         if not allowed:
             return JSONResponse(
                 status_code=429,

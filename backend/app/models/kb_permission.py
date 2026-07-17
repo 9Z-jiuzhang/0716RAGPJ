@@ -22,11 +22,17 @@ class KBPermission(Base):
         UUID(as_uuid=True), ForeignKey("roles.id"), nullable=True
     )
     permission: Mapped[str] = mapped_column(String(50), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
 
     knowledge_base = relationship("KnowledgeBase", back_populates="permissions")
 
     __table_args__ = (
-        UniqueConstraint("kb_id", "user_id", "permission", name="uq_kb_user_permission"),
-        UniqueConstraint("kb_id", "role_id", "permission", name="uq_kb_role_permission"),
+        UniqueConstraint(
+            "kb_id", "user_id", "permission", name="uq_kb_user_permission"
+        ),
+        UniqueConstraint(
+            "kb_id", "role_id", "permission", name="uq_kb_role_permission"
+        ),
     )

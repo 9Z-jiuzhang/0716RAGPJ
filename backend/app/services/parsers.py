@@ -1,4 +1,5 @@
 """多格式文本抽取。【对齐手册 §5.5 P0 格式】"""
+
 from __future__ import annotations
 
 import io

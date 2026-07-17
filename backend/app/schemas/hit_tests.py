@@ -60,7 +60,9 @@ class TestRunRequest(BaseModel):
         None, description="用例 ID，不传则使用 questions 做单题/临时测试"
     )
     kb_ids: list[uuid.UUID] = Field(description="知识库 ID 列表", min_length=1)
-    doc_ids: list[uuid.UUID] | None = Field(None, description="文档 ID 列表（可选过滤）")
+    doc_ids: list[uuid.UUID] | None = Field(
+        None, description="文档 ID 列表（可选过滤）"
+    )
     strategy: Literal["vector", "fulltext", "hybrid"] = Field(description="检索策略")
     top_k: int = Field(5, description="返回条数", ge=1, le=20)
     similarity_threshold: float = Field(0.5, description="相似度阈值", ge=0, le=1)

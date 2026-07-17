@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -46,7 +45,9 @@ class KnowledgeBaseService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_kb(self, data: KnowledgeBaseCreate, creator_id: UUID) -> KnowledgeBaseResponse:
+    async def create_kb(
+        self, data: KnowledgeBaseCreate, creator_id: UUID
+    ) -> KnowledgeBaseResponse:
         """创建知识库。同名且未删除时抛冲突。"""
         existing = await self.db.scalar(
             select(KnowledgeBase).where(
@@ -93,7 +94,12 @@ class KnowledgeBaseService:
         if filter.tag:
             conditions.append(KnowledgeBase.tags.contains([filter.tag]))
 
-        codes = {p.code for role in current_user.roles if role.is_enabled for p in role.permissions}
+        codes = {
+            p.code
+            for role in current_user.roles
+            if role.is_enabled
+            for p in role.permissions
+        }
         if "*" not in codes and "admin:*" not in codes:
             role_ids = [r.id for r in current_user.roles if r.is_enabled]
             subject = [KBPermission.user_id == current_user.id]
@@ -108,7 +114,12 @@ class KnowledgeBaseService:
                 )
             )
 
-        total = await self.db.scalar(select(func.count()).select_from(KnowledgeBase).where(*conditions)) or 0
+        total = (
+            await self.db.scalar(
+                select(func.count()).select_from(KnowledgeBase).where(*conditions)
+            )
+            or 0
+        )
         rows = list(
             (
                 await self.db.scalars(
@@ -128,7 +139,9 @@ class KnowledgeBaseService:
         kb = await self._get_active_kb(kb_id)
         return await self._to_response(kb)
 
-    async def update_kb(self, kb_id: str, data: KnowledgeBaseUpdate, user_id: UUID) -> KnowledgeBaseResponse:
+    async def update_kb(
+        self, kb_id: str, data: KnowledgeBaseUpdate, user_id: UUID
+    ) -> KnowledgeBaseResponse:
         """更新知识库元信息。"""
         kb = await self._get_active_kb(kb_id)
         payload = data.model_dump(exclude_unset=True)
@@ -163,7 +176,9 @@ class KnowledgeBaseService:
             kb.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
         await self.db.commit()
 
-    async def re_vectorize_kb(self, kb_id: str, user_id: UUID) -> VectorizeStatusResponse:
+    async def re_vectorize_kb(
+        self, kb_id: str, user_id: UUID
+    ) -> VectorizeStatusResponse:
         """
         创建重新向量化任务，并在后台对 ready 文档逐个重分段/向量化。
 
@@ -228,6 +243,7 @@ class KnowledgeBaseService:
             )
         )
         return self._task_to_status(task)
+
     async def get_vectorize_status(self, kb_id: str) -> VectorizeStatusResponse:
         """返回该知识库最近一次向量化任务状态。"""
         kb = await self._get_active_kb(kb_id)
@@ -241,7 +257,9 @@ class KnowledgeBaseService:
             raise VectorizeTaskNotFoundException()
         return self._task_to_status(task)
 
-    async def update_kb_permissions(self, kb_id: str, data: KBPermissionUpdate, user_id: UUID) -> None:
+    async def update_kb_permissions(
+        self, kb_id: str, data: KBPermissionUpdate, user_id: UUID
+    ) -> None:
         """全量替换知识库级权限授予。"""
         kb = await self._get_active_kb(kb_id)
         # 5.8.1：知识库权限变更前自动快照
@@ -253,7 +271,11 @@ class KnowledgeBaseService:
             name=f"permission:{kb.name}",
         )
         existing = list(
-            (await self.db.scalars(select(KBPermission).where(KBPermission.kb_id == kb.id))).all()
+            (
+                await self.db.scalars(
+                    select(KBPermission).where(KBPermission.kb_id == kb.id)
+                )
+            ).all()
         )
         for row in existing:
             await self.db.delete(row)
@@ -297,12 +319,22 @@ class KnowledgeBaseService:
         return kb
 
     async def _to_response(self, kb: KnowledgeBase) -> KnowledgeBaseResponse:
-        doc_count = await self.db.scalar(
-            select(func.count()).select_from(Document).where(Document.kb_id == kb.id)
-        ) or 0
-        chunk_count = await self.db.scalar(
-            select(func.coalesce(func.sum(Document.chunk_count), 0)).where(Document.kb_id == kb.id)
-        ) or 0
+        doc_count = (
+            await self.db.scalar(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.kb_id == kb.id)
+            )
+            or 0
+        )
+        chunk_count = (
+            await self.db.scalar(
+                select(func.coalesce(func.sum(Document.chunk_count), 0)).where(
+                    Document.kb_id == kb.id
+                )
+            )
+            or 0
+        )
         kb_type = kb.type
         try:
             kb_type = KnowledgeBaseType(kb.type)
@@ -415,11 +447,14 @@ async def _run_kb_revectorize(
                         )
                     )
                     if iv:
-                        total_chunks = await db.scalar(
-                            select(func.coalesce(func.sum(Document.chunk_count), 0)).where(
-                                Document.kb_id == kb_id
+                        total_chunks = (
+                            await db.scalar(
+                                select(
+                                    func.coalesce(func.sum(Document.chunk_count), 0)
+                                ).where(Document.kb_id == kb_id)
                             )
-                        ) or 0
+                            or 0
+                        )
                         iv.chunk_count = int(total_chunks)
                         iv.status = "active"
                     await switcher.switch_index_version(kb_id, target_version)

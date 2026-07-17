@@ -11,11 +11,15 @@ from sqlalchemy.orm import selectinload
 from app.models import Document, DocumentChunk, KbChunkRule, KnowledgeBase
 
 
-async def get_knowledge_base(db: AsyncSession, kb_id: uuid.UUID) -> KnowledgeBase | None:
+async def get_knowledge_base(
+    db: AsyncSession, kb_id: uuid.UUID
+) -> KnowledgeBase | None:
     return await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
 
 
-async def get_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID) -> Document | None:
+async def get_document(
+    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID
+) -> Document | None:
     return await db.scalar(
         select(Document)
         .where(Document.id == doc_id, Document.kb_id == kb_id)
@@ -24,7 +28,11 @@ async def get_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID) ->
 
 
 async def get_document_by_id(db: AsyncSession, doc_id: uuid.UUID) -> Document | None:
-    return await db.scalar(select(Document).where(Document.id == doc_id).options(selectinload(Document.chunks)))
+    return await db.scalar(
+        select(Document)
+        .where(Document.id == doc_id)
+        .options(selectinload(Document.chunks))
+    )
 
 
 async def list_documents(
@@ -38,7 +46,9 @@ async def list_documents(
     filters = [Document.kb_id == kb_id]
     if keyword:
         filters.append(Document.filename.ilike(f"%{keyword}%"))
-    total = await db.scalar(select(func.count()).select_from(Document).where(*filters)) or 0
+    total = (
+        await db.scalar(select(func.count()).select_from(Document).where(*filters)) or 0
+    )
     stmt = (
         select(Document)
         .where(*filters)
@@ -59,7 +69,9 @@ async def list_chunks(
 ) -> tuple[list[DocumentChunk], int]:
     total = (
         await db.scalar(
-            select(func.count()).select_from(DocumentChunk).where(DocumentChunk.document_id == document_id)
+            select(func.count())
+            .select_from(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
         )
         or 0
     )
@@ -74,13 +86,19 @@ async def list_chunks(
     return items, int(total)
 
 
-async def get_chunk(db: AsyncSession, document_id: uuid.UUID, chunk_id: uuid.UUID) -> DocumentChunk | None:
+async def get_chunk(
+    db: AsyncSession, document_id: uuid.UUID, chunk_id: uuid.UUID
+) -> DocumentChunk | None:
     return await db.scalar(
-        select(DocumentChunk).where(DocumentChunk.id == chunk_id, DocumentChunk.document_id == document_id)
+        select(DocumentChunk).where(
+            DocumentChunk.id == chunk_id, DocumentChunk.document_id == document_id
+        )
     )
 
 
-async def replace_chunks(db: AsyncSession, document: Document, chunks: list[DocumentChunk]) -> None:
+async def replace_chunks(
+    db: AsyncSession, document: Document, chunks: list[DocumentChunk]
+) -> None:
     for old in list(document.chunks):
         await db.delete(old)
     await db.flush()

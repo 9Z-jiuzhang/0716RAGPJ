@@ -1,4 +1,5 @@
 """角色与功能权限配置接口。"""
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,7 +11,12 @@ from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.models import AuditLog, Permission, Role, User
 from app.schemas.common import BaseResponse
-from app.schemas.identity import RoleListResponse, RolePermissionsRequest, RoleRequest, RoleResponse
+from app.schemas.identity import (
+    RoleListResponse,
+    RolePermissionsRequest,
+    RoleRequest,
+    RoleResponse,
+)
 from app.models.identity import user_roles
 
 router = APIRouter(prefix="/roles", tags=["角色与权限"])
@@ -38,7 +44,10 @@ async def list_roles(
     total = await db.scalar(select(func.count()).select_from(Role))
     rows = (
         await db.scalars(
-            select(Role).order_by(Role.created_at).offset((page - 1) * page_size).limit(page_size)
+            select(Role)
+            .order_by(Role.created_at)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
         )
     ).all()
     data = RoleListResponse(
@@ -58,7 +67,10 @@ async def list_permissions(
 ) -> BaseResponse:
     """提供角色编辑页的可勾选权限清单。"""
     rows = (await db.scalars(select(Permission).order_by(Permission.code))).all()
-    return ok([{"code": item.code, "name": item.name, "scope": item.scope} for item in rows], request_id=request_id)
+    return ok(
+        [{"code": item.code, "name": item.name, "scope": item.scope} for item in rows],
+        request_id=request_id,
+    )
 
 
 @router.post("", response_model=BaseResponse, status_code=status.HTTP_201_CREATED)
@@ -70,10 +82,16 @@ async def create_role(
 ) -> BaseResponse:
     if await db.scalar(select(Role).where(Role.name == data.name)):
         raise HTTPException(status_code=409, detail="角色名称已存在")
-    permissions = (await db.scalars(select(Permission).where(Permission.code.in_(data.permission_codes)))).all()
+    permissions = (
+        await db.scalars(
+            select(Permission).where(Permission.code.in_(data.permission_codes))
+        )
+    ).all()
     if len(permissions) != len(data.permission_codes):
         raise HTTPException(status_code=400, detail="包含不存在的权限")
-    role = Role(**data.model_dump(exclude={"permission_codes"}), permissions=list(permissions))
+    role = Role(
+        **data.model_dump(exclude={"permission_codes"}), permissions=list(permissions)
+    )
     db.add(role)
     db.add(
         AuditLog(
@@ -101,7 +119,11 @@ async def update_role(
         raise HTTPException(status_code=404, detail="角色不存在")
     if role.is_builtin and data.name != role.name:
         raise HTTPException(status_code=400, detail="内置角色不可改名")
-    role.name, role.description, role.is_enabled = data.name, data.description, data.is_enabled
+    role.name, role.description, role.is_enabled = (
+        data.name,
+        data.description,
+        data.is_enabled,
+    )
     db.add(
         AuditLog(
             user_id=operator.id,
@@ -127,7 +149,11 @@ async def delete_role(
         raise HTTPException(status_code=404, detail="角色不存在")
     if role.is_builtin:
         raise HTTPException(status_code=400, detail="内置角色不可删除")
-    bound = await db.scalar(select(func.count()).select_from(user_roles).where(user_roles.c.role_id == role.id))
+    bound = await db.scalar(
+        select(func.count())
+        .select_from(user_roles)
+        .where(user_roles.c.role_id == role.id)
+    )
     if bound and bound > 0:
         raise HTTPException(status_code=409, detail="仍有用户绑定该角色，无法删除")
     await db.execute(delete(Role).where(Role.id == role.id))
@@ -152,7 +178,11 @@ async def set_permissions(
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
     role = await db.get(Role, uuid.UUID(role_id))
-    permissions = (await db.scalars(select(Permission).where(Permission.code.in_(data.permission_codes)))).all()
+    permissions = (
+        await db.scalars(
+            select(Permission).where(Permission.code.in_(data.permission_codes))
+        )
+    ).all()
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
     if len(permissions) != len(data.permission_codes):

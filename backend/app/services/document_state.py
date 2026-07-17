@@ -1,19 +1,32 @@
 """文档状态机。【对齐手册 §5.5.3】"""
+
 from __future__ import annotations
 
 from app.models.enums import DocumentStatus
 from app.utils.exceptions import InvalidTransitionError
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    DocumentStatus.UPLOADED.value: {DocumentStatus.PARSING.value, DocumentStatus.ERROR.value},
-    DocumentStatus.PARSING.value: {DocumentStatus.PROCESSING.value, DocumentStatus.ERROR.value},
-    DocumentStatus.PROCESSING.value: {DocumentStatus.PENDING_SEGMENT.value, DocumentStatus.ERROR.value},
+    DocumentStatus.UPLOADED.value: {
+        DocumentStatus.PARSING.value,
+        DocumentStatus.ERROR.value,
+    },
+    DocumentStatus.PARSING.value: {
+        DocumentStatus.PROCESSING.value,
+        DocumentStatus.ERROR.value,
+    },
+    DocumentStatus.PROCESSING.value: {
+        DocumentStatus.PENDING_SEGMENT.value,
+        DocumentStatus.ERROR.value,
+    },
     DocumentStatus.PENDING_SEGMENT.value: {
         DocumentStatus.VECTORIZING.value,
         DocumentStatus.ERROR.value,
         DocumentStatus.PROCESSING.value,  # 重新规范化后再分段
     },
-    DocumentStatus.VECTORIZING.value: {DocumentStatus.READY.value, DocumentStatus.ERROR.value},
+    DocumentStatus.VECTORIZING.value: {
+        DocumentStatus.READY.value,
+        DocumentStatus.ERROR.value,
+    },
     DocumentStatus.READY.value: {
         DocumentStatus.ARCHIVED.value,
         DocumentStatus.PENDING_SEGMENT.value,  # 重分段前回到预览

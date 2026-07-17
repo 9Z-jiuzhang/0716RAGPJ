@@ -16,15 +16,18 @@ from httpx import ASGITransport, AsyncClient
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
-# CI / 本地 pytest：将 Docker Compose 服务名映射为 localhost
-for _key, _docker, _local in (
-    ("POSTGRES_HOST", "postgres", "localhost"),
-    ("REDIS_HOST", "redis", "localhost"),
-    ("CHROMA_HOST", "chroma", "localhost"),
-):
-    current = os.environ.get(_key)
-    if not current or current == _docker:
-        os.environ[_key] = _local
+# 仅在宿主机跑 pytest 时，把 Compose 服务名映射为 localhost。
+# 容器内（存在 /.dockerenv）应继续使用 postgres/redis 等服务名。
+_IN_CONTAINER = Path("/.dockerenv").exists()
+if not _IN_CONTAINER:
+    for _key, _docker, _local in (
+        ("POSTGRES_HOST", "postgres", "localhost"),
+        ("REDIS_HOST", "redis", "localhost"),
+        ("CHROMA_HOST", "chroma", "localhost"),
+    ):
+        current = os.environ.get(_key)
+        if not current or current == _docker:
+            os.environ[_key] = _local
 
 os.environ.setdefault("JWT_SECRET_KEY", "pytest-secret-key-change-me-32bytes!!")
 os.environ.setdefault("LLM_API_KEY", "test-key")

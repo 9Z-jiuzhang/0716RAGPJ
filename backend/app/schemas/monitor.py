@@ -23,7 +23,9 @@ class SystemStatsResponse(BaseModel):
     doc_count: int = 0
     active_sessions: int = 0
     task_queue_size: int = 0
-    qa_trend_7d: list[int] = Field(default_factory=lambda: [0] * 7, description="近7天每日问答量")
+    qa_trend_7d: list[int] = Field(
+        default_factory=lambda: [0] * 7, description="近7天每日问答量"
+    )
     hit_rate_trend_7d: list[float] = Field(
         default_factory=lambda: [0.0] * 7, description="近7天每日命中率 0-1"
     )

@@ -1,4 +1,5 @@
 """认证与用户管理的 API 请求、响应模型。"""
+
 from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
@@ -56,6 +57,7 @@ class UserRolesRequest(BaseModel):
 
 class AdminCreateUserRequest(BaseModel):
     """管理员创建用户；默认授予注册用户角色。"""
+
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=128)
     email: EmailStr

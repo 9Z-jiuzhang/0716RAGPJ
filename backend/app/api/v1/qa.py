@@ -34,11 +34,15 @@ from app.schemas.qa import AskRequest, FeedbackRequest, RenameSessionRequest
 router = APIRouter(prefix="/qa", tags=["智能问答"])
 
 
-def _request_id(x_request_id: Optional[str] = Header(default=None, alias="X-Request-Id")) -> str:
+def _request_id(
+    x_request_id: Optional[str] = Header(default=None, alias="X-Request-Id")
+) -> str:
     return x_request_id or str(uuid4())
 
 
-def _guest_id(x_guest_id: Optional[str] = Header(default=None, alias="X-Guest-Id")) -> Optional[str]:
+def _guest_id(
+    x_guest_id: Optional[str] = Header(default=None, alias="X-Guest-Id")
+) -> Optional[str]:
     """访客匿名标识，由前端 localStorage 生成并在 Header 透传。"""
     if not x_guest_id:
         return None
@@ -64,7 +68,9 @@ async def _get_owned_session(
     return session
 
 
-async def _kb_name_map(db: AsyncSession, kb_ids: Optional[list[UUID]]) -> dict[str, str]:
+async def _kb_name_map(
+    db: AsyncSession, kb_ids: Optional[list[UUID]]
+) -> dict[str, str]:
     """批量解析知识库名称。"""
     if not kb_ids:
         return {}
@@ -183,7 +189,11 @@ async def list_sessions(
     items: list[dict[str, Any]] = []
     for session in rows:
         name_map = await _kb_name_map(db, session.kb_ids)
-        kb_names = [name_map.get(str(kid), "") for kid in (session.kb_ids or []) if name_map.get(str(kid))]
+        kb_names = [
+            name_map.get(str(kid), "")
+            for kid in (session.kb_ids or [])
+            if name_map.get(str(kid))
+        ]
         items.append(_session_to_dict(session, kb_names))
 
     return BaseResponse(
@@ -197,7 +207,9 @@ async def list_sessions(
     )
 
 
-@router.get("/sessions/{session_id}", response_model=BaseResponse, summary="会话消息历史")
+@router.get(
+    "/sessions/{session_id}", response_model=BaseResponse, summary="会话消息历史"
+)
 async def get_session_messages(
     session_id: UUID,
     page: int = Query(1, ge=1),
@@ -247,7 +259,11 @@ async def rename_session(
     await db.refresh(session)
 
     name_map = await _kb_name_map(db, session.kb_ids)
-    kb_names = [name_map.get(str(kid), "") for kid in (session.kb_ids or []) if name_map.get(str(kid))]
+    kb_names = [
+        name_map.get(str(kid), "")
+        for kid in (session.kb_ids or [])
+        if name_map.get(str(kid))
+    ]
     return BaseResponse(data=_session_to_dict(session, kb_names), request_id=request_id)
 
 

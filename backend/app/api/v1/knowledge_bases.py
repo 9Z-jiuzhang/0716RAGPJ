@@ -6,7 +6,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, require_kb_permission, require_permissions
+from app.core.dependencies import (
+    get_current_user,
+    require_kb_permission,
+    require_permissions,
+)
 from app.core.exceptions import APIException
 from app.models import User
 from app.schemas.common import APIResponse, PageResponse
@@ -101,7 +105,9 @@ async def delete_knowledge_base(
     return APIResponse(data={"message": "Knowledge base deleted"})
 
 
-@router.post("/{kb_id}/re-vectorize", response_model=APIResponse[VectorizeStatusResponse])
+@router.post(
+    "/{kb_id}/re-vectorize", response_model=APIResponse[VectorizeStatusResponse]
+)
 async def re_vectorize_knowledge_base(
     kb_id: UUID = Path(..., description="知识库ID"),
     current_user: User = Depends(require_kb_permission("kb:vectorize")),
@@ -115,7 +121,9 @@ async def re_vectorize_knowledge_base(
     return APIResponse(data=result)
 
 
-@router.get("/{kb_id}/vectorize-status", response_model=APIResponse[VectorizeStatusResponse])
+@router.get(
+    "/{kb_id}/vectorize-status", response_model=APIResponse[VectorizeStatusResponse]
+)
 async def get_vectorize_status(
     kb_id: UUID = Path(..., description="知识库ID"),
     current_user: User = Depends(require_kb_permission("kb:vectorize")),

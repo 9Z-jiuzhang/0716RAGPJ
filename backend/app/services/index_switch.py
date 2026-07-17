@@ -71,7 +71,8 @@ class IndexSwitchService:
                 is_current=False,
                 chunk_count=chunk_count,
                 status="building",
-                config_snapshot=config or {
+                config_snapshot=config
+                or {
                     "embedding_model": kb.embedding_model,
                     "chunk_size": kb.chunk_size,
                     "chunk_overlap": kb.chunk_overlap,

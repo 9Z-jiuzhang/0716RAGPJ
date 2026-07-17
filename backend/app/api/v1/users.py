@@ -1,4 +1,5 @@
 """管理员用户管理接口。"""
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +12,13 @@ from app.core.dependencies import require_permission
 from app.core.security import hash_password
 from app.models import AuditLog, Role, User
 from app.schemas.common import BaseResponse
-from app.schemas.identity import AdminCreateUserRequest, UserListResponse, UserRolesRequest, UserStatusRequest, UserUpdateRequest
+from app.schemas.identity import (
+    AdminCreateUserRequest,
+    UserListResponse,
+    UserRolesRequest,
+    UserStatusRequest,
+    UserUpdateRequest,
+)
 from app.utils.identity_helpers import present_user
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
@@ -25,10 +32,20 @@ async def create_user(
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
     """管理员新增用户；未指定角色时自动分配注册用户角色。"""
-    if await db.scalar(select(User).where((User.username == data.username) | (User.email == data.email))):
+    if await db.scalar(
+        select(User).where(
+            (User.username == data.username) | (User.email == data.email)
+        )
+    ):
         raise HTTPException(status_code=409, detail="用户名或邮箱已存在")
     if data.role_ids:
-        roles = (await db.scalars(select(Role).where(Role.id.in_([uuid.UUID(item) for item in data.role_ids])))).all()
+        roles = (
+            await db.scalars(
+                select(Role).where(
+                    Role.id.in_([uuid.UUID(item) for item in data.role_ids])
+                )
+            )
+        ).all()
         if len(roles) != len(data.role_ids):
             raise HTTPException(status_code=400, detail="包含不存在的角色")
     else:
@@ -45,7 +62,15 @@ async def create_user(
     )
     db.add(user)
     await db.flush()
-    db.add(AuditLog(user_id=operator.id, action="user.create", resource_type="user", resource_id=str(user.id), detail={"role_ids": [str(role.id) for role in roles]}))
+    db.add(
+        AuditLog(
+            user_id=operator.id,
+            action="user.create",
+            resource_type="user",
+            resource_id=str(user.id),
+            detail={"role_ids": [str(role.id) for role in roles]},
+        )
+    )
     await db.commit()
     await db.refresh(user)
     return ok(present_user(user), request_id=request_id, message="用户创建成功")
@@ -64,12 +89,23 @@ async def list_users(
     conditions = []
     if keyword:
         like = f"%{keyword}%"
-        conditions.append(or_(User.username.ilike(like), User.email.ilike(like), User.nickname.ilike(like)))
+        conditions.append(
+            or_(
+                User.username.ilike(like),
+                User.email.ilike(like),
+                User.nickname.ilike(like),
+            )
+        )
     if status:
         conditions.append(User.status == status)
 
     count_stmt = select(func.count()).select_from(User)
-    list_stmt = select(User).order_by(User.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    list_stmt = (
+        select(User)
+        .order_by(User.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     if conditions:
         count_stmt = count_stmt.where(*conditions)
         list_stmt = list_stmt.where(*conditions)
@@ -97,6 +133,7 @@ async def get_user(
         raise HTTPException(status_code=404, detail="用户不存在")
     return ok(present_user(user), request_id=request_id)
 
+
 @router.put("/{user_id}", response_model=BaseResponse)
 async def update_user(
     user_id: str,
@@ -108,7 +145,11 @@ async def update_user(
     user = await db.get(User, uuid.UUID(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    if data.email and data.email != user.email and await db.scalar(select(User).where(User.email == data.email)):
+    if (
+        data.email
+        and data.email != user.email
+        and await db.scalar(select(User).where(User.email == data.email))
+    ):
         raise HTTPException(status_code=409, detail="邮箱已被使用")
     if data.email:
         user.email = data.email
@@ -126,6 +167,8 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     return ok(present_user(user), request_id=request_id)
+
+
 @router.patch("/{user_id}/status", response_model=BaseResponse)
 async def set_status(
     user_id: str,
@@ -163,7 +206,11 @@ async def set_roles(
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
     user = await db.get(User, uuid.UUID(user_id))
-    roles = (await db.scalars(select(Role).where(Role.id.in_([uuid.UUID(x) for x in data.role_ids])))).all()
+    roles = (
+        await db.scalars(
+            select(Role).where(Role.id.in_([uuid.UUID(x) for x in data.role_ids]))
+        )
+    ).all()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     if len(roles) != len(data.role_ids):

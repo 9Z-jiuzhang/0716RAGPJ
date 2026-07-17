@@ -56,7 +56,9 @@ class LangfuseService:
 
     def __init__(self) -> None:
         self._client = None
-        self.enabled = bool(settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY)
+        self.enabled = bool(
+            settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY
+        )
         if self.enabled:
             try:
                 from langfuse import Langfuse
@@ -142,7 +144,12 @@ class LangfuseService:
         if error:
             span.end(level="ERROR", status_message=error)
         else:
-            span.end(output={"context_summary": redact_text(context_summary), "hit_count": hit_count})
+            span.end(
+                output={
+                    "context_summary": redact_text(context_summary),
+                    "hit_count": hit_count,
+                }
+            )
         return span
 
     def span_generation(
@@ -170,7 +177,11 @@ class LangfuseService:
             name="llm_generation",
             model=model,
             input=redact_text(prompt),
-            metadata={"prompt_version": prompt_version, "latency_ms": latency_ms, "error": error},
+            metadata={
+                "prompt_version": prompt_version,
+                "latency_ms": latency_ms,
+                "error": error,
+            },
             usage={
                 "input": input_tokens or 0,
                 "output": output_tokens or 0,
@@ -194,7 +205,11 @@ class LangfuseService:
         if not self.enabled:
             return
         try:
-            trace.score(name=name, value=value, comment=redact_text(comment) if comment else None)
+            trace.score(
+                name=name,
+                value=value,
+                comment=redact_text(comment) if comment else None,
+            )
         except Exception:
             logger.exception("langfuse score failed")
 
@@ -223,7 +238,9 @@ class LangfuseService:
         try:
             t0 = time.perf_counter()
             async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(settings.LANGFUSE_HOST.rstrip("/") + "/api/public/health")
+                resp = await client.get(
+                    settings.LANGFUSE_HOST.rstrip("/") + "/api/public/health"
+                )
                 latency = round((time.perf_counter() - t0) * 1000, 2)
                 if resp.status_code < 500:
                     return "healthy", latency

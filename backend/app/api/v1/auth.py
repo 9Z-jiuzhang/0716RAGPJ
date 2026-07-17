@@ -1,4 +1,5 @@
 """注册、登录、刷新令牌与个人中心接口。"""
+
 from datetime import datetime, timezone
 import uuid
 
@@ -9,22 +10,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.helpers import ok, resolve_request_id
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    hash_password,
+    verify_password,
+)
 from app.models import Role, User
 from app.schemas.common import BaseResponse
-from app.schemas.identity import LoginRequest, RefreshRequest, RegisterRequest, UserUpdateRequest
+from app.schemas.identity import (
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    UserUpdateRequest,
+)
 from app.utils.identity_helpers import build_token_response, present_user
 
 router = APIRouter(prefix="/auth", tags=["认证与用户中心"])
 
 
-@router.post("/register", response_model=BaseResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=BaseResponse, status_code=status.HTTP_201_CREATED
+)
 async def register(
     data: RegisterRequest,
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
-    if await db.scalar(select(User).where((User.username == data.username) | (User.email == data.email))):
+    if await db.scalar(
+        select(User).where(
+            (User.username == data.username) | (User.email == data.email)
+        )
+    ):
         raise HTTPException(status_code=409, detail="用户名或邮箱已存在")
     role = await db.scalar(select(Role).where(Role.name == "user"))
     if not role:
@@ -56,7 +74,9 @@ async def login(
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     return ok(
-        build_token_response(create_access_token(str(user.id)), create_refresh_token(str(user.id))),
+        build_token_response(
+            create_access_token(str(user.id)), create_refresh_token(str(user.id))
+        ),
         request_id=request_id,
     )
 
@@ -72,13 +92,18 @@ async def refresh(
     if not user or user.status != "active":
         raise HTTPException(status_code=401, detail="用户不可用")
     return ok(
-        build_token_response(create_access_token(str(user.id)), create_refresh_token(str(user.id))),
+        build_token_response(
+            create_access_token(str(user.id)), create_refresh_token(str(user.id))
+        ),
         request_id=request_id,
     )
 
 
 @router.get("/me", response_model=BaseResponse)
-async def me(user: User = Depends(get_current_user), request_id: str = Depends(resolve_request_id)) -> BaseResponse:
+async def me(
+    user: User = Depends(get_current_user),
+    request_id: str = Depends(resolve_request_id),
+) -> BaseResponse:
     return ok(present_user(user), request_id=request_id)
 
 
@@ -89,7 +114,11 @@ async def update_me(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
-    if data.email and data.email != user.email and await db.scalar(select(User).where(User.email == data.email)):
+    if (
+        data.email
+        and data.email != user.email
+        and await db.scalar(select(User).where(User.email == data.email))
+    ):
         raise HTTPException(status_code=409, detail="邮箱已被使用")
     if data.email:
         user.email = data.email

@@ -65,10 +65,10 @@ def _heuristic_scan(filename: str, content: bytes) -> None:
     if text_like and content.lstrip().startswith(b"#!/"):
         raise MalwareDetectedError("文本扩展名下检测到脚本 shebang")
 
-    sample = content[:64 * 1024]
-    if re.search(br"(?i)<script[\s>]", sample) and ext not in {"html", "htm", "xml"}:
+    sample = content[: 64 * 1024]
+    if re.search(rb"(?i)<script[\s>]", sample) and ext not in {"html", "htm", "xml"}:
         raise MalwareDetectedError("疑似嵌入脚本")
-    if re.search(br"(?i)AutoOpen|Auto_Open|Document_Open", sample) and not office_like:
+    if re.search(rb"(?i)AutoOpen|Auto_Open|Document_Open", sample) and not office_like:
         raise MalwareDetectedError("疑似自动宏触发")
 
 

@@ -1,4 +1,5 @@
 """文本规范化与预处理。【对齐手册 §5.5.1 / §5.5.2】"""
+
 from __future__ import annotations
 
 import re

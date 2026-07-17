@@ -1,0 +1,52 @@
+﻿{
+    "health":  {
+                   "detail":  "status=degraded; postgres=healthy; redis=healthy; chroma=healthy",
+                   "ok":  true,
+                   "name":  "health"
+               },
+    "login":  {
+                  "detail":  "token_len=187",
+                  "ok":  true,
+                  "name":  "login"
+              },
+    "auth_me":  {
+                    "detail":  "user=admin",
+                    "ok":  true,
+                    "name":  "auth_me"
+                },
+    "kb_list_or_create":  {
+                              "detail":  "reuse kb=2e0ad9ce-b1ef-45df-8305-46affefd369a",
+                              "ok":  true,
+                              "name":  "kb_list_or_create"
+                          },
+    "doc_upload":  {
+                       "detail":  "doc=e0c0f421-36fa-4d6c-88a4-8efab1ed42b1",
+                       "ok":  true,
+                       "name":  "doc_upload"
+                   },
+    "doc_ready_poll":  {
+                           "detail":  "status=ready",
+                           "ok":  true,
+                           "name":  "doc_ready_poll"
+                       },
+    "hit_test_run":  {
+                         "detail":  "ok:{\"code\":0,\"message\":\"success\",\"data\":{\"id\":\"daf035b5-98b9-4f43-95cb-b4fb39f5bf17\",\"case_id\":null,\"kb_ids\":[\"2e0ad9ce-b1ef-45df-8305-46affefd369a\"],\"strategy\":\"hybrid\",\"top_k\":3,\"status\":\"completed\",\"total_questions\":2,\"hit_count\":0,\"recall_at_k\":0.0,\"mrr\":0.0,\"avg_elapsed_ms\":339.0,\"completed_at\":\"2",
+                         "ok":  true,
+                         "name":  "hit_test_run"
+                     },
+    "snapshot_create":  {
+                            "detail":  "snap=33585b65-d385-441b-afb1-d7888c4af32d",
+                            "ok":  true,
+                            "name":  "snapshot_create"
+                        },
+    "snapshot_preview":  {
+                             "detail":  "ok_len=1375",
+                             "ok":  true,
+                             "name":  "snapshot_preview"
+                         },
+    "qa_ask_sse":  {
+                       "detail":  "bytes=4423; preview=event: citations data: {\"items\": [{\"doc_id\": \"7bf0399b-580f-4e0f-abef-d17fccfa8d8b\", \"doc_name\": \"e2e_rag_doc.md\", \"chunk_index\": 0, \"content\": \"# E2E Knowledge Sample\\n\\nRAG (Retrieval-Augmented Generation) combines retrieval with generation.\\nIt first retrieves relevant chunks from a knowledge base, then asks an LLM to answer.\\nKeywords: vector retrieval, hybrid retrieval, hit-rate testing.\", \"s",
+                       "ok":  true,
+                       "name":  "qa_ask_sse"
+                   }
+}

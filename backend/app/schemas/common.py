@@ -33,7 +33,9 @@ class BaseResponse(BaseModel):
     code: int = Field(default=0, description="业务状态码，0 表示成功")
     message: str = Field(default="success", description="提示信息")
     data: Any | None = Field(default=None, description="业务数据")
-    request_id: str = Field(default_factory=lambda: str(uuid4()), description="请求标识")
+    request_id: str = Field(
+        default_factory=lambda: str(uuid4()), description="请求标识"
+    )
 
 
 class PaginationParams(BaseModel):

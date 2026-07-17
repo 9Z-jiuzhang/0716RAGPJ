@@ -16,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.retrieval.fulltext import fulltext_retriever
-from app.retrieval.types import KBTarget, RetrievalHit, RetrievalResult, RetrievalStrategy
+from app.retrieval.types import (
+    KBTarget,
+    RetrievalHit,
+    RetrievalResult,
+    RetrievalStrategy,
+)
 from app.retrieval.vector import vector_retriever
 
 logger = logging.getLogger(__name__)
@@ -165,7 +170,9 @@ class HybridRetriever:
         return max(0.0, min(1.0, rrf_score / max_rrf))
 
     @staticmethod
-    def _apply_threshold(hits: list[RetrievalHit], threshold: float) -> list[RetrievalHit]:
+    def _apply_threshold(
+        hits: list[RetrievalHit], threshold: float
+    ) -> list[RetrievalHit]:
         """相关性阈值截断：低于阈值的片段丢弃。"""
         if threshold <= 0:
             return hits

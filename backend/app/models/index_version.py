@@ -21,16 +21,25 @@ class IndexVersion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     kb_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), index=True, nullable=False
     )
-    version: Mapped[str] = mapped_column(String(50), nullable=False, comment="版本号，如 v20260716-001")
+    version: Mapped[str] = mapped_column(
+        String(50), nullable=False, comment="版本号，如 v20260716-001"
+    )
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, comment="该版本分段总数")
+    chunk_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, comment="该版本分段总数"
+    )
     status: Mapped[str] = mapped_column(
-        String(20), default="building", nullable=False, comment="building/active/obsolete/failed"
+        String(20),
+        default="building",
+        nullable=False,
+        comment="building/active/obsolete/failed",
     )
     config_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, comment="构建时的分段规则、embedding 模型等配置"
     )
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, comment="失败原因")
+    error_message: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="失败原因"
+    )
     source_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, comment="若由快照回退产生，记录来源快照 ID"
     )

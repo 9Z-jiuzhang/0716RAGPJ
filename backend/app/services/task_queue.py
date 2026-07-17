@@ -63,7 +63,9 @@ class TaskQueueService:
                 ),
             )
         except Exception:
-            logger.warning("redis enqueue failed; task persisted in DB only", exc_info=True)
+            logger.warning(
+                "redis enqueue failed; task persisted in DB only", exc_info=True
+            )
 
         await self.db.commit()
         await self.db.refresh(task)

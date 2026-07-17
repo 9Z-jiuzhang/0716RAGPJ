@@ -58,7 +58,9 @@ class AuditRepository:
             conditions.append(AuditLog.created_at <= params.end_date)
 
         where_clause = and_(*conditions) if conditions else True
-        count_result = await self.db.execute(select(func.count()).select_from(AuditLog).where(where_clause))
+        count_result = await self.db.execute(
+            select(func.count()).select_from(AuditLog).where(where_clause)
+        )
         total = int(count_result.scalar_one())
         display_name = func.coalesce(User.nickname, User.username)
         stmt = (

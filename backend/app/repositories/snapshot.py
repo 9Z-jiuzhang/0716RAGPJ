@@ -19,7 +19,9 @@ class SnapshotRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_by_id(self, snapshot_id: UUID, kb_id: UUID | None = None) -> Snapshot | None:
+    async def get_by_id(
+        self, snapshot_id: UUID, kb_id: UUID | None = None
+    ) -> Snapshot | None:
         """按 ID 查询快照（可限定知识库），含文档列表。"""
         stmt = (
             select(Snapshot)
@@ -39,7 +41,9 @@ class SnapshotRepository:
     ) -> tuple[Sequence[Snapshot], int]:
         """按时间倒序列出知识库快照（列表不加载 documents，依赖汇总列）。"""
         filters = and_(Snapshot.kb_id == kb_id, Snapshot.status == "active")
-        count_result = await self.db.execute(select(func.count()).select_from(Snapshot).where(filters))
+        count_result = await self.db.execute(
+            select(func.count()).select_from(Snapshot).where(filters)
+        )
         total = int(count_result.scalar_one())
 
         stmt = (
@@ -81,11 +85,15 @@ class SnapshotRepository:
             snap.chunk_count = chunk_count
         await self.db.flush()
 
-    async def count_active(self, kb_id: UUID, *, exclude_protection: bool = False) -> int:
+    async def count_active(
+        self, kb_id: UUID, *, exclude_protection: bool = False
+    ) -> int:
         """统计知识库下活跃快照数量。"""
         conditions = [Snapshot.kb_id == kb_id, Snapshot.status == "active"]
         if exclude_protection:
-            conditions.append(Snapshot.trigger != SnapshotTrigger.ROLLBACK_PROTECTION.value)
+            conditions.append(
+                Snapshot.trigger != SnapshotTrigger.ROLLBACK_PROTECTION.value
+            )
         result = await self.db.execute(
             select(func.count()).select_from(Snapshot).where(and_(*conditions))
         )
@@ -143,7 +151,9 @@ class SnapshotRepository:
         if exclude_ids:
             conditions.append(Snapshot.id.notin_(exclude_ids))
         if only_non_protection:
-            conditions.append(Snapshot.trigger != SnapshotTrigger.ROLLBACK_PROTECTION.value)
+            conditions.append(
+                Snapshot.trigger != SnapshotTrigger.ROLLBACK_PROTECTION.value
+            )
 
         stmt = (
             select(Snapshot)
@@ -179,7 +189,10 @@ class SnapshotRepository:
             conditions.append(Snapshot.id.notin_(exclude_ids))
 
         result = await self.db.execute(
-            update(Snapshot).where(and_(*conditions)).values(status="deleted").returning(Snapshot.id)
+            update(Snapshot)
+            .where(and_(*conditions))
+            .values(status="deleted")
+            .returning(Snapshot.id)
         )
         rows = result.fetchall()
         await self.db.flush()

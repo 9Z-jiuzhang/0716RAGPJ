@@ -70,7 +70,9 @@ class ConversationSummarizer:
         """将消息列表格式化为可读对话文本。"""
         lines: list[str] = []
         for msg in messages:
-            role_label = {"user": "用户", "assistant": "助手", "system": "系统"}.get(msg.role, msg.role)
+            role_label = {"user": "用户", "assistant": "助手", "system": "系统"}.get(
+                msg.role, msg.role
+            )
             content = (msg.content or "").strip()
             if content:
                 lines.append(f"{role_label}：{content}")

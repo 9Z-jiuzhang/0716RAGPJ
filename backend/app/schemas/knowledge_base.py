@@ -22,7 +22,9 @@ class KnowledgeBaseUpdate(BaseModel):
     tags: Optional[List[str]] = Field(None, description="标签列表")
     description: Optional[str] = Field(None, description="简介/描述")
     visibility: Optional[Visibility] = Field(None, description="可见性")
-    embedding_model: Optional[str] = Field(None, description="使用的 Embedding 模型名称")
+    embedding_model: Optional[str] = Field(
+        None, description="使用的 Embedding 模型名称"
+    )
     chunk_size: Optional[int] = Field(None, description="默认分段大小（字符数）")
     chunk_overlap: Optional[int] = Field(None, description="默认分段重叠（字符数）")
 

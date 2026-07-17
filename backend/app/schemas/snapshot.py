@@ -11,8 +11,16 @@ from pydantic import BaseModel, Field, field_validator
 class CreateSnapshotRequest(BaseModel):
     """手动创建快照请求。"""
 
-    name: str = Field(..., min_length=1, max_length=200, description="快照名称", examples=["发布前备份"])
-    description: str | None = Field(default=None, max_length=2000, description="快照说明")
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="快照名称",
+        examples=["发布前备份"],
+    )
+    description: str | None = Field(
+        default=None, max_length=2000, description="快照说明"
+    )
 
 
 class RollbackRequest(BaseModel):
@@ -72,7 +80,9 @@ class SnapshotListItem(BaseModel):
 class SnapshotResponse(SnapshotListItem):
     """完整快照信息。"""
 
-    config_snapshot: dict[str, Any] = Field(default_factory=dict, description="配置快照")
+    config_snapshot: dict[str, Any] = Field(
+        default_factory=dict, description="配置快照"
+    )
     updated_at: datetime | None = None
 
 
@@ -83,7 +93,9 @@ class SnapshotDetailResponse(SnapshotResponse):
     permission_snapshot: list[dict[str, Any]] = Field(
         default_factory=list, description="快照时的权限配置"
     )
-    segment_rules: dict[str, Any] = Field(default_factory=dict, description="分段规则快照")
+    segment_rules: dict[str, Any] = Field(
+        default_factory=dict, description="分段规则快照"
+    )
 
 
 class AffectedDocument(BaseModel):
@@ -117,7 +129,9 @@ class RollbackPreviewResponse(BaseModel):
     config_changes: list[ConfigChangeItem] = Field(
         default_factory=list, description="分段规则/嵌入模型/权限等配置差异"
     )
-    total_changes: int = Field(default=0, description="将发生变更的文档数（不含 unchanged）")
+    total_changes: int = Field(
+        default=0, description="将发生变更的文档数（不含 unchanged）"
+    )
     will_create_protection_snapshot: bool = Field(
         default=True, description="回退前是否自动创建保护快照"
     )
@@ -136,7 +150,9 @@ class RollbackResultResponse(BaseModel):
     """回退执行结果。"""
 
     protection_snapshot_id: UUID = Field(..., description="回退前保护快照 ID")
-    new_index_version: str = Field(..., description="新生成的索引版本号（building，待向量重建后激活）")
+    new_index_version: str = Field(
+        ..., description="新生成的索引版本号（building，待向量重建后激活）"
+    )
     index_status: str = Field(default="building", description="索引版本状态")
     before_version: str | None = Field(default=None, description="回退前生效索引版本")
     after_version: str = Field(..., description="回退后待激活的索引版本")
@@ -145,7 +161,9 @@ class RollbackResultResponse(BaseModel):
         default_factory=list, description="已恢复文档 ID，供异步重建索引使用"
     )
     selective: bool = Field(default=False, description="是否选择性恢复")
-    rebuild_required: bool = Field(default=True, description="是否仍需向量化模块重建并激活索引")
+    rebuild_required: bool = Field(
+        default=True, description="是否仍需向量化模块重建并激活索引"
+    )
     message: str = Field(
         default="文档与配置已按快照恢复；索引版本处于 building，待向量重建后原子激活"
     )
@@ -158,4 +176,6 @@ class SnapshotCleanupResponse(BaseModel):
     excess_deleted: int = Field(default=0, description="按最大数量清理数量")
     retention_days: int
     max_count: int
-    active_remaining: int = Field(default=0, description="清理后仍活跃的快照数（含保护）")
+    active_remaining: int = Field(
+        default=0, description="清理后仍活跃的快照数（含保护）"
+    )

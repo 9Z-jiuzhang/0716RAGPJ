@@ -25,7 +25,9 @@ class AuditLogListItem(BaseModel):
 
     id: UUID
     user_id: UUID | None = None
-    user_name: str | None = Field(default=None, description="操作者账号或昵称（便于界面展示）")
+    user_name: str | None = Field(
+        default=None, description="操作者账号或昵称（便于界面展示）"
+    )
     action: str
     resource_type: str
     resource_id: str | None = None

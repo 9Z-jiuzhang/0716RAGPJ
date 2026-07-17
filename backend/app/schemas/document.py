@@ -101,7 +101,9 @@ class FileSegmentPreviewResponse(BaseModel):
     """
 
     kb_id: str
-    document_id: str | None = Field(default=None, description="按已上传文档预览时回填，按文件预览时为 None")
+    document_id: str | None = Field(
+        default=None, description="按已上传文档预览时回填，按文件预览时为 None"
+    )
     filename: str
     file_type: str
     rules: dict[str, Any]

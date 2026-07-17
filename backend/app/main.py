@@ -1,4 +1,5 @@
 """FastAPI 应用入口：生命周期、种子数据、可观测性与模块路由挂载。"""
+
 from contextlib import asynccontextmanager
 import os
 
@@ -14,7 +15,12 @@ from .api.v1.knowledge_bases import router as knowledge_bases_router
 from .api.v1.router import api_router
 from .core.chroma import close_chroma, init_chroma
 from .core.config import settings
-from .core.database import SessionLocal, engine, ensure_postgres_extensions, ensure_schema_patches
+from .core.database import (
+    SessionLocal,
+    engine,
+    ensure_postgres_extensions,
+    ensure_schema_patches,
+)
 from .core.logging import setup_logging
 from .core.metrics import metrics_payload
 from .core.redis import close_redis, init_redis
@@ -46,13 +52,17 @@ async def seed_identity_data() -> None:
         perm_by_code = {p.code: p for p in all_perms}
         roles = {
             r.name: r
-            for r in (await db.scalars(select(Role).options(selectinload(Role.permissions)))).all()
+            for r in (
+                await db.scalars(select(Role).options(selectinload(Role.permissions)))
+            ).all()
         }
         newly_created: set[str] = set()
 
         for role_name, (description, codes) in BUILTIN_ROLES.items():
             if role_name not in roles:
-                roles[role_name] = Role(name=role_name, description=description, is_builtin=True)
+                roles[role_name] = Role(
+                    name=role_name, description=description, is_builtin=True
+                )
                 db.add(roles[role_name])
                 newly_created.add(role_name)
         await db.flush()
@@ -60,7 +70,9 @@ async def seed_identity_data() -> None:
         # flush 后重新加载，避免访问未预加载的 permissions 触发懒加载
         roles = {
             r.name: r
-            for r in (await db.scalars(select(Role).options(selectinload(Role.permissions)))).all()
+            for r in (
+                await db.scalars(select(Role).options(selectinload(Role.permissions)))
+            ).all()
         }
 
         for role_name, (_, codes) in BUILTIN_ROLES.items():

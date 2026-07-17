@@ -15,7 +15,7 @@ import re
 from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import Float, cast, func, literal, or_, select
+from sqlalchemy import Float, cast, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document, DocumentChunk
@@ -57,8 +57,8 @@ class FulltextRetriever:
         top_k: int,
     ) -> list[RetrievalHit]:
         """使用 plainto_tsquery + ts_rank_cd 检索。"""
-        # plainto_tsquery 对空/纯标点可能生成空查询，需兜底
-        ts_query = func.plainto_tsquery(literal("simple"), query)
+        # 必须显式 regconfig，否则 asyncpg 会变成 varchar,varchar 重载不存在
+        ts_query = func.plainto_tsquery(literal_column("'simple'::regconfig"), query)
         rank = func.ts_rank_cd(DocumentChunk.content_tsv, ts_query)
 
         stmt = (
@@ -82,7 +82,9 @@ class FulltextRetriever:
         )
 
         try:
-            rows = (await db.execute(stmt)).all()
+            # savepoint：失败后不污染外层事务（否则 hybrid 后续 SQL 全部 aborted）
+            async with db.begin_nested():
+                rows = (await db.execute(stmt)).all()
         except Exception as exc:
             # content_tsv 尚未迁移时降级为空，由 trigram 路径兜底
             logger.warning("tsvector 检索失败，将尝试 trigram：%s", exc)
@@ -149,7 +151,8 @@ class FulltextRetriever:
         )
 
         try:
-            rows = (await db.execute(stmt)).all()
+            async with db.begin_nested():
+                rows = (await db.execute(stmt)).all()
         except Exception as exc:
             logger.warning("trigram 检索失败：%s", exc)
             # 最后降级：纯 ILIKE，无相似度分
@@ -200,7 +203,12 @@ class FulltextRetriever:
             )
             .limit(top_k)
         )
-        rows = (await db.execute(stmt)).all()
+        try:
+            async with db.begin_nested():
+                rows = (await db.execute(stmt)).all()
+        except Exception as exc:
+            logger.warning("ILIKE 降级检索失败：%s", exc)
+            return []
         # 无真实分数时按命中顺序递减赋分，保证排序稳定
         hits: list[RetrievalHit] = []
         for i, row in enumerate(rows):

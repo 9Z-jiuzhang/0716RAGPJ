@@ -34,7 +34,9 @@ def default_rules() -> dict[str, Any]:
     }
 
 
-def merge_rules(base: dict[str, Any] | None, patch: dict[str, Any] | None) -> dict[str, Any]:
+def merge_rules(
+    base: dict[str, Any] | None, patch: dict[str, Any] | None
+) -> dict[str, Any]:
     rules = default_rules()
     if base:
         rules.update({k: v for k, v in base.items() if v is not None})
@@ -76,7 +78,9 @@ def split_text(text: str, rules: dict[str, Any] | None = None) -> list[ChunkPrev
             refined.extend(_split_fixed(part, chunk_size, overlap, separators))
 
     return [
-        ChunkPreview(chunk_index=i, content=c, char_count=len(c), metadata={"split_mode": mode})
+        ChunkPreview(
+            chunk_index=i, content=c, char_count=len(c), metadata={"split_mode": mode}
+        )
         for i, c in enumerate(refined)
         if c.strip()
     ]
@@ -107,7 +111,9 @@ def _split_sliding(text: str, chunk_size: int, overlap: int) -> list[str]:
     return parts
 
 
-def _split_fixed(text: str, chunk_size: int, overlap: int, separators: list[str]) -> list[str]:
+def _split_fixed(
+    text: str, chunk_size: int, overlap: int, separators: list[str]
+) -> list[str]:
     units = _recursive_split(text, separators)
     chunks: list[str] = []
     buf = ""

@@ -8,7 +8,9 @@ from fastapi import Header
 from app.schemas.common import BaseResponse
 
 
-def resolve_request_id(x_request_id: Optional[str] = Header(default=None, alias="X-Request-Id")) -> str:
+def resolve_request_id(
+    x_request_id: Optional[str] = Header(default=None, alias="X-Request-Id")
+) -> str:
     """从请求头读取或生成 request_id。"""
     return x_request_id or str(uuid4())
 

@@ -1,7 +1,12 @@
 """业务服务包。"""
 
 from app.services.audit import AuditService
-from app.services.embedding import EmbeddingService, embedding_service, embed_texts, get_embedding_client
+from app.services.embedding import (
+    EmbeddingService,
+    embedding_service,
+    embed_texts,
+    get_embedding_client,
+)
 from app.services.index_switch import IndexSwitchService
 from app.services.knowledge_base import KnowledgeBaseService
 from app.services.llm import LLMService, llm_service

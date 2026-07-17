@@ -180,7 +180,9 @@ async def compare_test_strategies(
     try:
         result = await service.compare_strategies(request)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     return BaseResponse(data=result)
 
 

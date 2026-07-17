@@ -1,4 +1,5 @@
 """MinIO 对象存储。【对齐 .env.example MINIO_*】"""
+
 from __future__ import annotations
 
 import io
@@ -32,7 +33,12 @@ def ensure_bucket() -> None:
         client.make_bucket(bucket)
 
 
-def upload_bytes(kb_id: str, filename: str, content: bytes, content_type: str = "application/octet-stream") -> str:
+def upload_bytes(
+    kb_id: str,
+    filename: str,
+    content: bytes,
+    content_type: str = "application/octet-stream",
+) -> str:
     """上传原文件，返回对象路径。"""
     ensure_bucket()
     object_name = f"{kb_id}/{uuid.uuid4().hex}_{filename}"

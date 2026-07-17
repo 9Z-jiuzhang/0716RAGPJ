@@ -1,4 +1,5 @@
 """异步 PostgreSQL 会话管理。"""
+
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import text

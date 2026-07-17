@@ -10,7 +10,11 @@ from uuid import UUID, uuid4
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.models import User
-from app.schemas.audit import AuditLogFilterParams, AuditLogListResponse, AuditLogResponse
+from app.schemas.audit import (
+    AuditLogFilterParams,
+    AuditLogListResponse,
+    AuditLogResponse,
+)
 from app.schemas.common import BaseResponse
 from app.services.audit import AuditService
 from fastapi import APIRouter, Depends, Header, Query, status
@@ -19,7 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter(prefix="/audit", tags=["审计日志"])
 
 
-def _request_id(x_request_id: str | None = Header(default=None, alias="X-Request-Id")) -> str:
+def _request_id(
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id")
+) -> str:
     return x_request_id or str(uuid4())
 
 

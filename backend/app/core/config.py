@@ -1,4 +1,5 @@
 """应用运行配置：对齐 .env.example，并扩展智能问答（5.6）参数。"""
+
 from functools import lru_cache
 from pathlib import Path
 

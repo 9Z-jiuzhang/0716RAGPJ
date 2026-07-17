@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,7 +78,9 @@ class SessionStore:
         is_guest = guest_id is not None and user_id is None
         ttl = self._ttl_seconds(is_guest=is_guest)
         sid = str(session_id)
-        await redis.set(self._meta_key(sid), json.dumps(meta, ensure_ascii=False), ex=ttl)
+        await redis.set(
+            self._meta_key(sid), json.dumps(meta, ensure_ascii=False), ex=ttl
+        )
         if guest_id:
             await redis.set(self._guest_key(guest_id), sid, ex=ttl)
 
@@ -136,7 +138,9 @@ class SessionStore:
         if context_raw:
             try:
                 items = json.loads(context_raw)
-                messages = [ContextMessage.from_dict(x) for x in items if isinstance(x, dict)]
+                messages = [
+                    ContextMessage.from_dict(x) for x in items if isinstance(x, dict)
+                ]
             except json.JSONDecodeError:
                 logger.warning("会话 %s context JSON 损坏，已忽略", sid)
 
@@ -244,7 +248,9 @@ class SessionStore:
         )
         await self._refresh_ttl(sid, is_guest=is_guest, guest_id=None)
 
-    async def delete_session_cache(self, session_id: uuid.UUID, *, guest_id: Optional[str] = None) -> None:
+    async def delete_session_cache(
+        self, session_id: uuid.UUID, *, guest_id: Optional[str] = None
+    ) -> None:
         """删除会话全部 Redis 键（用户删除会话或访客过期清理）。"""
         redis = get_redis_client()
         sid = str(session_id)
@@ -266,12 +272,22 @@ class SessionStore:
         """续期 context/summary/meta（及访客映射）TTL。"""
         redis = get_redis_client()
         ttl = self._ttl_seconds(is_guest=is_guest)
-        for key in (self._context_key(session_id), self._summary_key(session_id), self._meta_key(session_id)):
+        for key in (
+            self._context_key(session_id),
+            self._summary_key(session_id),
+            self._meta_key(session_id),
+        ):
             await redis.expire(key, ttl)
         if guest_id:
             await redis.expire(self._guest_key(guest_id), ttl)
 
-    async def touch(self, session_id: uuid.UUID, *, is_guest: bool = False, guest_id: Optional[str] = None) -> None:
+    async def touch(
+        self,
+        session_id: uuid.UUID,
+        *,
+        is_guest: bool = False,
+        guest_id: Optional[str] = None,
+    ) -> None:
         """请求开始时续期，防止活跃会话被误过期。"""
         await self._refresh_ttl(str(session_id), is_guest=is_guest, guest_id=guest_id)
 

@@ -67,4 +67,6 @@ def setup_logging() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    logging.getLogger(__name__).info("logging initialized level=%s dir=%s", settings.LOG_LEVEL, log_dir)
+    logging.getLogger(__name__).info(
+        "logging initialized level=%s dir=%s", settings.LOG_LEVEL, log_dir
+    )

@@ -23,7 +23,9 @@ from app.services.snapshot_hooks import take_auto_snapshot
 logger = logging.getLogger(__name__)
 
 
-async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = True) -> None:
+async def run_upload_pipeline(
+    document_id: uuid.UUID, *, auto_vectorize: bool = True
+) -> None:
     """uploaded/parsing -> processing -> pending_segment -> vectorizing -> ready。"""
     async with SessionLocal() as db:
         doc = await doc_repo.get_document_by_id(db, document_id)
@@ -31,7 +33,9 @@ async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = 
             logger.error("pipeline: document not found %s", document_id)
             return
         try:
-            with langfuse_span("document.upload_pipeline", {"document_id": str(document_id)}):
+            with langfuse_span(
+                "document.upload_pipeline", {"document_id": str(document_id)}
+            ):
                 await _parse(db, doc)
                 await _process(db, doc)
                 await _segment(db, doc)
@@ -218,6 +222,11 @@ async def _vectorize(
     await db.flush()
     record_metric("vectorizing", "start")
 
+    kb = await doc_repo.get_knowledge_base(db, doc.kb_id)
+    active_version = (
+        (kb.current_index_version or "").strip() if kb is not None else ""
+    )
+
     if not skip_auto_snapshot:
         snap = await take_auto_snapshot(
             db,
@@ -228,9 +237,10 @@ async def _vectorize(
         )
         version = str(getattr(snap, "id", None) or uuid.uuid4())
     else:
-        version = index_version or str(uuid.uuid4())
+        # 契约：检索只认 KB.current_index_version；同库后续上传应复用已发布版本
+        version = index_version or active_version or str(uuid.uuid4())
 
-    enabled = [c for c in doc.chunks if c.is_enabled]
+    enabled = [c for c in (doc.chunks or []) if c.is_enabled]
     vector_store.delete_document_vectors(doc.kb_id, doc.id)
     if enabled:
         vectors = embedding.embed_texts([c.content for c in enabled])
@@ -251,6 +261,9 @@ async def _vectorize(
         )
     doc.index_version = version
     doc.updated_at = datetime.now(timezone.utc)
+    # docs/API.md + retrieval/scope：无 current_index_version 的库不可被 /qa/ask 检索
+    if kb is not None and not active_version:
+        kb.current_index_version = version
     apply_status(doc, DocumentStatus.READY.value)
     await db.flush()
     record_metric("vectorizing", "ok")
@@ -316,7 +329,11 @@ async def run_rollback_rebuild(
             )
         )
         if iv is None or kb is None:
-            logger.error("rollback rebuild missing kb/version kb=%s ver=%s", kb_id, target_version)
+            logger.error(
+                "rollback rebuild missing kb/version kb=%s ver=%s",
+                kb_id,
+                target_version,
+            )
             return
 
         before_version = (iv.config_snapshot or {}).get("before_version")
@@ -358,7 +375,9 @@ async def run_rollback_rebuild(
             total_chunks = int(
                 (
                     await db.scalar(
-                        select(sa_func.coalesce(sa_func.sum(Document.chunk_count), 0)).where(
+                        select(
+                            sa_func.coalesce(sa_func.sum(Document.chunk_count), 0)
+                        ).where(
                             Document.kb_id == kb_id,
                             Document.status != "archived",
                         )

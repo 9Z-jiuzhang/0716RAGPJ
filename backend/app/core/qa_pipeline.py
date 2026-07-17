@@ -134,18 +134,27 @@ class QAPipeline:
             with tracker.track("scope"):
                 targets = await resolve_kb_targets(db, user=user, kb_ids=request.kb_ids)
                 if request.kb_ids and not targets:
-                    raise QAPipelineError("指定的知识库均不在您的授权范围内", status_code=403)
+                    raise QAPipelineError(
+                        "指定的知识库不可检索：无权限，或尚未完成向量化（缺少生效索引版本）",
+                        status_code=403,
+                    )
 
             # [3] 加载会话记忆
             with tracker.track("memory"):
-                memory = await session_store.load_memory(session.id, pg_summary=session.summary)
+                memory = await session_store.load_memory(
+                    session.id, pg_summary=session.summary
+                )
                 if not memory.messages and session.message_count > 0:
                     # Redis 过期时从 PG 恢复最近消息（注册用户历史会话）
-                    memory.messages = await self._hydrate_context_from_db(db, session.id)
+                    memory.messages = await self._hydrate_context_from_db(
+                        db, session.id
+                    )
 
             # [4] 查询改写
             with tracker.track("rewrite"):
-                rewritten = await self._rewrite_query(question, memory.to_llm_messages())
+                rewritten = await self._rewrite_query(
+                    question, memory.to_llm_messages()
+                )
 
             retrieval_meta: dict[str, Any] = {
                 "original_query": question,
@@ -248,10 +257,18 @@ class QAPipeline:
             yield self._event("error", message=str(exc), request_id=tracker.request_id)
         except LLMServiceError as exc:
             logger.error("问答 LLM 错误 request_id=%s: %s", tracker.request_id, exc)
-            yield self._event("error", message=f"大模型服务暂时不可用：{exc}", request_id=tracker.request_id)
-        except Exception as exc:
+            yield self._event(
+                "error",
+                message=f"大模型服务暂时不可用：{exc}",
+                request_id=tracker.request_id,
+            )
+        except Exception:
             logger.exception("问答流水线未预期错误 request_id=%s", tracker.request_id)
-            yield self._event("error", message="服务器内部错误，请稍后重试", request_id=tracker.request_id)
+            yield self._event(
+                "error",
+                message="服务器内部错误，请稍后重试",
+                request_id=tracker.request_id,
+            )
 
     async def _resolve_session(
         self,
@@ -353,9 +370,14 @@ class QAPipeline:
             messages = [
                 {"role": "system", "content": _REWRITE_SYSTEM_PROMPT},
                 *history[-6:],  # 仅取最近若干条，控制 token
-                {"role": "user", "content": f"最新问题：{question}\n改写后的检索查询："},
+                {
+                    "role": "user",
+                    "content": f"最新问题：{question}\n改写后的检索查询：",
+                },
             ]
-            rewritten = await llm_service.chat(messages, temperature=0.1, max_tokens=256)
+            rewritten = await llm_service.chat(
+                messages, temperature=0.1, max_tokens=256
+            )
             cleaned = (rewritten or "").strip().strip("\"'")
             return cleaned or question
         except LLMServiceError as exc:
@@ -379,7 +401,9 @@ class QAPipeline:
             "请基于检索证据回答；若证据不足请明确说明。"
         )
         # history 已含摘要 system；再追加 RAG system 与当前问题
-        messages: list[dict[str, str]] = [{"role": "system", "content": _RAG_SYSTEM_PROMPT}]
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": _RAG_SYSTEM_PROMPT}
+        ]
         for msg in history_messages:
             # 避免重复 system 过多：保留摘要 system，跳过其他 system
             if msg["role"] == "system":

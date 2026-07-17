@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditLog
 from app.repositories.audit import AuditRepository
-from app.schemas.audit import AuditLogFilterParams, AuditLogListItem, AuditLogListResponse, AuditLogResponse
+from app.schemas.audit import (
+    AuditLogFilterParams,
+    AuditLogListItem,
+    AuditLogListResponse,
+    AuditLogResponse,
+)
 
 
 class AuditService:
@@ -49,7 +54,9 @@ class AuditService:
     async def get_detail(self, log_id: UUID) -> AuditLogResponse:
         log = await self.repo.get_by_id(log_id)
         if log is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审计日志不存在")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="审计日志不存在"
+            )
         data = AuditLogResponse.model_validate(log)
         data.user_name = await self.repo.resolve_user_name(log.user_id)
         return data

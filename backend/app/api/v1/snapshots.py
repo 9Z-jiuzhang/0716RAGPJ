@@ -23,7 +23,16 @@ from app.schemas.snapshot import (
 from app.services.audit import AuditService
 from app.services.document_pipeline import run_rollback_rebuild
 from app.services.snapshot import SnapshotService
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -32,7 +41,9 @@ router = APIRouter(
 )
 
 
-def _request_id(x_request_id: str | None = Header(default=None, alias="X-Request-Id")) -> str:
+def _request_id(
+    x_request_id: str | None = Header(default=None, alias="X-Request-Id")
+) -> str:
     return x_request_id or str(uuid4())
 
 
@@ -59,7 +70,9 @@ async def list_snapshots(
     request_id: str = Depends(_request_id),
 ) -> BaseResponse:
     """获取快照列表。"""
-    data: SnapshotListResponse = await SnapshotService(db).list_snapshots(kb_id, page, page_size)
+    data: SnapshotListResponse = await SnapshotService(db).list_snapshots(
+        kb_id, page, page_size
+    )
     await db.commit()  # 可能回填了遗留计数
     return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
 
@@ -135,7 +148,9 @@ async def get_snapshot(
     request_id: str = Depends(_request_id),
 ) -> BaseResponse:
     """获取快照详情。"""
-    data: SnapshotDetailResponse = await SnapshotService(db).get_detail(kb_id, snapshot_id)
+    data: SnapshotDetailResponse = await SnapshotService(db).get_detail(
+        kb_id, snapshot_id
+    )
     return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
 
 

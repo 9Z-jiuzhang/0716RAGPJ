@@ -60,7 +60,9 @@ class MonitorService:
 
         # Chroma
         chroma_status, chroma_latency = self._check_chroma()
-        checks["chroma"] = HealthCheckItem(status=chroma_status, latency_ms=chroma_latency)
+        checks["chroma"] = HealthCheckItem(
+            status=chroma_status, latency_ms=chroma_latency
+        )
         if chroma_status == "unhealthy" and overall == "healthy":
             overall = "degraded"
 
@@ -103,18 +105,24 @@ class MonitorService:
 
     async def stats(self) -> SystemStatsResponse:
         assert self.db is not None
-        user_count = int(await self.db.scalar(select(func.count()).select_from(User)) or 0)
+        user_count = int(
+            await self.db.scalar(select(func.count()).select_from(User)) or 0
+        )
         try:
             kb_count = int(
                 await self.db.scalar(
-                    select(func.count()).select_from(KnowledgeBase).where(KnowledgeBase.status != "deleted")
+                    select(func.count())
+                    .select_from(KnowledgeBase)
+                    .where(KnowledgeBase.status != "deleted")
                 )
                 or 0
             )
         except Exception:
             kb_count = 0
         try:
-            document_count = int(await self.db.scalar(select(func.count()).select_from(Document)) or 0)
+            document_count = int(
+                await self.db.scalar(select(func.count()).select_from(Document)) or 0
+            )
         except Exception:
             document_count = 0
         try:
@@ -136,7 +144,9 @@ class MonitorService:
 
             sessions = int(
                 await self.db.scalar(
-                    select(func.count()).select_from(QASession).where(QASession.status == "active")
+                    select(func.count())
+                    .select_from(QASession)
+                    .where(QASession.status == "active")
                 )
                 or 0
             )
@@ -176,7 +186,10 @@ class MonitorService:
                     )
                     .where(
                         QAMessage.role == "user",
-                        QAMessage.created_at >= datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc),
+                        QAMessage.created_at
+                        >= datetime.combine(
+                            start, datetime.min.time(), tzinfo=timezone.utc
+                        ),
                     )
                     .group_by(func.date(QAMessage.created_at))
                 )
@@ -205,19 +218,24 @@ class MonitorService:
                     select(
                         func.date(TestRuns.completed_at).label("d"),
                         func.coalesce(func.sum(TestRuns.hit_count), 0).label("hits"),
-                        func.coalesce(func.sum(TestRuns.total_questions), 0).label("total"),
+                        func.coalesce(func.sum(TestRuns.total_questions), 0).label(
+                            "total"
+                        ),
                     )
                     .where(
                         TestRuns.status == "completed",
                         TestRuns.completed_at.is_not(None),
                         TestRuns.completed_at
-                        >= datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc),
+                        >= datetime.combine(
+                            start, datetime.min.time(), tzinfo=timezone.utc
+                        ),
                     )
                     .group_by(func.date(TestRuns.completed_at))
                 )
             ).all()
             rates = {
-                str(r.d): (float(r.hits) / float(r.total) if int(r.total) > 0 else 0.0) for r in rows
+                str(r.d): (float(r.hits) / float(r.total) if int(r.total) > 0 else 0.0)
+                for r in rows
             }
         except Exception:
             logger.warning("hit_rate_trend_7d query failed", exc_info=True)

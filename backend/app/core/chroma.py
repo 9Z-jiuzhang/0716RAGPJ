@@ -1,4 +1,5 @@
 """Chroma Client-Server 连接管理：向量检索专用，支持多连接并发读取。"""
+
 from __future__ import annotations
 
 import logging
@@ -50,7 +51,9 @@ def close_chroma() -> None:
 def get_chroma_client() -> Any:
     """获取已初始化的 Chroma 客户端，供检索模块使用。"""
     if _chroma_client is None:
-        raise RuntimeError("Chroma 尚未初始化，请确认应用 lifespan 已调用 init_chroma()")
+        raise RuntimeError(
+            "Chroma 尚未初始化，请确认应用 lifespan 已调用 init_chroma()"
+        )
     return _chroma_client
 
 
@@ -64,9 +67,7 @@ def ping_chroma() -> bool:
         return False
     try:
         client = get_chroma_client()
-        if HttpClient is not None and isinstance(client, HttpClient):
-            client.heartbeat()
-            return True
-        return False
+        client.heartbeat()
+        return True
     except Exception:
         return False

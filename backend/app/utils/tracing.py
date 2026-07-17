@@ -1,4 +1,5 @@
 """请求追踪与性能计时工具：贯穿问答全流程的可观测标识。"""
+
 import time
 import uuid
 from contextlib import contextmanager

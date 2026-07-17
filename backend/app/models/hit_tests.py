@@ -1,4 +1,5 @@
 """命中率测试模型。"""
+
 import uuid
 from datetime import datetime
 
@@ -62,8 +63,12 @@ class TestQuestions(Base):
         nullable=False,
     )
     question: Mapped[str] = mapped_column(Text, nullable=False)
-    expected_doc_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
-    expected_chunk_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
+    expected_doc_ids: Mapped[list[uuid.UUID] | None] = mapped_column(
+        ARRAY(UUID(as_uuid=True))
+    )
+    expected_chunk_ids: Mapped[list[uuid.UUID] | None] = mapped_column(
+        ARRAY(UUID(as_uuid=True))
+    )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     case = relationship("TestCases", back_populates="questions")
@@ -87,11 +92,15 @@ class TestRuns(TimestampMixin, Base):
         UUID(as_uuid=True),
         ForeignKey("test_cases.id", ondelete="SET NULL"),
     )
-    kb_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=False)
+    kb_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False
+    )
     doc_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
     strategy: Mapped[str] = mapped_column(String(50), nullable=False)
     top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
-    similarity_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    similarity_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.5
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
     total_questions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

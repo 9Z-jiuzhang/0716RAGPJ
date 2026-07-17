@@ -21,8 +21,12 @@ class ModelConfig(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         String(20), nullable=False, index=True, comment="llm / embedding / rerank"
     )
     provider: Mapped[str] = mapped_column(String(50), nullable=False, comment="提供方")
-    model_name: Mapped[str] = mapped_column(String(200), nullable=False, comment="实际模型标识")
-    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="API Base URL")
+    model_name: Mapped[str] = mapped_column(
+        String(200), nullable=False, comment="实际模型标识"
+    )
+    base_url: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="API Base URL"
+    )
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     config: Mapped[dict[str, Any]] = mapped_column(

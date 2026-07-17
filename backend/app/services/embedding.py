@@ -43,7 +43,9 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         batch = texts[i : i + batch_size]
         # 空串替换，避免部分厂商拒绝
         normalized = [t if (t and t.strip()) else " " for t in batch]
-        resp = client.embeddings.create(model=settings.EMBEDDING_MODEL_NAME, input=normalized)
+        resp = client.embeddings.create(
+            model=settings.EMBEDDING_MODEL_NAME, input=normalized
+        )
         ordered = sorted(resp.data, key=lambda x: x.index)
         vectors.extend([item.embedding for item in ordered])
     return vectors
@@ -55,7 +57,9 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 class EmbeddingServiceError(Exception):
     """Embedding 调用失败时抛出的业务异常。"""
 
-    def __init__(self, message: str, *, status_code: Optional[int] = None, detail: Any = None):
+    def __init__(
+        self, message: str, *, status_code: Optional[int] = None, detail: Any = None
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.detail = detail
@@ -148,7 +152,9 @@ class EmbeddingService:
         try:
             items = data["data"]
         except (KeyError, TypeError) as exc:
-            raise EmbeddingServiceError("Embedding 响应缺少 data 字段", detail=data) from exc
+            raise EmbeddingServiceError(
+                "Embedding 响应缺少 data 字段", detail=data
+            ) from exc
 
         sorted_items = sorted(items, key=lambda x: x.get("index", 0))
         vectors: list[list[float]] = []

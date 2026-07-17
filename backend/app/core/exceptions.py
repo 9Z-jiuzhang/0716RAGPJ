@@ -41,7 +41,11 @@ class ValidationException(APIException):
 
 class KnowledgeBaseNotFoundException(NotFoundException):
     def __init__(self, kb_id: Optional[str] = None):
-        message = f"Knowledge base not found: {kb_id}" if kb_id else "Knowledge base not found"
+        message = (
+            f"Knowledge base not found: {kb_id}"
+            if kb_id
+            else "Knowledge base not found"
+        )
         super().__init__(message)
 
 
@@ -68,5 +72,9 @@ class PermissionDeniedException(ForbiddenException):
 
 class VectorizeTaskNotFoundException(NotFoundException):
     def __init__(self, task_id: Optional[str] = None):
-        message = f"Vectorize task not found: {task_id}" if task_id else "Vectorize task not found"
+        message = (
+            f"Vectorize task not found: {task_id}"
+            if task_id
+            else "Vectorize task not found"
+        )
         super().__init__(message)

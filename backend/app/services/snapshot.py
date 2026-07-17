@@ -42,7 +42,15 @@ from app.services.audit import AuditService
 from app.utils.snapshot_diff import compute_document_diff
 
 # 快照/差异时视为「当前有效」的文档状态（不含 archived）
-_ACTIVE_DOC_STATUSES = {"uploaded", "parsing", "processing", "pending_segment", "vectorizing", "ready", "error"}
+_ACTIVE_DOC_STATUSES = {
+    "uploaded",
+    "parsing",
+    "processing",
+    "pending_segment",
+    "vectorizing",
+    "ready",
+    "error",
+}
 
 
 class SnapshotService:
@@ -65,7 +73,9 @@ class SnapshotService:
             )
         )
         if kb_id_row is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在"
+            )
 
     async def _get_kb_or_404(
         self,
@@ -88,7 +98,9 @@ class SnapshotService:
         result = await self.db.execute(stmt)
         kb = result.scalar_one_or_none()
         if kb is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在"
+            )
         return kb
 
     @staticmethod
@@ -98,7 +110,9 @@ class SnapshotService:
 
     async def _load_kb_segment_rules(self, kb: KnowledgeBase) -> dict[str, Any]:
         """捕获知识库级完整分段规则（含 KbChunkRule）。"""
-        rule = await self.db.scalar(select(KbChunkRule).where(KbChunkRule.kb_id == kb.id))
+        rule = await self.db.scalar(
+            select(KbChunkRule).where(KbChunkRule.kb_id == kb.id)
+        )
         if rule is not None:
             return {
                 "chunk_size": rule.chunk_size,
@@ -186,9 +200,13 @@ class SnapshotService:
     def _to_list_item(self, snap: Snapshot) -> SnapshotListItem:
         # 列表接口不再加载 documents，优先用汇总列
         docs = getattr(snap, "documents", None) or []
-        doc_count = snap.document_count if snap.document_count is not None else len(docs)
+        doc_count = (
+            snap.document_count if snap.document_count is not None else len(docs)
+        )
         total_chunks = (
-            snap.chunk_count if snap.chunk_count is not None else sum(d.chunk_count for d in docs)
+            snap.chunk_count
+            if snap.chunk_count is not None
+            else sum(d.chunk_count for d in docs)
         )
         return SnapshotListItem(
             id=snap.id,
@@ -236,7 +254,9 @@ class SnapshotService:
             segment_rules=snap.segment_rules or cfg.get("segment_rules", {}),
         )
 
-    def _config_changes(self, kb: KnowledgeBase, snap: Snapshot) -> list[ConfigChangeItem]:
+    def _config_changes(
+        self, kb: KnowledgeBase, snap: Snapshot
+    ) -> list[ConfigChangeItem]:
         """预览配置层差异。"""
         cfg = snap.config_snapshot or {}
         kb_meta = cfg.get("kb") or {}
@@ -247,7 +267,11 @@ class SnapshotService:
             snapshot_val = kb_meta.get(field)
             if snapshot_val is not None and getattr(kb, field, None) != snapshot_val:
                 changes.append(
-                    ConfigChangeItem(field=field, current=getattr(kb, field, None), snapshot=snapshot_val)
+                    ConfigChangeItem(
+                        field=field,
+                        current=getattr(kb, field, None),
+                        snapshot=snapshot_val,
+                    )
                 )
 
         # 分段规则：统一用一条 segment_rules，避免与 chunk_size 字段重复
@@ -259,8 +283,12 @@ class SnapshotService:
             changes.append(
                 ConfigChangeItem(
                     field="segment_rules",
-                    current={"chunk_size": kb.chunk_size, "chunk_overlap": kb.chunk_overlap},
-                    snapshot=snap_rules or {"chunk_size": snap_size, "chunk_overlap": snap_overlap},
+                    current={
+                        "chunk_size": kb.chunk_size,
+                        "chunk_overlap": kb.chunk_overlap,
+                    },
+                    snapshot=snap_rules
+                    or {"chunk_size": snap_size, "chunk_overlap": snap_overlap},
                 )
             )
 
@@ -275,7 +303,9 @@ class SnapshotService:
         ]
         if snap_perms != cur_perms:
             changes.append(
-                ConfigChangeItem(field="permissions", current=cur_perms, snapshot=snap_perms)
+                ConfigChangeItem(
+                    field="permissions", current=cur_perms, snapshot=snap_perms
+                )
             )
         return changes
 
@@ -340,14 +370,20 @@ class SnapshotService:
 
         meta = snap_doc.doc_metadata or {}
         # 回退后要能进重建流水线：统一落到可转入 vectorizing 的状态
-        has_legacy_chunks = isinstance(meta.get("chunks"), list) and bool(meta.get("chunks"))
+        has_legacy_chunks = isinstance(meta.get("chunks"), list) and bool(
+            meta.get("chunks")
+        )
         has_text = bool(meta.get("normalized_text") or meta.get("raw_text"))
         if has_legacy_chunks or has_text:
             restored_status = "ready" if has_legacy_chunks else "pending_segment"
         else:
             restored_status = "uploaded"
 
-        rules = meta.get("segment_rules") if isinstance(meta.get("segment_rules"), dict) else None
+        rules = (
+            meta.get("segment_rules")
+            if isinstance(meta.get("segment_rules"), dict)
+            else None
+        )
         if not rules:
             rules = _default_segment_rules()
 
@@ -365,7 +401,9 @@ class SnapshotService:
                 existing.file_size = meta["file_size"]
             existing.segment_rules = rules
             if "normalized_text" in meta or "raw_text" in meta:
-                existing.normalized_text = meta.get("normalized_text") or meta.get("raw_text")
+                existing.normalized_text = meta.get("normalized_text") or meta.get(
+                    "raw_text"
+                )
                 existing.raw_text = meta.get("raw_text") or existing.raw_text
             doc = existing
         else:
@@ -402,7 +440,9 @@ class SnapshotService:
                     kb_id=kb.id,
                     chunk_index=int(item.get("chunk_index") or idx),
                     content=str(item.get("content") or ""),
-                    char_count=int(item.get("char_count") or len(str(item.get("content") or ""))),
+                    char_count=int(
+                        item.get("char_count") or len(str(item.get("content") or ""))
+                    ),
                     chunk_metadata=item.get("metadata") or {},
                     is_enabled=bool(item.get("is_enabled", True)),
                 )
@@ -434,9 +474,15 @@ class SnapshotService:
             )
         await self.db.flush()
 
-    async def _restore_kb_segment_rules(self, kb: KnowledgeBase, snap: Snapshot) -> None:
+    async def _restore_kb_segment_rules(
+        self, kb: KnowledgeBase, snap: Snapshot
+    ) -> None:
         """整库回退时恢复 KbChunkRule 与 KB 上的 chunk 字段。"""
-        rules = (snap.config_snapshot or {}).get("segment_rules") or snap.segment_rules or {}
+        rules = (
+            (snap.config_snapshot or {}).get("segment_rules")
+            or snap.segment_rules
+            or {}
+        )
         if not rules:
             return
         if rules.get("chunk_size") is not None:
@@ -444,7 +490,9 @@ class SnapshotService:
         if rules.get("chunk_overlap") is not None:
             kb.chunk_overlap = int(rules["chunk_overlap"])
 
-        rule = await self.db.scalar(select(KbChunkRule).where(KbChunkRule.kb_id == kb.id))
+        rule = await self.db.scalar(
+            select(KbChunkRule).where(KbChunkRule.kb_id == kb.id)
+        )
         if rule is None:
             rule = KbChunkRule(kb_id=kb.id)
             self.db.add(rule)
@@ -507,7 +555,9 @@ class SnapshotService:
         """变更前自动快照（供文档/权限等写操作调用）。"""
         kb = await self._get_kb_or_404(kb_id)
         trigger_val = trigger.value if isinstance(trigger, SnapshotTrigger) else trigger
-        auto_name = name or f"自动快照-{trigger_val}-{utcnow().strftime('%Y%m%d-%H%M%S')}"
+        auto_name = (
+            name or f"自动快照-{trigger_val}-{utcnow().strftime('%Y%m%d-%H%M%S')}"
+        )
         snap = await self._create_snapshot_internal(
             kb=kb,
             name=auto_name,
@@ -540,12 +590,16 @@ class SnapshotService:
             page_size=page_size,
         )
 
-    async def get_detail(self, kb_id: UUID, snapshot_id: UUID) -> SnapshotDetailResponse:
+    async def get_detail(
+        self, kb_id: UUID, snapshot_id: UUID
+    ) -> SnapshotDetailResponse:
         """快照详情。"""
         await self._ensure_kb_exists(kb_id)
         snap = await self.repo.get_by_id(snapshot_id, kb_id=kb_id)
         if snap is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="快照不存在")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="快照不存在"
+            )
         return self._to_detail(snap)
 
     def _build_preview(
@@ -570,7 +624,9 @@ class SnapshotService:
                     detail=f"document_ids 不在快照中: {[str(x) for x in unknown]}",
                 )
             snap_map = {k: v for k, v in snap_map.items() if k in allow}
-            current_map = {k: v for k, v in current_map.items() if k in allow or k in snap_map}
+            current_map = {
+                k: v for k, v in current_map.items() if k in allow or k in snap_map
+            }
 
         affected = compute_document_diff(current_map, snap_map)
         if document_ids is not None:
@@ -601,7 +657,9 @@ class SnapshotService:
         kb = await self._get_kb_or_404(kb_id)
         snap = await self.repo.get_by_id(snapshot_id, kb_id=kb_id)
         if snap is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="快照不存在")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="快照不存在"
+            )
         return self._build_preview(kb, snap, document_ids)
 
     async def run_policy_cleanup(
@@ -614,7 +672,9 @@ class SnapshotService:
     ) -> SnapshotCleanupResponse:
         """按 5.8.4 策略手动触发清理（保留天数 + 最大数量）。"""
         await self._ensure_kb_exists(kb_id)
-        expired = await self.repo.cleanup_expired(kb_id, settings.SNAPSHOT_RETENTION_DAYS)
+        expired = await self.repo.cleanup_expired(
+            kb_id, settings.SNAPSHOT_RETENTION_DAYS
+        )
         excess = await self.repo.cleanup_excess(kb_id, settings.SNAPSHOT_MAX_COUNT)
         remaining = await self.repo.count_active(kb_id)
         await self.audit.log(
@@ -664,7 +724,9 @@ class SnapshotService:
             )
         snap = await self.repo.get_by_id(snapshot_id, kb_id=kb_id)
         if snap is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="快照不存在")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="快照不存在"
+            )
 
         selective = body.document_ids is not None
         preview = self._build_preview(kb, snap, body.document_ids)
@@ -691,7 +753,9 @@ class SnapshotService:
         # 3) 恢复文档元数据与文本版本
         restored_ids: list[UUID] = []
         for snap_doc in target_docs:
-            doc = await self._restore_document_from_snap(kb, snap_doc, operator_id, current_map)
+            doc = await self._restore_document_from_snap(
+                kb, snap_doc, operator_id, current_map
+            )
             restored_ids.append(doc.id)
 
         # 4) 整库恢复：归档快照外文档 + 清理其向量 + 恢复 KB 配置与权限
@@ -721,7 +785,9 @@ class SnapshotService:
             await self._restore_permissions(kb, snap)
 
         # 5) 创建新索引版本（building），不覆盖历史、暂不激活
-        version_code = f"v{utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}-restore"
+        version_code = (
+            f"v{utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}-restore"
+        )
         total_chunks = sum(d.chunk_count for d in target_docs)
         index_version = IndexVersion(
             kb_id=kb.id,
@@ -805,13 +871,19 @@ class SnapshotService:
         """向量重建完成后原子激活索引版本（供回退重建 / 向量化模块调用）。"""
         kb = await self._get_kb_or_404(kb_id, for_update=True, load_relations=False)
         result = await self.db.execute(
-            select(IndexVersion).where(IndexVersion.kb_id == kb_id, IndexVersion.version == version)
+            select(IndexVersion).where(
+                IndexVersion.kb_id == kb_id, IndexVersion.version == version
+            )
         )
         target = result.scalar_one_or_none()
         if target is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="索引版本不存在")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="索引版本不存在"
+            )
         if target.status == IndexVersionStatus.FAILED.value:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="失败的索引版本不可激活")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="失败的索引版本不可激活"
+            )
 
         before = kb.current_index_version
         old_active = await self.db.execute(
@@ -865,7 +937,9 @@ class SnapshotService:
         await self._ensure_kb_exists(kb_id)
         snap = await self.repo.get_by_id(snapshot_id, kb_id=kb_id)
         if snap is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="快照不存在")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="快照不存在"
+            )
         if snap.trigger == SnapshotTrigger.ROLLBACK_PROTECTION.value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

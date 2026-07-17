@@ -11,7 +11,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.logging import request_id_ctx
-from app.core.metrics import http_request_duration_seconds, http_requests_total, normalize_path
+from app.core.metrics import (
+    http_request_duration_seconds,
+    http_requests_total,
+    normalize_path,
+)
 
 logger = logging.getLogger("app.access")
 error_logger = logging.getLogger("app.error")
@@ -20,7 +24,9 @@ error_logger = logging.getLogger("app.error")
 class ObservabilityMiddleware(BaseHTTPMiddleware):
     """注入 request_id、写访问日志、采集 Prometheus HTTP 指标。"""
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         token = request_id_ctx.set(request_id)
         started = time.perf_counter()
@@ -42,8 +48,12 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             path = normalize_path(request.url.path)
             # /metrics 自身不计入业务请求量，避免刮取噪声
             if path != "/metrics":
-                http_requests_total.labels(method=request.method, path=path, status=str(status_code)).inc()
-                http_request_duration_seconds.labels(method=request.method, path=path).observe(elapsed)
+                http_requests_total.labels(
+                    method=request.method, path=path, status=str(status_code)
+                ).inc()
+                http_request_duration_seconds.labels(
+                    method=request.method, path=path
+                ).observe(elapsed)
             logger.info(
                 "method=%s path=%s status=%s latency_ms=%.2f",
                 request.method,
