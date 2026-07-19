@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-
 from app.models.base import utcnow
 from app.services.session_expiry import expire_idle_sessions
 
