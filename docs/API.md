@@ -212,11 +212,11 @@ Authorization: Bearer <access_token>
 |------|------|------|------|
 | POST | `/users` | `user:write` | 创建用户（`201`）；未指定角色时默认 `guest` |
 | GET | `/users` | `user:read` | 分页；Query：`keyword`、`status`(active\|disabled\|pending) |
-| GET | `/users/{user_id}` | `user:read` | 详情 |
-| PUT | `/users/{user_id}` | `user:write` | 改昵称/邮箱/部门 |
-| DELETE | `/users/{user_id}` | `user:write` | 删除等级严格低于自己的用户 |
-| PATCH | `/users/{user_id}/status` | `user:write` | Body：`status`(active\|disabled\|pending) |
-| PUT | `/users/{user_id}/roles` | `user:write` | Body：`role_ids[]` 全量覆盖 |
+| GET | `/users/{id}` | `user:read` | 详情 |
+| PUT | `/users/{id}` | `user:write` | 改昵称/邮箱/部门 |
+| DELETE | `/users/{id}` | `user:write` | 删除等级严格低于自己的用户；成功 `data: {deleted:true}` |
+| PATCH | `/users/{id}/status` | `user:write` | Body：`status`(active\|disabled\|pending) |
+| PUT | `/users/{id}/roles` | `user:write` | Body：`role_ids[]` 全量覆盖 |
 
 **创建用户请求**（`AdminCreateUserRequest`）：`username`(3–50)、`password`(8–128)、`email`、`nickname?`(≤100)、`role_ids[]`（默认空 → `guest`）。
 
@@ -235,9 +235,9 @@ Authorization: Bearer <access_token>
 | GET | `/roles` | `role:read` | 分页列表 |
 | GET | `/roles/permissions` | `role:read` | 权限清单：`data` 为 `[{code, name, scope}]` |
 | POST | `/roles` | `role:write` | 创建（`201`） |
-| PUT | `/roles/{role_id}` | `role:write` | 改名称/描述/启停 |
-| DELETE | `/roles/{role_id}` | `role:write` | 内置禁删；仍有用户绑定 → `409` |
-| PUT | `/roles/{role_id}/permissions` | **仅超管** | `permission_codes[]` 全量覆盖；非超管 → `403` |
+| PUT | `/roles/{id}` | `role:write` | 改名称/描述/启停 |
+| DELETE | `/roles/{id}` | `role:write` | 内置禁删；仍有用户绑定 → `409` |
+| PUT | `/roles/{id}/permissions` | **仅超管** | `permission_codes[]` 全量覆盖；非超管 → `403` |
 
 **创建/更新角色请求**（`RoleRequest`）：`name`(2–100)、`description?`、`is_enabled`(默认 true)、`permission_codes[]`。
 

@@ -70,7 +70,7 @@ flowchart TB
     subgraph Observ["可观测性"]
         PROM["Prometheus :9090"]
         GRAF["Grafana :3001 (/grafana)"]
-        LF["Langfuse :3000 + langfuse-db :5433"]
+        LF["Langfuse Cloud<br/>(外部 SaaS)"]
     end
 
     Guest --> RP
@@ -87,7 +87,6 @@ flowchart TB
     API -->|/metrics| PROM
     API -->|traces / usage| LF
     PROM --> GRAF
-    LF --> LFDB[("langfuse-db :5433")]
 ```
 
 > Mermaid 图在 GitHub / 支持的 Markdown 预览中会自动渲染；纯文本环境可参考 [1.4 服务与端口](#14-服务与端口)。
@@ -146,8 +145,8 @@ nginx 反向代理 (reverse-proxy.conf, :8080)
 | minio | `minio/minio:latest` | 9000 / 9001 | 对象存储 API / 控制台 |
 | prometheus | `prom/prometheus:latest` | 9090 | 指标采集 |
 | grafana | `grafana/grafana:latest` | 3001→3000 | 面板（子路径 `/grafana`，允许匿名 Viewer + iframe） |
-| langfuse-server | `ghcr.io/langfuse/langfuse:latest` | 3000 | LLM 追踪 / 用量 |
-| langfuse-db | `postgres:16-alpine` | 5433→5432 | Langfuse 专用库（独立于业务库） |
+
+> LLM 追踪与用量监测对接 **Langfuse Cloud**（或任意兼容端点），通过 `.env` 的 `LANGFUSE_*` 配置；Compose **不再**内置 `langfuse-server` / `langfuse-db`。
 
 ---
 
@@ -270,7 +269,7 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 - **Prometheus**（`docker/prometheus/`）：15s 抓取 `api:8000/metrics`；`alerts.yml` 定义 `HighHTTPErrorRate`（5xx 占比 >5% 持续 5 分钟告警）。
 - **Grafana**（`docker/grafana/`）：预置 Prometheus 数据源与多张面板（overview / api_performance / llm_monitor / document_processing / qa_analysis / alerts），经 `/grafana` 子路径嵌入管理端监控页。
-- **Langfuse**：后端在问答生成时上报 model / prompt / completion / token 用量；`services/model_usage.py` 反向从 Langfuse Cloud `metrics/daily` 拉取用量（含 10 分钟 TTL 缓存与 429 限流降级），供管理端「模型用量监测」展示。
+- **Langfuse（云端）**：后端在问答生成时上报 model / prompt / completion / token 用量；`services/model_usage.py` 按 `LANGFUSE_HOST`（默认云端）拉取 `metrics/daily` 用量（含 10 分钟 TTL 缓存与 429 限流降级），供管理端「模型用量监测」展示。本地 Compose 不部署 Langfuse 容器。
 
 ---
 
@@ -283,8 +282,8 @@ cp .env.example .env
 # 2. 启动核心栈
 docker compose up -d --build postgres redis chroma minio api web nginx prometheus
 
-# 3.（可选）可观测组件（需 .env 中对应密钥齐全）
-docker compose up -d grafana langfuse-db langfuse-server
+# 3.（可选）Grafana 监控面板
+docker compose up -d grafana
 ```
 
 | 入口 | 地址 |
@@ -294,6 +293,8 @@ docker compose up -d grafana langfuse-db langfuse-server
 | API Swagger | http://localhost:8080/docs |
 | 健康检查 | http://localhost:8080/api/v1/monitor/health |
 | Grafana | http://localhost:8080/grafana/ |
+
+> Langfuse 用量/追踪请在 `.env` 配置 `LANGFUSE_HOST` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（云端或自建端点均可）。
 
 **内置账号**（种子数据，默认密码见 `core/seed_data.py`）：
 
@@ -381,7 +382,7 @@ pytest backend/tests -q
 **Windows 端口速查 / 释放**：
 
 ```powershell
-$ports = 8000,8080,5432,16379,8001,9000,9001,9090,3000,3001,5433
+$ports = 8000,8080,5432,16379,8001,9000,9001,9090,3001
 foreach ($p in $ports) { netstat -ano | findstr ":$p " | findstr LISTENING }
 docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
 ```
