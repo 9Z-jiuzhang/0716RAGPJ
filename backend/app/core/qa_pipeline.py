@@ -410,20 +410,19 @@ class QAPipeline:
                 user_id=user.id if user else None,
                 guest_id=guest_id if is_guest else None,
             )
+            # 从历史继续提问：expired → active，并重新绑定 Redis 归属
+            if session.status == "expired":
+                session.status = "active"
+                await session_store.bind_session_owner(
+                    session.id,
+                    user_id=user.id if user else None,
+                    guest_id=guest_id if is_guest else None,
+                )
             return session
 
-        # 访客：尝试复用 Redis 中当前会话
-        if is_guest and guest_id:
-            existing_id = await session_store.get_guest_session_id(guest_id)
-            if existing_id:
-                session = await db.scalar(
-                    select(QASession).where(
-                        QASession.id == uuid.UUID(existing_id),
-                        QASession.status == "active",
-                    )
-                )
-                if session is not None:
-                    return session
+        # 未显式传 session_id：始终新建会话。
+        # 不再按 guest_id 自动复用旧会话，避免重复打开页面后上下文膨胀、回答变慢。
+        # 多轮对话由前端在同页会话内携带 session_id 延续。
 
         # 创建新会话
         session = QASession(
@@ -701,6 +700,7 @@ class QAPipeline:
 
         session.message_count += 2
         session.last_active_at = utcnow()
+        session.status = "active"
         if session.title == "新会话" and question:
             session.title = self._default_title(question)
         if kb_ids:
@@ -717,7 +717,8 @@ class QAPipeline:
             ),
             assistant_message=ContextMessage(
                 role="assistant",
-                content=answer,
+                # 热上下文只保留最终回答，去掉推理块，避免多轮后提示词膨胀变慢
+                content=_strip_model_reasoning(answer) or answer[:2000],
                 message_id=str(assistant_msg_id),
                 citations=citations or None,
             ),

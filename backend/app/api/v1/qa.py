@@ -264,7 +264,7 @@ async def delete_session(
     session = await _get_owned_session(db, session_id, user)
     session.status = "deleted"
     await db.commit()
-    await session_store.delete_session_cache(session.id)
+    await session_store.delete_session_cache(session.id, guest_id=session.guest_id)
     return BaseResponse(message="会话已删除", request_id=request_id)
 
 

@@ -12597,7 +12597,7 @@
     "/qa/ask": {
       "post": {
         "summary": "发送问题（SSE）",
-        "description": "流式问答，Content-Type: text/event-stream。事件：chunk/citations/done/error。可选认证：未登录仅检索 GUEST（访客专用）部门知识库；登录用户按授权范围。可选请求头 X-Guest-Id 标识访客会话。",
+        "description": "流式问答，Content-Type: text/event-stream。事件：chunk/citations/done/error。可选认证：未登录仅检索 GUEST（访客专用）部门知识库；登录用户按授权范围。可选请求头 X-Guest-Id 仅用于访客归属标识，不传 session_id 时不会自动复用旧会话。闲置超时会话（status=expired）在携带 session_id 续聊时会重新激活为 active。",
         "tags": [
           "智能问答"
         ],
@@ -12804,7 +12804,7 @@
     "/qa/sessions": {
       "get": {
         "summary": "我的会话列表",
-        "description": "仅返回当前登录用户的会话。需登录。",
+        "description": "仅返回当前登录用户的会话（含 active 与闲置过期 expired，不含已删除）。需登录。",
         "tags": [
           "智能问答"
         ],
@@ -20033,7 +20033,7 @@
           "session_id": {
             "type": "string",
             "format": "uuid",
-            "description": "不传则创建新会话",
+            "description": "可选。不传则始终新建会话（不按 X-Guest-Id / Redis 自动复用旧会话）；传入已有会话 ID 可多轮续聊（含已闲置过期的会话，会重新激活）",
             "nullable": true
           },
           "kb_ids": {
@@ -20142,6 +20142,17 @@
               "medium",
               "low"
             ],
+            "nullable": true
+          },
+          "performance": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true,
+            "description": "done 事件可选性能字段（各阶段耗时等）"
+          },
+          "message": {
+            "type": "string",
+            "description": "error 事件错误信息",
             "nullable": true
           }
         }
@@ -20934,6 +20945,10 @@
             "type": "string",
             "example": "2.1.0"
           },
+          "uptime_seconds": {
+            "type": "integer",
+            "description": "进程已运行秒数"
+          },
           "checks": {
             "type": "object",
             "additionalProperties": {
@@ -20964,10 +20979,29 @@
             "type": "integer"
           },
           "active_sessions": {
-            "type": "integer"
+            "type": "integer",
+            "description": "status=active 的问答会话数（不含 expired/deleted）"
           },
           "task_queue_size": {
             "type": "integer"
+          },
+          "qa_trend_7d": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 7,
+            "maxItems": 7,
+            "description": "近 7 天每日用户提问数（含今天，升序）"
+          },
+          "hit_rate_trend_7d": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 7,
+            "maxItems": 7,
+            "description": "近 7 天每日命中率 0–1（含今天，升序）"
           }
         }
       }

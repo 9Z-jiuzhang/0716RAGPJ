@@ -187,6 +187,16 @@ function dispatchRender() {
 
 /* ========================= 问答首页 / ========================= */
 function pageChat() {
+  // 重新进入问答页时取消未完成流式请求，避免并发堆积变慢
+  if (askAbort) {
+    try {
+      askAbort.abort();
+    } catch {
+      /* ignore */
+    }
+    askAbort = null;
+  }
+
   renderShell("智能问答", { wide: true });
   const role = getPrimaryRole();
   const tip =
@@ -524,10 +534,6 @@ function pageAuth(initialTab = "login") {
           <button type="button" class="auth-tab ${initialTab === "register" ? "active" : ""}" data-tab="register">注册</button>
         </div>
         <div id="authPanel"></div>
-        <p class="text-muted" style="margin-top:12px;font-size:13px">
-          测试账号：<code>admin</code> / <code>Admin123!</code>　
-          <code>super</code> / <code>Super123!</code>
-        </p>
       </div>
       <button type="button" class="btn btn-text" data-go="/">以访客身份继续问答（仅公开库）</button>
     </div>

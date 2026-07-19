@@ -240,7 +240,7 @@ class SessionStore:
         await self._refresh_ttl(sid, is_guest=is_guest, guest_id=None)
 
     async def delete_session_cache(self, session_id: uuid.UUID, *, guest_id: str | None = None) -> None:
-        """删除会话全部 Redis 键（用户删除会话或访客过期清理）。"""
+        """删除会话全部 Redis 键（用户删除会话或闲置过期清理）。"""
         redis = get_redis_client()
         sid = str(session_id)
         await redis.delete(
@@ -248,8 +248,11 @@ class SessionStore:
             self._summary_key(sid),
             self._meta_key(sid),
         )
+        # 仅当访客映射仍指向本会话时清理，避免误删新会话绑定
         if guest_id:
-            await redis.delete(self._guest_key(guest_id))
+            current = await redis.get(self._guest_key(guest_id))
+            if current == sid:
+                await redis.delete(self._guest_key(guest_id))
 
     async def _refresh_ttl(
         self,

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -43,10 +44,35 @@ class SessionMemory:
     user_id: str | None = None
     guest_id: str | None = None
 
+    # 单条消息送入 LLM 的最大字符数，防止历史膨胀拖慢生成
+    _LLM_MSG_MAX_CHARS: ClassVar[int] = 2000
+
     @property
     def turn_count(self) -> int:
         """一问一答计为 1 轮。"""
         return len([m for m in self.messages if m.role == "user"])
+
+    @staticmethod
+    def _compact_for_llm(content: str) -> str:
+        """去掉推理标签并截断过长内容。"""
+        text = content or ""
+        text = re.sub(
+            r"<(?:redacted_thinking|think|thinking)>[\s\S]*?</(?:redacted_thinking|think|thinking)>",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"<(?:redacted_thinking|think|thinking)>[\s\S]*$",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = text.strip()
+        limit = SessionMemory._LLM_MSG_MAX_CHARS
+        if len(text) > limit:
+            return text[:limit] + "…"
+        return text
 
     def to_llm_messages(self) -> list[dict[str, str]]:
         """
@@ -56,13 +82,14 @@ class SessionMemory:
         """
         out: list[dict[str, str]] = []
         if self.summary and self.summary.strip():
+            summary = self._compact_for_llm(self.summary)
             out.append(
                 {
                     "role": "system",
-                    "content": ("以下是本会话较早轮次的压缩摘要，供理解上下文参考：\n" f"{self.summary.strip()}"),
+                    "content": ("以下是本会话较早轮次的压缩摘要，供理解上下文参考：\n" f"{summary}"),
                 }
             )
         for msg in self.messages:
             if msg.role in ("user", "assistant", "system") and msg.content.strip():
-                out.append({"role": msg.role, "content": msg.content})
+                out.append({"role": msg.role, "content": self._compact_for_llm(msg.content)})
         return out

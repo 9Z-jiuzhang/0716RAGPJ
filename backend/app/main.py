@@ -1,6 +1,8 @@
 """FastAPI 应用入口：生命周期、种子数据、可观测性与模块路由挂载。"""
 
+import asyncio
 import os
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -42,6 +44,7 @@ from .models.model_config import ModelConfig
 from .services.embedding import embedding_service
 from .services.langfuse_service import get_langfuse
 from .services.llm import llm_service
+from .services.session_expiry import session_expiry_loop
 
 
 async def _all_permissions(db: AsyncSession) -> list[Permission]:
@@ -295,7 +298,23 @@ async def lifespan(_: FastAPI):
     except Exception:
         # Chroma 暂不可用时不阻断 API 启动（健康检查会标记 degraded）
         pass
+
+    stop_expiry = asyncio.Event()
+    expiry_task: asyncio.Task | None = None
+    # 测试环境不启后台扫描，避免干扰用例与连接生命周期
+    if "pytest" not in sys.modules and not os.environ.get("PYTEST_CURRENT_TEST"):
+        expiry_task = asyncio.create_task(session_expiry_loop(stop_expiry), name="session-expiry")
+
     yield
+
+    stop_expiry.set()
+    if expiry_task is not None:
+        expiry_task.cancel()
+        try:
+            await expiry_task
+        except asyncio.CancelledError:
+            pass
+
     get_langfuse().flush()
     await llm_service.aclose()
     await embedding_service.aclose()

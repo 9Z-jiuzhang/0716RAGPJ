@@ -1,6 +1,0 @@
-A1 cites=0 conf=low chunk_len=1862 notice=True
-A1 ans_prefix=【知识库未命中】未在您当前授权的知识库中找到与问题相关的文档依据，以下内容仅供参考，不代表企业知识库官方答复，也不是知识库引用。
-
-<think>The user is asking about annual leave (年假) days
-B1 cites=0 conf=low notice=True chunk_len=2499
-B1 prefix=【知识库未命中】未在您当前授权的知识库中找到与问题相关的文档依据，以下内容仅供参考，不代表企业知识库官方答复，也不是知识库引用。 /  / <think>The user is asking about how to calculate the strike price (exercise price) of company stock options. The k

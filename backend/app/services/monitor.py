@@ -128,7 +128,7 @@ class MonitorService:
         except Exception:
             queue_size = 0
 
-        # 活跃会话：统计未关闭的问答会话
+        # 活跃会话：未关闭且未闲置过期的问答会话
         sessions = 0
         try:
             from app.models.qa import QASession

@@ -75,8 +75,8 @@ class Settings(BaseSettings):
     RERANK_API_KEY: str = ""
     RERANK_MODEL: str = ""
 
-    # ---------- Langfuse ----------
-    LANGFUSE_HOST: str = "http://langfuse-server:3000"
+    # ---------- Langfuse（云端或自建兼容端点；Compose 不含 Langfuse 容器） ----------
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_REDACT_MAX_LEN: int = 500
@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     # ---------- 智能问答与会话记忆（产品手册 5.6） ----------
     QA_CONTEXT_WINDOW: int = 10
     QA_SESSION_TTL_MINUTES: int = 30
+    # 闲置超过该分钟数的 active 会话 → expired（清 Redis，历史仍可查）
+    QA_SESSION_IDLE_EXPIRE_MINUTES: int = 30
+    # 后台扫描闲置会话的间隔（秒）
+    QA_SESSION_EXPIRE_SWEEP_SECONDS: int = 60
     QA_DEFAULT_STRATEGY: str = "hybrid"
     QA_DEFAULT_TOP_K: int = 5
     QA_RELEVANCE_THRESHOLD: float = 0.3

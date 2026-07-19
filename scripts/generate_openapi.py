@@ -742,7 +742,11 @@ schemas["AskRequest"] = {
     "required": ["question"],
     "properties": {
         "question": prop("string", minLength=1, maxLength=2000, example="如何配置知识库权限？"),
-        "session_id": uuid_prop("不传则创建新会话", nullable=True),
+        "session_id": uuid_prop(
+            "可选。不传则始终新建会话（不按 X-Guest-Id / Redis 自动复用旧会话）；"
+            "传入已有会话 ID 可多轮续聊（含已闲置过期的会话，会重新激活）",
+            nullable=True,
+        ),
         "kb_ids": {
             "type": "array",
             "items": uuid_prop(),
@@ -776,6 +780,13 @@ schemas["AskEventResponse"] = {
         "message_id": uuid_prop(nullable=True),
         "request_id": prop("string", nullable=True),
         "confidence": prop("string", enum=["high", "medium", "low"], nullable=True),
+        "performance": {
+            "type": "object",
+            "nullable": True,
+            "additionalProperties": True,
+            "description": "done 事件可选性能字段（各阶段耗时等）",
+        },
+        "message": prop("string", "error 事件错误信息", nullable=True),
     },
 }
 schemas["SessionResponse"] = {
@@ -1064,6 +1075,7 @@ schemas["HealthResponse"] = {
     "properties": {
         "status": prop("string", enum=["healthy", "degraded", "unhealthy"]),
         "version": prop("string", example="2.1.0"),
+        "uptime_seconds": prop("integer", description="进程已运行秒数"),
         "checks": {
             "type": "object",
             "additionalProperties": {
@@ -1080,8 +1092,25 @@ schemas["SystemStatsResponse"] = {
         "user_count": prop("integer"),
         "kb_count": prop("integer"),
         "doc_count": prop("integer"),
-        "active_sessions": prop("integer"),
+        "active_sessions": prop(
+            "integer",
+            description="status=active 的问答会话数（不含 expired/deleted）",
+        ),
         "task_queue_size": prop("integer"),
+        "qa_trend_7d": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 7,
+            "maxItems": 7,
+            "description": "近 7 天每日用户提问数（含今天，升序）",
+        },
+        "hit_rate_trend_7d": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 7,
+            "maxItems": 7,
+            "description": "近 7 天每日命中率 0–1（含今天，升序）",
+        },
     },
 }
 
@@ -1639,7 +1668,8 @@ paths["/qa/ask"] = {
         "发送问题（SSE）",
         "流式问答，Content-Type: text/event-stream。事件：chunk/citations/done/error。"
         "可选认证：未登录仅检索 GUEST（访客专用）部门知识库；登录用户按授权范围。"
-        "可选请求头 X-Guest-Id 标识访客会话。",
+        "可选请求头 X-Guest-Id 仅用于访客归属标识，不传 session_id 时不会自动复用旧会话。"
+        "闲置超时会话（status=expired）在携带 session_id 续聊时会重新激活为 active。",
         ["智能问答"],
         public=True,
         security=[{"BearerAuth": []}, {}],
@@ -1656,7 +1686,7 @@ paths["/qa/ask"] = {
 paths["/qa/sessions"] = {
     "get": op(
         "我的会话列表",
-        "仅返回当前登录用户的会话。需登录。",
+        "仅返回当前登录用户的会话（含 active 与闲置过期 expired，不含已删除）。需登录。",
         ["智能问答"],
         parameters=page_params(),
         responses={**resp("成功", page_of(ref("SessionResponse"))), **err_resps(401, 500)},

@@ -116,7 +116,8 @@ nginx 反向代理 (reverse-proxy.conf, :8080)
 ```text
 问题输入
   │
-  ├─[会话] 解析/新建 QASession（登录用户按 user_id，访客按 guest_id + Redis）
+  ├─[会话] 有 session_id → 校验归属并续聊（expired 自动恢复 active）；无 session_id → 始终新建
+  │         （X-Guest-Id 仅访客归属，不自动复用旧会话）
   ├─[范围] resolve_kb_targets：按身份计算可访问且已建索引的知识库
   ├─[记忆] 从 Redis 热态（或回填 PostgreSQL 历史）加载最近 N 轮 + 摘要
   ├─[改写] LLM 结合历史改写查询（失败/过长则回退原问）
@@ -130,6 +131,8 @@ nginx 反向代理 (reverse-proxy.conf, :8080)
      ▼
   SSE 事件：chunk（增量文本）→ citations（引用来源）→ done（session_id/message_id/confidence）
             出错时 error
+
+闲置超过 `QA_SESSION_IDLE_EXPIRE_MINUTES` 的会话由后台扫描标为 `expired` 并清理 Redis；历史仍可查看，续聊可重新激活。
 ```
 
 ### 1.4 服务与端口
@@ -225,7 +228,7 @@ app/
 | `staff` | `qa:ask` + 授权范围内 KB 上传/向量化/文档/分段/测试/快照 |
 | `guest` | 仅 `qa:ask` + `kb:read`（GUEST 部门知识库）；注册与管理员创建用户的默认角色 |
 
-角色等级：`super_admin > admin > staff > guest`；仅可启停/删除/改角色等级严格低于自己的用户。旧内置角色 `user` 已废弃并迁移为 `guest`。
+角色等级：`super_admin > admin > staff > guest`；仅可启停/删除/改角色等级严格低于自己的用户。旧内置角色 `user` 已废弃并迁移为 `guest`；旧内置角色 `kb_admin` 已废弃并迁移为 `staff`。
 
 ### 2.4 文档处理流水线
 
@@ -296,7 +299,7 @@ docker compose up -d grafana
 
 > Langfuse 用量/追踪请在 `.env` 配置 `LANGFUSE_HOST` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（云端或自建端点均可）。
 
-**内置账号**（种子数据，默认密码见 `core/seed_data.py`）：
+**内置账号**（种子数据，默认密码在 `backend/app/main.py` 的 `seed_identity_data`）：
 
 | 账号 | 角色 | 默认密码 | 说明 |
 |------|------|----------|------|
@@ -332,11 +335,11 @@ pytest backend/tests -q
 | LLM | `LLM_PROVIDER=openai`、`LLM_API_KEY`、`LLM_MODEL=gpt-4o`、`LLM_BASE_URL`、`LLM_TIMEOUT_SECONDS=120`、`LLM_MAX_TOKENS=2048` |
 | Embedding | `EMBEDDING_PROVIDER=dashscope`、`EMBEDDING_API_KEY`、`EMBEDDING_MODEL_NAME=text-embedding-v3`、`EMBEDDING_API_BASE`、`EMBEDDING_BATCH_SIZE=10` |
 | Rerank（可选） | `RERANK_PROVIDER`、`RERANK_API_KEY`、`RERANK_MODEL` |
-| Langfuse | `LANGFUSE_HOST`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`LANGFUSE_REDACT_MAX_LEN=500` |
+| Langfuse | `LANGFUSE_HOST`（默认云端）、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`LANGFUSE_REDACT_MAX_LEN=500` |
 | JWT | `JWT_SECRET_KEY`、`JWT_ALGORITHM=HS256`、`ACCESS_TOKEN_EXPIRE_MINUTES=30`、`REFRESH_TOKEN_EXPIRE_DAYS=7` |
 | 快照 | `SNAPSHOT_MAX_COUNT=50`、`SNAPSHOT_RETENTION_DAYS=90` |
 | 上传 | `MAX_UPLOAD_BYTES=104857600`（100MB）、`VIRUS_SCAN_ENABLED=false` |
-| 问答/记忆 | `QA_CONTEXT_WINDOW=10`、`QA_SESSION_TTL_MINUTES=30`、`QA_DEFAULT_STRATEGY=hybrid`、`QA_DEFAULT_TOP_K=5`、`QA_RELEVANCE_THRESHOLD=0.3`、`QA_RRF_K=60`、`QA_GUEST_SESSION_TTL_MINUTES=30` |
+| 问答/记忆 | `QA_CONTEXT_WINDOW=10`、`QA_SESSION_TTL_MINUTES=30`、`QA_SESSION_IDLE_EXPIRE_MINUTES=30`、`QA_SESSION_EXPIRE_SWEEP_SECONDS=60`、`QA_DEFAULT_STRATEGY=hybrid`、`QA_DEFAULT_TOP_K=5`、`QA_RELEVANCE_THRESHOLD=0.3`、`QA_RRF_K=60`、`QA_GUEST_SESSION_TTL_MINUTES=30` |
 
 > **安全提示**：模型 API Key 通过 `ModelConfig.api_key_env`（环境变量**名**）引用，**不落库、不在接口明文返回**。
 
@@ -373,7 +376,7 @@ pytest backend/tests -q
 
 | 脚本 | 位置 | 用途 |
 |------|------|------|
-| `e2e_real_stack.ps1` | `scripts/` | 禁用 Mock 的真实全栈 E2E：health → login → KB → 上传 → ready 轮询 → 命中率 → 快照 → SSE 问答，结果写 `e2e_results.json` |
+| `e2e_real_stack.ps1` | `scripts/` | 禁用 Mock 的真实全栈 E2E：health → login → KB → 上传 → ready 轮询 → 命中率 → 快照 → SSE 问答，结果写本地 `e2e_results.json`（已 gitignore） |
 | `verify_qa_stack.ps1` | `scripts/` | QA 模块冒烟：拉起核心栈、迁移、访客 SSE 问答、`:8080` 入口健康检查 |
 | `generate_openapi.py` | `scripts/` | 生成 `docs/openapi.json`（OpenAPI 3.0.3 契约） |
 | `seed_qa_test_kb.py` | `scripts/` | 从 `testdata/qa_kb/*.md` 灌入测试知识库（依赖 PostgreSQL 全文，无需 Chroma） |

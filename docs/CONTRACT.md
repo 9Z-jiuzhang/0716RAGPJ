@@ -19,7 +19,8 @@
 - **认证**：`Authorization: Bearer <access_token>`（JWT）。标注为 `public` 或含可选 `BearerAuth`（如 `/qa/ask`）的接口允许匿名/可选认证。
 - **统一响应**：除 SSE、CSV 导出、Prometheus `/metrics` 外，JSON 接口统一包装为 `{code, message, data, request_id}`。
 - **分页**：`data` 为 `{items, total, page, page_size}`；查询参数 `page`（默认 1）、`page_size`（默认 20，部门列表 50、会话消息 50，上限 100）。
-- **SSE**：`POST /qa/ask` 返回 `text/event-stream`，事件类型 `chunk / citations / done / error`。
+- **SSE**：`POST /qa/ask` 返回 `text/event-stream`，事件类型 `chunk / citations / done / error`。不传 `session_id` 始终新建会话；`X-Guest-Id` 仅标识归属，不自动复用旧会话。
+- **会话闲置过期**：超过 `QA_SESSION_IDLE_EXPIRE_MINUTES` 未问答 → `status=expired` 并清 Redis；历史列表仍可见；续聊携带 `session_id` 可重新激活。管理员「活跃会话」仅计 `active`。
 - **文件上传**：`multipart/form-data`（字段 `file`），上限 100MB（`413`）。
 - **访问控制**：知识库可见性以**部门**驱动（`GUEST`=访客专用）；角色等级 `super_admin > admin > staff/guest`，仅可管理权限低于自己的用户。
 - **角色权限配置**：`PUT /roles/{id}/permissions` **仅超级管理员**可调用。

@@ -65,9 +65,13 @@ export function dispatch() {
   if (notFound) notFound.handler({ path, params: {}, query: {} });
 }
 
-/** 启动监听 */
+/** 启动监听（幂等，避免重复绑定 hashchange） */
+let routerStarted = false;
 export function startRouter() {
-  window.addEventListener("hashchange", dispatch);
+  if (!routerStarted) {
+    window.addEventListener("hashchange", dispatch);
+    routerStarted = true;
+  }
   // 无 hash 时默认首页
   if (!location.hash) location.hash = "#/";
   else dispatch();

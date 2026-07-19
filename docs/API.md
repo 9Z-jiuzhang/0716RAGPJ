@@ -379,7 +379,7 @@ Authorization: Bearer <access_token>
 ### 10.1 发送问题（SSE）
 
 - `POST /qa/ask` — **可选认证**（访客可访问，功能对应 `qa:ask`）
-- 可选请求头：`X-Guest-Id`（访客标识）、`X-Request-Id`
+- 可选请求头：`X-Guest-Id`（访客归属标识，不自动复用旧会话）、`X-Request-Id`
 - **响应**：`Content-Type: text/event-stream; charset=utf-8`（`Cache-Control: no-cache`、`X-Accel-Buffering: no`）
 
 **请求体**（`AskRequest`）：
@@ -387,7 +387,7 @@ Authorization: Bearer <access_token>
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | question | 是 | 1–2000 字符 |
-| session_id | 否 | 不传则新建会话 |
+| session_id | 否 | 不传则**始终新建会话**（不按 `X-Guest-Id` 自动复用）；传入则可多轮续聊（含已闲置过期的会话，会重新激活） |
 | kb_ids | 否 | 限定知识库；默认全部可访问范围（与可访问集取交集） |
 | strategy | 否 | `hybrid`(默认) / `vector` / `fulltext` |
 | top_k | 否 | 默认 5（1–20） |
@@ -424,7 +424,12 @@ Authorization: Bearer <access_token>
 
 - **会话项**：`id`、`title`、`kb_names[]`、`message_count`、`created_at`、`updated_at`。
 - **消息项**：`id`、`role`、`content`、`citations`、`token_count`、`created_at`、`request_id`、`strategy`、`latency_ms`。
-- 访客会话以 `guest_id` + Redis 短期保存（TTL `QA_GUEST_SESSION_TTL_MINUTES`）；长期历史仅登录用户；只能访问本人会话。
+- **会话生命周期**（`QASession.status`）：
+  - `active`：进行中；管理员「活跃会话」仅统计此类。
+  - `expired`：闲置超过 `QA_SESSION_IDLE_EXPIRE_MINUTES`（默认 30）未问答，由后台按 `QA_SESSION_EXPIRE_SWEEP_SECONDS` 扫描标记；同时清理 Redis 热缓存。**历史列表与消息查询仍包含 expired**（仅排除 `deleted`）。
+  - `deleted`：用户软删除。
+  - 携带 `session_id` 对 `expired` 会话继续提问 → 自动恢复为 `active`，并从 PG 回填上下文。
+- 访客：请求可带 `X-Guest-Id` 做归属；会话与消息仍落 PG；Redis 仅作热缓存（TTL `QA_GUEST_SESSION_TTL_MINUTES`）。**长期历史列表仅登录用户**；只能访问本人会话。
 
 ---
 
@@ -490,8 +495,8 @@ Authorization: Bearer <access_token>
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`checks` 含 postgres/redis/chroma/langfuse 连通性 |
-| GET | `/monitor/stats` | `system:read` | 用户数、库数、文档数、活跃会话、任务队列、近 7 天问答与命中率趋势 |
+| GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`uptime_seconds`；`checks` 含 postgres/redis/chroma/langfuse 连通性 |
+| GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d`、`hit_rate_trend_7d` |
 | GET | `/metrics`（应用根，非 `/api/v1`） | 内部 | Prometheus 文本指标，**不走统一包装** |
 
 > `/api/v1/monitor/metrics` 为 `307` 重定向到 `/metrics`（隐藏于 schema）。
@@ -516,6 +521,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.0 | 2026-07-19 | 补充会话闲置过期（active→expired）、访客不自动复用会话、`active_sessions` 定义；对齐 Langfuse 云端配置说明 |
 | 2.1.0 | 2026-07-17 | 契约迁入 `docs/`；补充用户删除、角色等级与分配规则；`admin` 不含 `role:write`；默认角色改为 `guest`；废弃 `user` 角色 |
 | 2.1.0 | 2026-07-17 | 全面对齐当前实现：新增部门管理与部门驱动访问控制、模型用量监测（Langfuse）、文档内容预览/分段预览/失败重试、命中率多策略对比与运行删除、快照清理与选择性回退；刷新全部字段与约束 |
 | 2.1.0 | 2026-07-16 | 框架阶段首版契约与中文说明 |
