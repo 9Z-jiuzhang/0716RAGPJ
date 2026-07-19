@@ -119,6 +119,27 @@
   max-width: 220px;
 }
 
+/* 表格操作列：按钮同一行，不换行 */
+.table-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.table th.col-builtin,
+.table td.col-builtin {
+  white-space: nowrap;
+  width: 1%;
+}
+
+.table th.col-actions,
+.table td.col-actions {
+  white-space: nowrap;
+  width: 1%;
+}
+
 /* 详情双栏 */
 .detail-grid {
   display: grid;

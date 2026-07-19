@@ -33,7 +33,6 @@ ROLE_DISPLAY_NAMES: dict[str, str] = {
     "admin": "管理员",
     "staff": "员工",
     "guest": "访客",
-    "kb_admin": "知识库维护员",
 }
 
 # 内置角色 -> (描述, 权限 code 列表；"*" 表示全部)
@@ -87,22 +86,4 @@ BUILTIN_ROLES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "guest": ("访客，仅可检索公开知识库并问答", ["qa:ask", "kb:read"]),
-    # 兼容旧库中的角色名（等同员工）
-    "kb_admin": (
-        "知识库维护员（兼容旧角色，等同员工）",
-        [
-            "qa:ask",
-            "kb:read",
-            "kb:upload",
-            "kb:vectorize",
-            "doc:read",
-            "doc:write",
-            "doc:segment",
-            "test:read",
-            "test:write",
-            "snapshot:read",
-            "snapshot:write",
-            "snapshot:restore",
-        ],
-    ),
 }

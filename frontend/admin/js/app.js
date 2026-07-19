@@ -223,7 +223,7 @@ async function pageDashboard() {
 function roleLabelOf(u) {
   if (Array.isArray(u.role_labels) && u.role_labels.length) return u.role_labels.join("、");
   const names = (u.roles || [u.role]).filter(Boolean);
-  const map = { super_admin: "超级管理员", admin: "管理员", staff: "员工", guest: "访客", user: "注册用户", kb_admin: "知识库维护员" };
+  const map = { super_admin: "超级管理员", admin: "管理员", staff: "员工", guest: "访客" };
   return names.map((n) => map[n] || n).join("、") || "-";
 }
 
@@ -247,7 +247,7 @@ function openUserRolePicker({ user, roles, departments = [], onSave }) {
   // 超管可分配 admin / super_admin；普通管理员不可分配 admin 或超管
   const options = (roles || [])
     .filter((r) => {
-      if (r.name === "user") return false; // 已废弃，等同访客
+      if (r.name === "user" || r.name === "kb_admin") return false;
       if (iAmSuper) return true;
       return r.name !== "super_admin" && r.name !== "admin";
     })
@@ -302,7 +302,7 @@ async function openCreateUserForm() {
       loadDepartmentOptions(),
     ]);
     roles = (roleData.items || []).filter((r) => {
-      if (r.name === "user") return false;
+      if (r.name === "user" || r.name === "kb_admin") return false;
       if (isSuperAdmin()) return true;
       return r.name !== "super_admin" && r.name !== "admin";
     });
@@ -404,7 +404,6 @@ async function pageUsers() {
         <div class="toolbar"><strong>用户列表</strong><span class="spacer"></span>
           <span class="text-muted">${canWrite ? "可新增用户、启用/禁用、变更角色、删除权限更低的用户" : "只读"}</span>
           ${canWrite ? `<button class="btn btn-sm" id="btnNewUser">新增用户</button>` : ""}
-          <input class="form-control" id="userKw" style="width:200px;height:32px" placeholder="搜索账号/昵称" />
         </div>
         <div class="table-wrap"><table class="table">
           <thead><tr><th>账号</th><th>昵称</th><th>状态</th><th>角色</th><th>部门</th><th>创建时间</th><th>最近登录</th><th>操作</th></tr></thead>
@@ -611,10 +610,10 @@ async function pageRoles() {
         </div>
         <p class="text-muted" style="margin:0 0 12px">内置：超级管理员 / 管理员 / 员工 / 访客。仅超级管理员可配置角色权限；普通管理员不可修改「超级管理员」角色。</p>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>中文名</th><th>标识</th><th>说明</th><th>内置</th><th>权限数</th><th>操作</th></tr></thead>
+          <thead><tr><th>中文名</th><th>标识</th><th>说明</th><th class="col-builtin">内置</th><th>权限数</th><th class="col-actions">操作</th></tr></thead>
           <tbody>
             ${items
-              .filter((r) => r.name !== "user")
+              .filter((r) => r.name !== "user" && r.name !== "kb_admin")
               .map((r) => {
                 const isSuperRole = r.name === "super_admin";
                 const canEditThis = canWrite && (isSuperAdmin() || !isSuperRole);
@@ -623,12 +622,14 @@ async function pageRoles() {
                   <td><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
                   <td><code>${escapeHtml(r.name)}</code></td>
                   <td>${escapeHtml(r.description || "")}</td>
-                  <td>${r.is_builtin ? `<span class="badge">内置</span>` : "-"}</td>
+                  <td class="col-builtin">${r.is_builtin ? `<span class="badge">内置</span>` : "-"}</td>
                   <td>${(r.permissions || []).length}</td>
-                  <td>
-                    <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
-                    ${canConfigPerms ? `<button class="btn btn-secondary btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
-                    ${!r.is_builtin && canEditThis ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
+                  <td class="col-actions">
+                    <div class="table-actions">
+                      <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
+                      ${canConfigPerms ? `<button class="btn btn-secondary btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
+                      ${!r.is_builtin && canEditThis ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
+                    </div>
                   </td>
                 </tr>`;
               })
@@ -702,7 +703,7 @@ async function pageRoles() {
 
     document.querySelectorAll("[data-del]").forEach((btn) => {
       btn.onclick = async () => {
-        const ok = await confirmDialog({ title: "删除角色", message: "内置角色不可删；确定删除该角色？", confirmText: "删除" });
+        const ok = await confirmDialog({ title: "删除角色", message: "确定删除该角色？", confirmText: "删除" });
         if (!ok) return;
         try {
           await api.delete(`/roles/${btn.getAttribute("data-del")}`);

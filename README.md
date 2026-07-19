@@ -222,7 +222,7 @@ app/
 |------|----------|
 | `super_admin` | 全部（含 `model:write`、角色权限配置与超管控制），权限码 `*` |
 | `admin` | 用户/部门/知识库/文档/快照/审计/系统管理；含 `role:read`，**不含** `role:write`、`model:write`；不可操作超管、不可配置角色权限 |
-| `staff`（≈ 旧 `kb_admin`） | `qa:ask` + 授权范围内 KB 上传/向量化/文档/分段/测试/快照 |
+| `staff` | `qa:ask` + 授权范围内 KB 上传/向量化/文档/分段/测试/快照 |
 | `guest` | 仅 `qa:ask` + `kb:read`（GUEST 部门知识库）；注册与管理员创建用户的默认角色 |
 
 角色等级：`super_admin > admin > staff > guest`；仅可启停/删除/改角色等级严格低于自己的用户。旧内置角色 `user` 已废弃并迁移为 `guest`。

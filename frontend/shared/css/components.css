@@ -251,6 +251,7 @@ textarea.form-control {
   line-height: 1.4;
   background: #E8F0FE;
   color: var(--color-primary-dark);
+  white-space: nowrap;
 }
 
 .badge-success {

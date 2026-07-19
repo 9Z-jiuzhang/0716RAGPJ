@@ -149,6 +149,24 @@ async def seed_identity_data() -> None:
                 u.roles = remaining or [roles["guest"]]
             await db.delete(legacy_user_role)
 
+        # 废弃旧「kb_admin」角色：迁移到 staff 后删除（与员工功能重复）
+        legacy_kb_admin = await db.scalar(select(Role).where(Role.name == "kb_admin"))
+        if legacy_kb_admin and "staff" in roles:
+            from .models.identity import user_roles
+
+            bound_user_ids = (
+                await db.scalars(select(user_roles.c.user_id).where(user_roles.c.role_id == legacy_kb_admin.id))
+            ).all()
+            for uid in bound_user_ids:
+                u = await db.scalar(select(User).options(selectinload(User.roles)).where(User.id == uid))
+                if not u:
+                    continue
+                remaining = [r for r in u.roles if r.name != "kb_admin"]
+                if not any(r.name == "staff" for r in remaining):
+                    remaining.append(roles["staff"])
+                u.roles = remaining or [roles["staff"]]
+            await db.delete(legacy_kb_admin)
+
         await db.commit()
 
 

@@ -35,6 +35,20 @@ let askAbort = null;
 /** 待从历史打开的会话 ID（跳转问答页后由 pageChat 加载） */
 let pendingOpenSessionId = null;
 
+/** 登录/退出后清空本地会话上下文，避免沿用上一身份的 session_id */
+function resetLocalChatContext() {
+  currentSessionId = null;
+  pendingOpenSessionId = null;
+  if (askAbort) {
+    try {
+      askAbort.abort();
+    } catch {
+      /* ignore */
+    }
+    askAbort = null;
+  }
+}
+
 /**
  * 拆分模型推理标签与最终回答。
  * 兼容 <think> / <think> / <thinking>，含流式未闭合。
@@ -150,6 +164,7 @@ function renderShell(activeTitle, { wide = false } = {}) {
       const ok = await confirmDialog({ title: "退出登录", message: "确定退出当前账号吗？", confirmText: "退出" });
       if (!ok) return;
       clearAuth();
+      resetLocalChatContext();
       toast("已退出", "success");
       // 退出后直接回到独立登录页
       navigate("/login");
@@ -391,11 +406,17 @@ async function sendQuestion() {
     }
   };
 
-  try {
+  const runAsk = async (sessionId) => {
+    citationsHtml = "";
+    confidenceTip = "";
+    hasTraces = false;
+    rawAssistantText = "";
+    bubble.innerHTML = "";
+    clearReasoningPanel();
     await askStream(
       {
         question,
-        session_id: currentSessionId || undefined,
+        session_id: sessionId || undefined,
         // 不传 kb_ids：由后端按访客/登录身份过滤范围
       },
       {
@@ -451,13 +472,33 @@ async function sendQuestion() {
           }
           // 错误
           if (event === "error") {
-            bubble.innerHTML = `<span class="text-danger">${escapeHtml(data.message || data || "问答失败")}</span>`;
+            const msg = data.message || data || "问答失败";
+            // 身份切换后沿用旧会话时后端返回无权访问：清会话并新建一次
+            if (typeof msg === "string" && msg.includes("无权访问") && sessionId) {
+              throw Object.assign(new Error(msg), { code: "SESSION_FORBIDDEN" });
+            }
+            bubble.innerHTML = `<span class="text-danger">${escapeHtml(msg)}</span>`;
           }
         },
       }
     );
+  };
+
+  try {
+    await runAsk(currentSessionId);
   } catch (err) {
     if (err.name === "AbortError") return;
+    if (err.code === "SESSION_FORBIDDEN" || (typeof err.message === "string" && err.message.includes("无权访问"))) {
+      currentSessionId = null;
+      try {
+        await runAsk(null);
+        return;
+      } catch (retryErr) {
+        if (retryErr.name === "AbortError") return;
+        bubble.innerHTML = `<span class="text-danger">${escapeHtml(retryErr.message || "问答失败")}</span>`;
+        return;
+      }
+    }
     bubble.innerHTML = `<span class="text-danger">${escapeHtml(err.message || "问答失败")}</span>`;
   }
 }
@@ -557,6 +598,8 @@ async function doLogin() {
       refresh_token: data.refresh_token,
       user: me,
     });
+    // 登录后身份变化：丢弃访客期会话，避免「无权访问该会话」
+    resetLocalChatContext();
     const role = getPrimaryRole();
     toast(`登录成功（${getRoleLabel(role)}）`, "success");
     redirectAfterLogin();

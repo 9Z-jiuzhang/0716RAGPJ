@@ -150,9 +150,9 @@ Authorization: Bearer <access_token>
 | `staff` | 问答 + 授权范围内知识库上传/向量化/文档/分段/测试/快照 |
 | `guest` | 仅 `qa:ask` + `kb:read`（GUEST 部门知识库）；注册/管理员创建用户默认角色 |
 
-角色等级（仅可管理等级**严格低于**自己的用户）：`super_admin(100) > admin(50) > staff/kb_admin(20) > guest(10)`。
+角色等级（仅可管理等级**严格低于**自己的用户）：`super_admin(100) > admin(50) > staff(20) > guest(10)`。
 
-内置角色不可删除或改名。启动时旧库中的 `user` 角色会迁移至 `guest` 后删除；`kb_admin` 仍为兼容别名（等同 `staff`）。
+内置角色不可删除或改名。启动时旧库中的 `user` 会迁移至 `guest`、`kb_admin` 会迁移至 `staff` 后删除。
 
 ---
 
