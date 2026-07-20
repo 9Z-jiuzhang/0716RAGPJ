@@ -101,7 +101,10 @@ class FulltextRetriever:
                 score=self._normalize_ts_rank(float(row.rank_score or 0.0)),
                 source="fulltext",
                 raw_score=float(row.rank_score or 0.0),
-                metadata={"channel": "tsvector"},
+                metadata={
+                    "channel": "tsvector",
+                    "score_source": "normalized_ts_rank",
+                },
             )
             for row in rows
         ]
@@ -161,8 +164,10 @@ class FulltextRetriever:
         hits: list[RetrievalHit] = []
         for row in rows:
             sim_score = float(row.sim_score or 0.0)
-            # 中文 similarity 往往偏低；既已 ILIKE 命中，抬到可过默认阈值的底分
-            score = max(sim_score, 0.55)
+            # pg_trgm 已返回真实 similarity，必须直接使用它；不得为了通过阈值而
+            # 伪造固定最低分，否则多个低相似度片段会全部显示成同一个 55%。
+            score = max(0.0, min(1.0, sim_score))
+            lexical_coverage = self._lexical_coverage_score(query, row.content or "")
             hits.append(
                 RetrievalHit(
                     chunk_id=str(row.id),
@@ -171,10 +176,15 @@ class FulltextRetriever:
                     kb_id=str(row.kb_id),
                     chunk_index=int(row.chunk_index),
                     content=row.content or "",
-                    score=max(0.0, min(1.0, score)),
+                    score=score,
                     source="fulltext",
                     raw_score=sim_score,
-                    metadata={"channel": "trgm"},
+                    metadata={
+                        "channel": "trgm",
+                        "score_source": "pg_trgm_similarity",
+                        # 仅记录查询字面覆盖率供排障，不覆盖数据库返回的真实 similarity。
+                        "lexical_coverage": round(lexical_coverage, 8),
+                    },
                 )
             )
         return hits
@@ -209,7 +219,8 @@ class FulltextRetriever:
                 DocumentChunk.kb_id.in_(list(kb_ids)),
                 or_(*like_filters),
             )
-            .limit(top_k)
+            # ILIKE 没有数据库相关度排序，先多取少量候选，再按可解释的字面覆盖率排序。
+            .limit(min(100, max(top_k, top_k * 4)))
         )
         try:
             async with db.begin_nested():
@@ -217,10 +228,11 @@ class FulltextRetriever:
         except Exception as exc:
             logger.warning("ILIKE 降级检索失败：%s", exc)
             return []
-        # 无真实分数时按命中顺序递减赋分，保证排序稳定
+        # ILIKE 本身没有相关度分数，使用查询字符 n-gram 覆盖率作为可解释的
+        # 字面相关度；不能再按数据库返回顺序伪造 1.00、0.95 或固定 0.55。
         hits: list[RetrievalHit] = []
-        for i, row in enumerate(rows):
-            score = max(0.55, 1.0 - i * 0.05)
+        for row in rows:
+            score = self._lexical_coverage_score(query, row.content or "")
             hits.append(
                 RetrievalHit(
                     chunk_id=str(row.id),
@@ -232,10 +244,54 @@ class FulltextRetriever:
                     score=score,
                     source="fulltext",
                     raw_score=score,
-                    metadata={"channel": "ilike"},
+                    metadata={
+                        "channel": "ilike",
+                        "score_source": "query_ngram_coverage",
+                    },
                 )
             )
-        return hits
+        hits.sort(
+            key=lambda hit: (
+                -hit.score,
+                hit.doc_id,
+                hit.chunk_index,
+                hit.chunk_id,
+            )
+        )
+        return hits[: max(1, top_k)]
+
+    @staticmethod
+    def _lexical_coverage_score(query: str, content: str) -> float:
+        """
+        计算纯 ILIKE 降级路径的字面覆盖率，返回 0-1 区间分数。
+
+        该值表示查询字符 n-gram 在片段中的覆盖比例，不是回答正确概率。中文使用
+        二元字符组，英文和数字使用三元字符组；短查询则按完整字符串是否出现判断。
+        """
+
+        def normalize(value: str) -> str:
+            # 去除空白和标点后再比较，使“年假 申请”与“年假申请”采用同一口径。
+            return "".join(re.findall(r"[a-z0-9\u4e00-\u9fff]+", (value or "").casefold()))
+
+        normalized_query = normalize(query)
+        normalized_content = normalize(content)
+        if not normalized_query or not normalized_content:
+            return 0.0
+        if len(normalized_query) <= 2:
+            return 1.0 if normalized_query in normalized_content else 0.0
+
+        contains_cjk = bool(re.search(r"[\u4e00-\u9fff]", normalized_query))
+        ngram_size = 2 if contains_cjk else 3
+        if len(normalized_query) < ngram_size:
+            return 1.0 if normalized_query in normalized_content else 0.0
+
+        query_ngrams = {
+            normalized_query[index : index + ngram_size] for index in range(len(normalized_query) - ngram_size + 1)
+        }
+        if not query_ngrams:
+            return 0.0
+        matched = sum(1 for ngram in query_ngrams if ngram in normalized_content)
+        return max(0.0, min(1.0, matched / len(query_ngrams)))
 
     @staticmethod
     def _extract_tokens(query: str) -> list[str]:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -84,7 +84,7 @@ class UpdateSegmentRulesRequest(BaseModel):
     chunk_size: int = Field(ge=100, le=5000)
     chunk_overlap: int = Field(ge=0, le=1000)
     separators: list[str] | None = None
-    split_mode: str | None = None
+    split_mode: Literal["fixed", "heading", "paragraph", "sliding", "markdown"] | None = None
     # P2迭代开发，当前仅配置存储，不启用语义切分
     enable_semantic: bool | None = False
 

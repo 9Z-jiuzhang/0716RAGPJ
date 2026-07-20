@@ -62,11 +62,14 @@ async def list_documents(
 async def upload_document(
     kb_id: str,
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="multipart 字段名 file"),
+    file: UploadFile = File(
+        ...,
+        description="multipart 字段名 file；支持 PDF、DOC、DOCX、TXT、MD（Markdown）",
+    ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission("kb:upload")),
 ):
-    """上传文档并触发解析->清洗->分段->向量化流水线。"""
+    """上传 PDF、DOC、DOCX、TXT 或 Markdown，并触发解析、清洗、分段和向量化流水线。"""
     content = await file.read()
     filename = file.filename or "unnamed"
     try:
@@ -165,11 +168,17 @@ async def segment_preview(
 @router.post("/segment-preview-file")
 async def segment_preview_file(
     kb_id: str,
-    file: UploadFile | None = File(None, description="待预览分段的文档文件；与 doc_id 二选一"),
+    file: UploadFile | None = File(
+        None,
+        description="待预览分段的文档文件，支持 PDF、DOC、DOCX、TXT、MD；与 doc_id 二选一",
+    ),
     doc_id: str | None = Form(None, description="已上传文档 id；与 file 二选一"),
     chunk_size: int | None = Form(None, description="可选覆盖：分段长度"),
     chunk_overlap: int | None = Form(None, description="可选覆盖：重叠长度"),
-    split_mode: str | None = Form(None, description="可选覆盖：分段模式 fixed/heading/paragraph/sliding"),
+    split_mode: str | None = Form(
+        None,
+        description="可选覆盖：分段模式 fixed/heading/paragraph/sliding/markdown",
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_permission("doc:segment")),
 ):

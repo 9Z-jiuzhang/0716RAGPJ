@@ -104,6 +104,9 @@ class HitTestService:
         返回:
             创建后的测试用例响应
         """
+        # 命中率必须与人工标注的期望结果对比；未标注问题不能用“有召回即命中”代替。
+        self._validate_ground_truth(request.questions)
+
         # 创建测试用例数据库记录
         case = TestCases(
             id=uuid.uuid4(),
@@ -163,6 +166,7 @@ class HitTestService:
 
         # 更新问题列表（如果提供）
         if request.questions is not None:
+            self._validate_ground_truth(request.questions)
             # 删除现有问题记录
             await self.db.execute(TestQuestions.__table__.delete().where(TestQuestions.case_id == case_id))
 
@@ -241,11 +245,13 @@ class HitTestService:
                 for q in db_questions
             ]
         elif request.questions:
-            # 使用临时问题列表
-            questions = [TestQuestion(question=q) for q in request.questions]
+            # 临时问题没有期望文档/分段，无法计算命中率。旧逻辑把任意召回都算命中，
+            # 导致结果大概率为 100%，因此明确拒绝并引导创建带标注的测试用例。
+            raise ValueError("临时问题没有期望文档或分段，不能用于命中率测试；请先创建带标注的测试用例")
 
         if not questions:
             raise ValueError("没有可执行的测试问题")
+        self._validate_ground_truth(questions)
 
         # 创建测试运行记录
         run = TestRuns(
@@ -297,13 +303,15 @@ class HitTestService:
 
             # 记录单题测试结果（实际块数据以 JSON 字符串列表存储）
             actual_chunks_json = [json.dumps(r) for r in results]
+            # 单题的“检索相关度”取实际命中的期望片段得分，而不是无条件取第一条候选。
+            matched_score = results[hit_rank - 1]["score"] if is_hit and hit_rank else None
             test_result = TestResults(
                 id=uuid.uuid4(),
                 run_id=run.id,
                 question=question.question,
                 is_hit=is_hit,
                 hit_rank=hit_rank,
-                score=results[0]["score"] if results else None,
+                score=matched_score,
                 strategy=request.strategy,
                 elapsed_ms=elapsed_ms,
                 actual_chunks=actual_chunks_json,
@@ -407,7 +415,7 @@ class HitTestService:
         results = result.scalars().all()
 
         # 构建 CSV 内容
-        lines = ["问题,是否命中,命中排名,分数,策略,耗时(ms)"]
+        lines = ["问题,是否命中,命中排名,命中片段相关度,策略,耗时(ms)"]
         for result_item in results:
             lines.append(
                 f"{result_item.question},{result_item.is_hit},{result_item.hit_rank or ''},"
@@ -577,14 +585,13 @@ class HitTestService:
         判断是否命中期望结果。
 
         - 配置了 expected_doc_ids / expected_chunk_ids：Top-K 内命中任一期望即算命中
-        - 未配置期望（临时题冒烟）：有任意召回结果即算命中（验证检索链路）
+        - 未配置期望：不可评估，防御性返回未命中；入口会提前拒绝此类用例
         """
         if not results:
             return False, None
 
         if not expected_doc_ids and not expected_chunk_ids:
-            # 冒烟：有召回即命中
-            return True, 1
+            return False, None
 
         expected_docs = {str(x) for x in (expected_doc_ids or [])}
         expected_chunks = {str(x) for x in (expected_chunk_ids or [])}
@@ -598,6 +605,23 @@ class HitTestService:
                 return True, rank
 
         return False, None
+
+    @staticmethod
+    def _validate_ground_truth(questions: list[TestQuestion]) -> None:
+        """确保每道题至少标注一个期望文档或期望分段。
+
+        命中率是检索结果与标准答案集合的比较指标；没有标准答案时不能把“召回了
+        任意内容”解释为命中，否则测试结果会系统性虚高。
+        """
+        unlabeled = [
+            index + 1
+            for index, item in enumerate(questions)
+            if not item.expected_doc_ids and not item.expected_chunk_ids
+        ]
+        if unlabeled:
+            positions = "、".join(str(index) for index in unlabeled[:10])
+            suffix = "等" if len(unlabeled) > 10 else ""
+            raise ValueError(f"第 {positions} 题{suffix}未配置期望文档或期望分段，无法计算真实命中率")
 
     async def _calculate_mrr(self, run_id: uuid.UUID) -> float | None:
         """
@@ -670,6 +694,7 @@ class HitTestService:
         返回:
             测试运行响应
         """
+        hit_rate = (run.hit_count / run.total_questions) if run.total_questions else None
         return TestRunResponse(
             id=run.id,
             case_id=run.case_id,
@@ -679,7 +704,9 @@ class HitTestService:
             status=run.status,
             total_questions=run.total_questions,
             hit_count=run.hit_count,
-            hit_rate=((run.hit_count / run.total_questions) if run.total_questions else None),
+            hit_rate=hit_rate,
+            # 产品页面中的“测试得分”必须与展示的命中率完全一致，避免混用检索相似度。
+            score=hit_rate,
             recall_at_k=run.recall_at_k,
             mrr=run.mrr,
             avg_elapsed_ms=run.avg_elapsed_ms,

@@ -34,7 +34,7 @@ from app.schemas.document import (
     UpdateSegmentRulesRequest,
 )
 from app.services import storage, vector_store
-from app.services.chunking import default_rules, merge_rules
+from app.services.chunking import adapt_rules_for_file_type, default_rules, merge_rules
 from app.services.document_state import apply_status
 from app.services.normalize import normalize_text
 from app.services.observability import record_metric, write_audit
@@ -122,6 +122,7 @@ async def upload_document(
             "enable_semantic": kb_rule.enable_semantic,
         },
     )
+    rules = adapt_rules_for_file_type(rules, file_type)
     object_path = storage.upload_bytes(str(kb_id), filename, content)
     doc = Document(
         kb_id=kb_id,
@@ -209,7 +210,7 @@ async def preview_segment(
             patch["split_mode"] = body.split_mode
         if body.enable_semantic is not None:
             patch["enable_semantic"] = body.enable_semantic
-    rules = merge_rules(doc.segment_rules, patch or None)
+    rules = adapt_rules_for_file_type(merge_rules(doc.segment_rules, patch or None), doc.file_type)
     previews = split_text(source, rules)
     return SegmentPreviewResponse(
         document_id=str(doc.id),
@@ -312,7 +313,7 @@ async def preview_segment_source(
     if not source:
         raise DocumentError("文档无可预览文本，无法分段", http_status=400)
 
-    rules = merge_rules(base_rules, rule_overrides or None)
+    rules = adapt_rules_for_file_type(merge_rules(base_rules, rule_overrides or None), file_type)
     previews = split_text(source, rules)
     offsets = _locate_chunk_offsets(source, previews)
     return FileSegmentPreviewResponse(

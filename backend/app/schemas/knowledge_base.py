@@ -81,7 +81,8 @@ class ReVectorizeRequest(BaseModel):
     chunk_overlap: int | None = Field(None, ge=0, le=1000, description="分段重叠；不传则沿用知识库当前值")
     split_mode: str | None = Field(
         None,
-        description="分段模式：fixed / sliding / paragraph / heading",
+        pattern="^(fixed|sliding|paragraph|heading|markdown)$",
+        description="分段模式：fixed / sliding / paragraph / heading / markdown",
     )
     separators: list[str] | None = Field(None, description="分隔符列表（fixed 模式）")
     embedding_model: str | None = Field(None, max_length=200, description="可选：切换嵌入模型后重建")

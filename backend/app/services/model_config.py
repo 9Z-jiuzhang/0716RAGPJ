@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import APIException, NotFoundException
 from app.models.model_config import ModelConfig
 from app.schemas.common import PageResponse
@@ -69,8 +70,16 @@ class ModelConfigService:
     async def update(self, model_id: UUID, data: UpdateModelConfigRequest) -> ModelConfigResponse:
         row = await self._get(model_id)
         payload = data.model_dump(exclude_unset=True)
+        # 默认模型必须保持“同类型唯一”。不能直接给当前行赋 True，否则会产生多个默认项。
+        requested_default = payload.pop("is_default", None)
         for key, value in payload.items():
             setattr(row, key, value)
+        if requested_default is True:
+            if not row.is_enabled:
+                raise APIException(400, "禁用的模型不能设为默认", status_code=400)
+            await self._set_default(row.id, row.model_type)
+        elif requested_default is False:
+            row.is_default = False
         await self.db.commit()
         await self.db.refresh(row)
         return self._to_response(row)
@@ -114,7 +123,10 @@ class ModelConfigService:
     @staticmethod
     def _to_response(row: ModelConfig) -> ModelConfigResponse:
         env_name = row.api_key_env
-        has_key = bool(env_name and os.getenv(env_name))
+        # pydantic-settings 会读取项目 .env，但不会自动把值写回 os.environ；
+        # 因此页面的“已配置密钥”状态同时检查 Settings，避免明明可用却显示未配置。
+        configured_value = getattr(settings, env_name, "") if env_name else ""
+        has_key = bool(env_name and (os.getenv(env_name) or configured_value))
         return ModelConfigResponse(
             id=row.id,
             name=row.name,

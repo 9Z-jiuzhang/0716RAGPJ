@@ -17,7 +17,11 @@ class InvalidTransitionError(DocumentError):
 
 class UnsupportedFileTypeError(DocumentError):
     def __init__(self, file_type: str):
-        super().__init__(f"不支持的文件格式: {file_type}", http_status=400)
+        # 错误响应同步告知允许范围，避免用户只能反复试错判断支持格式。
+        super().__init__(
+            f"不支持的文件格式: {file_type}；当前支持 PDF、DOC、DOCX、TXT、MD（Markdown）",
+            http_status=400,
+        )
 
 
 class FileTooLargeError(DocumentError):

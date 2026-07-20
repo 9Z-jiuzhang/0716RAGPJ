@@ -55,7 +55,9 @@ class SessionStore:
     @property
     def max_messages(self) -> int:
         """上下文窗口对应的最大消息条数（每轮 user+assistant 共 2 条）。"""
-        return max(2, settings.QA_CONTEXT_WINDOW * 2)
+        # Redis 热上下文不能突破数据库 20 轮硬性保留上限。
+        effective_turns = min(settings.QA_CONTEXT_WINDOW, settings.QA_HISTORY_MAX_TURNS)
+        return max(2, effective_turns * 2)
 
     async def bind_session_owner(
         self,

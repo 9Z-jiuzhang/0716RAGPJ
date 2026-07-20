@@ -61,7 +61,10 @@ async def create_test_case(
         )
 
     service = HitTestService(db)
-    case = await service.create_test_case(request=request)
+    try:
+        case = await service.create_test_case(request=request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     return BaseResponse(data=case)
 
@@ -85,7 +88,10 @@ async def update_test_case(
         )
 
     service = HitTestService(db)
-    case = await service.update_test_case(case_id=id, request=request)
+    try:
+        case = await service.update_test_case(case_id=id, request=request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     if not case:
         raise HTTPException(
@@ -128,7 +134,7 @@ async def execute_test_run(
     """
     执行命中率测试
 
-    需要 test:write 权限。基于用例集或临时 questions 执行测试，异步执行。
+    需要 test:write 权限。基于带期望文档/分段标注的用例集执行测试。
     只能测试当前用户有权限访问的知识库范围。
     """
     if not request.case_id and not request.questions:

@@ -3,11 +3,13 @@
 import uuid
 
 from app.api.helpers import ok, resolve_request_id
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import is_super_admin, require_permission
 from app.core.seed_data import ROLE_DISPLAY_NAMES
 from app.models import AuditLog, Permission, Role, User
 from app.models.identity import user_roles
+from app.models.role_cache import RoleCacheConfig
 from app.schemas.common import BaseResponse
 from app.schemas.identity import (
     RoleListResponse,
@@ -90,6 +92,18 @@ async def create_role(
         raise HTTPException(status_code=400, detail="包含不存在的权限")
     role = Role(**data.model_dump(exclude={"permission_codes"}), permissions=list(permissions))
     db.add(role)
+    await db.flush()
+    # 自定义角色创建时立即配套创建缓存知识库，无需等待后台周期任务补齐。
+    db.add(
+        RoleCacheConfig(
+            role_id=role.id,
+            name=f"{role.description or role.name}缓存知识库",
+            enabled=True,
+            interval_days=settings.ROLE_CACHE_DEFAULT_INTERVAL_DAYS,
+            document_question_limit=settings.ROLE_CACHE_DOCUMENT_QUESTION_COUNT,
+            history_question_limit=settings.ROLE_CACHE_HISTORY_QUESTION_COUNT,
+        )
+    )
     db.add(
         AuditLog(
             user_id=operator.id,

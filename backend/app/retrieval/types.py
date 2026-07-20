@@ -59,6 +59,14 @@ class RetrievalResult:
     vector_count: int = 0
     fulltext_count: int = 0
     filtered_out: int = 0
+    # 重排信息供管理端排障展示，不包含请求正文或密钥。
+    rerank_applied: bool = False
+    rerank_provider: str | None = None
+    rerank_model: str | None = None
+    rerank_error: str | None = None
+    # Query 预处理实际参与检索的统计，供管理员会话分析与问题排查使用。
+    expanded_query_count: int = 0
+    hyde_used: bool = False
 
     @property
     def empty(self) -> bool:

@@ -70,10 +70,16 @@ class Settings(BaseSettings):
     # 每次向量化请求的最大文本条数；阿里云 DashScope text-embedding-v3 上限为 10
     EMBEDDING_BATCH_SIZE: int = 10
 
-    # ---------- Rerank（可选） ----------
-    RERANK_PROVIDER: str = ""
+    # ---------- Rerank 重排 ----------
+    # 默认采用 Cohere 官方多语言 Rerank。密钥为空时服务会安全降级为原始检索排序，
+    # 不会因为外部重排服务不可用而中断知识库问答。
+    RERANK_PROVIDER: str = "cohere"
     RERANK_API_KEY: str = ""
-    RERANK_MODEL: str = ""
+    RERANK_MODEL: str = "rerank-v4.0-pro"
+    RERANK_BASE_URL: str = "https://api.cohere.ai"
+    RERANK_TIMEOUT_SECONDS: int = 30
+    # 重排前扩大候选集，避免只对最终 Top-K 重排而失去纠正召回顺序的意义。
+    RERANK_CANDIDATE_MULTIPLIER: int = 4
 
     # ---------- Langfuse（云端或自建兼容端点；Compose 不含 Langfuse 容器） ----------
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
@@ -108,11 +114,49 @@ class Settings(BaseSettings):
     QA_SESSION_IDLE_EXPIRE_MINUTES: int = 30
     # 后台扫描闲置会话的间隔（秒）
     QA_SESSION_EXPIRE_SWEEP_SECONDS: int = 60
+    # ---------- 问答历史保留策略 ----------
+    # 所有身份只保留最近 7 天且最多 20 轮；后台定期物理删除，单次问答后也会立即裁剪。
+    QA_HISTORY_RETENTION_DAYS: int = 7
+    QA_HISTORY_MAX_TURNS: int = 20
+    QA_HISTORY_RETENTION_SWEEP_SECONDS: int = 300
     QA_DEFAULT_STRATEGY: str = "hybrid"
     QA_DEFAULT_TOP_K: int = 5
     QA_RELEVANCE_THRESHOLD: float = 0.3
     QA_RRF_K: int = 60
     QA_GUEST_SESSION_TTL_MINUTES: int = 30
+    # ---------- 用户 Query 预处理 ----------
+    # 三项能力默认启用；模型调用或解析失败时会自动使用原问题继续检索，不会中断问答。
+    QA_QUERY_REWRITE_ENABLED: bool = True
+    QA_QUERY_EXPANSION_ENABLED: bool = True
+    # 扩展 Query 数量限制在 0-5，默认生成 3 条语义相近、关键词互补的查询。
+    QA_QUERY_EXPANSION_COUNT: int = 3
+    QA_HYDE_ENABLED: bool = True
+    # 改写、扩展和 HyDE 合并为一次结构化调用，限制输出长度以控制耗时与成本。
+    QA_QUERY_PROCESSING_MAX_TOKENS: int = 768
+    # ---------- 按角色缓存知识库 ----------
+    ROLE_CACHE_DEFAULT_INTERVAL_DAYS: int = 7
+    ROLE_CACHE_DOCUMENT_QUESTION_COUNT: int = 20
+    ROLE_CACHE_HISTORY_QUESTION_COUNT: int = 5
+    # 单次分析选取有限片段与字符，防止周期任务提示词无界增长。
+    ROLE_CACHE_DOCUMENT_CHUNK_LIMIT: int = 30
+    ROLE_CACHE_DOCUMENT_CHARS_PER_CHUNK: int = 800
+    ROLE_CACHE_LLM_MAX_TOKENS: int = 4096
+    ROLE_CACHE_SCHEDULER_POLL_SECONDS: int = 3600
+    # ---------- LLM Guard 与意图识别 ----------
+    LLM_GUARD_ENABLED: bool = True
+    # 本地规则无法明确归类时才调用 LLM 分类器，兼顾安全性与缓存节省效果。
+    LLM_GUARD_CLASSIFIER_ENABLED: bool = True
+    LLM_GUARD_BLOCK_THRESHOLD: float = 0.65
+    # 默认分类器不可用时放行，但高风险本地规则始终生效；高安全环境可改为 true。
+    LLM_GUARD_FAIL_CLOSED: bool = False
+    LLM_GUARD_PREVIEW_MAX_CHARS: int = 200
+    # ---------- RAGAS 评估 ----------
+    RAGAS_ENABLED: bool = True
+    RAGAS_DO_NOT_TRACK: bool = True
+    RAGAS_DEFAULT_SAMPLE_LIMIT: int = 10
+    RAGAS_MAX_SAMPLE_LIMIT: int = 50
+    RAGAS_MAX_CONTEXTS_PER_SAMPLE: int = 10
+    RAGAS_CONTEXT_MAX_CHARS: int = 3000
     # 检索无命中时：先声明知识库未找到依据，再调用 LLM 给出「参考答案」（不伪造 KB 引用）
     QA_FALLBACK_LLM_ENABLED: bool = True
     # 可选：无命中时附加轻量联网检索结果，供参考答案提示词使用（无 API Key，默认关闭）

@@ -93,6 +93,15 @@ function renderAssistantBubbleHtml(rawText, extrasHtml = "") {
   return `${reasoningHtml}<div class="msg-answer">${answerHtml}</div>${extrasHtml || ""}`;
 }
 
+function formatRetrievalRelevance(value) {
+  // 引用分数来自 cosine、全文相似度、RRF 或 Rerank，统一限制到 0-1 后
+  // 保留一位小数，避免整数取整把多个不同分数误显示成同一个百分比。
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "未知";
+  const bounded = Math.max(0, Math.min(1, numeric));
+  return `${(bounded * 100).toFixed(1)}%`;
+}
+
 /** 登录成功后按角色跳转 */
 function redirectAfterLogin() {
   const target = getPostLoginTarget();
@@ -308,12 +317,12 @@ function appendMessage(role, contentHtml) {
   return row.querySelector(".msg-bubble");
 }
 
-/** 推理步骤类型图标映射 */
-const reasoningTypeIcons = {
-  rewrite: "✍️",
-  retrieval: "🔍",
-  rerank: "📊",
-  generation: "💡",
+/** 推理步骤类型短标签；使用纯文本以满足系统禁用 emoji 的显示约束。 */
+const reasoningTypeLabels = {
+  rewrite: "改",
+  retrieval: "检",
+  rerank: "排",
+  generation: "生",
 };
 
 /** 推理步骤类型标题映射 */
@@ -338,7 +347,7 @@ function appendReasoningStep(step) {
   const stepsContainer = document.getElementById("reasoningSteps");
   if (!stepsContainer) return;
 
-  const icon = reasoningTypeIcons[step.type] || "📌";
+  const typeLabel = reasoningTypeLabels[step.type] || "步";
   const title = reasoningTypeTitles[step.type] || step.content || "处理步骤";
   const status = step.status || "processing";
   const isCompleted = status === "completed";
@@ -348,12 +357,12 @@ function appendReasoningStep(step) {
   stepEl.className = `reasoning-step ${isCompleted ? "completed" : isActive ? "active" : ""}`;
   stepEl.dataset.step = step.step;
 
-  const statusIcon = isCompleted ? "✅" : isActive ? "◯" : "○";
+  const statusLabel = isCompleted ? "完" : isActive ? "中" : "待";
 
   stepEl.innerHTML = `
-    <div class="reasoning-step-icon ${isActive ? "loading" : ""}">${statusIcon}</div>
+    <div class="reasoning-step-icon ${isActive ? "loading" : ""}">${statusLabel}</div>
     <div class="reasoning-step-content">
-      <div class="reasoning-step-title">${icon} ${escapeHtml(title)}</div>
+      <div class="reasoning-step-title">${typeLabel} ${escapeHtml(title)}</div>
       <div class="reasoning-step-detail">${escapeHtml(step.detail || "")}</div>
       ${step.elapsed_ms !== undefined ? `<div class="reasoning-step-time">耗时 ${step.elapsed_ms}ms</div>` : ""}
     </div>
@@ -379,7 +388,7 @@ function updateReasoningStep(stepNum, status, elapsedMs) {
   const iconEl = stepEl.querySelector(".reasoning-step-icon");
   if (iconEl) {
     iconEl.classList.remove("loading");
-    iconEl.textContent = status === "completed" ? "✅" : "◯";
+    iconEl.textContent = status === "completed" ? "完" : "中";
   }
 
   if (elapsedMs !== undefined) {
@@ -447,6 +456,13 @@ async function sendQuestion() {
       {
         signal: askAbort.signal,
         onEvent: (event, data) => {
+          // LLM Guard 拒绝：显示固定安全提示，不继续等待回答或引用。
+          if (event === "guard_blocked") {
+            bubble.classList.remove("streaming-cursor");
+            rawAssistantText = data.message || "该请求未通过安全检查，系统已拒绝处理。";
+            bubble.innerHTML = `<span class="text-danger">${escapeHtml(rawAssistantText)}</span>`;
+            return;
+          }
           // 推理步骤追踪（后端新事件类型）
           if (event === "reasoning") {
             handleTrace(data);
@@ -479,7 +495,7 @@ async function sendQuestion() {
               citationsHtml = `<div class="citations"><div class="citation-heading">引用来源（共 ${items.length} 段，点击展开原文）</div>${items
                 .map(
                   (c) => `<details class="citation-item">
-                    <summary class="citation-meta">${escapeHtml(c.doc_name || "未知文档")} · 分段 #${escapeHtml(c.chunk_index)} · 置信 ${(Number(c.score || 0) * 100).toFixed(0)}%</summary>
+                    <summary class="citation-meta">${escapeHtml(c.doc_name || "未知文档")} · 分段 #${escapeHtml(c.chunk_index)} · 检索相关度 ${formatRetrievalRelevance(c.score)}</summary>
                     <div class="citation-content">${escapeHtml(c.content || "")}</div>
                   </details>`
                 )
@@ -776,7 +792,8 @@ async function pageUpload() {
   document.getElementById("pageRoot").innerHTML = `
     <div class="card upload-panel">
       <h2 class="card-title">上传文档到知识库</h2>
-      <p class="text-muted">当前身份：${getRoleLabel()}${getDepartment() ? ` · 部门 ${getDepartment()}` : ""}。管理员/超管可上传至任意库；员工仅本部门或授权知识库。类型与大小由服务端最终校验。</p>
+      <p class="text-muted">当前身份：${getRoleLabel()}${getDepartment() ? ` · 部门 ${getDepartment()}` : ""}。管理员/超管可上传至任意库；员工仅本部门或授权知识库。</p>
+      <p class="text-muted"><strong>支持的文件类型：</strong>PDF、DOC、DOCX、TXT、MD（Markdown）。文件类型与大小由服务端最终校验。</p>
       <div class="form-group">
         <label>目标知识库</label>
         <select class="form-control" id="kbSelect">
@@ -788,7 +805,7 @@ async function pageUpload() {
             .join("")}
         </select>
       </div>
-      <div class="upload-drop" id="dropZone">点击或拖拽文件到此处</div>
+      <div class="upload-drop" id="dropZone">点击或拖拽 PDF、DOC、DOCX、TXT、MD 文件到此处</div>
       <input type="file" id="fileInput" class="hidden" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
       <div class="form-group" style="margin-top:12px">
         <label>处理进度</label>

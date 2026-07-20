@@ -22,6 +22,9 @@ const MENUS = [
   { path: "/admin/departments", label: "部门管理", perm: "department:read" },
   { path: "/admin/models", label: "大模型管理", perm: "model:read" },
   { path: "/admin/knowledge-bases", label: "知识库管理", perm: "kb:read" },
+  { path: "/admin/ragas", label: "RAGAS 评估", perm: "system:read" },
+  { path: "/admin/qa-sessions", label: "会话分析", perm: "system:read" },
+  { path: "/admin/role-caches", label: "角色缓存", perm: "system:read" },
   { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
   { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
   { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
@@ -138,6 +141,9 @@ async function dispatchRender() {
   if (path === "/admin/departments") return pageDepartments();
   if (path === "/admin/models") return pageModels();
   if (path === "/admin/knowledge-bases") return pageKbList();
+  if (path === "/admin/ragas") return pageRagas();
+  if (path === "/admin/qa-sessions") return pageQaSessions();
+  if (path === "/admin/role-caches") return pageRoleCaches();
   if (path === "/admin/hit-test") return pageHitTest();
   if (path === "/admin/audit") return pageAudit();
   if (path === "/admin/monitor") return pageMonitor();
@@ -210,11 +216,17 @@ async function pageDashboard() {
         <div class="stat-card"><div class="label">文档总数</div><div class="value">${s.doc_count ?? "-"}</div></div>
         <div class="stat-card"><div class="label">用户总数</div><div class="value">${s.user_count ?? "-"}</div></div>
         <div class="stat-card"><div class="label">活跃会话</div><div class="value">${s.active_sessions ?? "-"}</div></div>
+        <div class="stat-card"><div class="label">近 24 小时恶意阻拦</div><div class="value">${s.guard_blocked_24h ?? 0}</div></div>
       </div>
       <div class="chart-grid">
         <div class="card"><h3 class="card-title">近 7 天问答量</h3>${renderBars(s.qa_trend_7d || [0, 0, 0, 0, 0, 0, 0])}</div>
         <div class="card"><h3 class="card-title">近 7 天命中率</h3>${renderBars(s.hit_rate_trend_7d || [0, 0, 0, 0, 0, 0, 0], { percent: true })}</div>
         <div class="card"><h3 class="card-title">近 24 小时错误趋势</h3>${renderBars(s.error_24h || [0, 0, 0, 0])}</div>
+        <div class="card">
+          <h3 class="card-title">LLM Guard 安全窗口</h3>
+          <p style="margin:8px 0">最近 24 小时阻拦 <strong>${s.guard_blocked_24h ?? 0}</strong> 次，最近 7 天共 <strong>${s.guard_blocked_7d ?? 0}</strong> 次。</p>
+          <p class="text-muted" style="margin-bottom:0">阻拦统计涵盖提示注入、窃密、越权、破坏性操作与危险命令执行。</p>
+        </div>
       </div>`;
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `${headerHtml}<div class="card text-danger">${escapeHtml(e.message)}</div>`;
@@ -1157,6 +1169,26 @@ async function pageDepartmentDetail(deptId) {
 }
 
 /* ========== 大模型管理 ========== */
+/**
+ * 管理端模型预设仅用于辅助填写，不限制管理员接入兼容模型。
+ * Rerank 默认项与后端 `.env.example` 保持一致，避免类型下拉有 rerank 却没有可选模型。
+ */
+const MODEL_PRESETS = {
+  llm: [
+    { provider: "openai", model: "gpt-4o", baseUrl: "", keyEnv: "LLM_API_KEY" },
+    { provider: "dashscope", model: "qwen-plus", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", keyEnv: "LLM_API_KEY" },
+  ],
+  embedding: [
+    { provider: "dashscope", model: "text-embedding-v3", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", keyEnv: "EMBEDDING_API_KEY" },
+    { provider: "openai", model: "text-embedding-3-large", baseUrl: "", keyEnv: "EMBEDDING_API_KEY" },
+  ],
+  rerank: [
+    { provider: "cohere", model: "rerank-v4.0-pro", baseUrl: "https://api.cohere.ai", keyEnv: "RERANK_API_KEY" },
+    { provider: "cohere", model: "rerank-v4.0-fast", baseUrl: "https://api.cohere.ai", keyEnv: "RERANK_API_KEY" },
+    { provider: "cohere", model: "rerank-v3.5", baseUrl: "https://api.cohere.ai", keyEnv: "RERANK_API_KEY" },
+  ],
+};
+
 function openModelForm({ title, model = null, onSave }) {
   closeAllModals();
   const dialogId = `modelForm-${Date.now()}`;
@@ -1176,9 +1208,11 @@ function openModelForm({ title, model = null, onSave }) {
               .join("")}
           </select>
           <label class="form-label" style="margin-top:10px">提供方</label>
-          <input class="form-control" name="provider" value="${escapeHtml(m.provider || "")}" placeholder="openai / dashscope / …" />
+          <input class="form-control" name="provider" list="${dialogId}-providers" value="${escapeHtml(m.provider || "")}" placeholder="openai / dashscope / cohere" />
+          <datalist id="${dialogId}-providers"></datalist>
           <label class="form-label" style="margin-top:10px">模型名称</label>
-          <input class="form-control" name="model_name" required value="${escapeHtml(m.model_name || "")}" placeholder="如 qwen-plus" />
+          <input class="form-control" name="model_name" list="${dialogId}-models" required value="${escapeHtml(m.model_name || "")}" placeholder="请选择预设或填写兼容模型名" />
+          <datalist id="${dialogId}-models"></datalist>
           <label class="form-label" style="margin-top:10px">API Base URL</label>
           <input class="form-control" name="base_url" value="${escapeHtml(m.base_url || "")}" placeholder="https://…" />
           <label class="form-label" style="margin-top:10px">API Key 环境变量名</label>
@@ -1197,6 +1231,40 @@ function openModelForm({ title, model = null, onSave }) {
     </div>`
   );
   const root = document.getElementById(dialogId);
+  const typeInput = root.querySelector('[name="model_type"]');
+  const providerInput = root.querySelector('[name="provider"]');
+  const modelInput = root.querySelector('[name="model_name"]');
+  const baseUrlInput = root.querySelector('[name="base_url"]');
+  const keyEnvInput = root.querySelector('[name="api_key_env"]');
+
+  /** 根据类型刷新预设；新建模型时自动带入首个推荐项，编辑时保留管理员原值。 */
+  const refreshModelPresets = ({ fillRecommended = false } = {}) => {
+    const type = typeInput.value || "llm";
+    const presets = MODEL_PRESETS[type] || [];
+    root.querySelector(`#${dialogId}-providers`).innerHTML = [...new Set(presets.map((item) => item.provider))]
+      .map((provider) => `<option value="${escapeHtml(provider)}"></option>`)
+      .join("");
+    root.querySelector(`#${dialogId}-models`).innerHTML = presets
+      .map((item) => `<option value="${escapeHtml(item.model)}">${escapeHtml(item.provider)}</option>`)
+      .join("");
+    if (fillRecommended && presets[0]) {
+      providerInput.value = presets[0].provider;
+      modelInput.value = presets[0].model;
+      baseUrlInput.value = presets[0].baseUrl;
+      keyEnvInput.value = presets[0].keyEnv;
+    }
+  };
+
+  typeInput.addEventListener("change", () => refreshModelPresets({ fillRecommended: true }));
+  modelInput.addEventListener("change", () => {
+    const preset = (MODEL_PRESETS[typeInput.value] || []).find((item) => item.model === modelInput.value);
+    if (!preset) return;
+    providerInput.value = preset.provider;
+    baseUrlInput.value = preset.baseUrl;
+    keyEnvInput.value = preset.keyEnv;
+  });
+  refreshModelPresets({ fillRecommended: !model });
+
   root.querySelector("[data-close]").onclick = () => root.remove();
   root.onclick = (e) => {
     if (e.target === root) root.remove();
@@ -1257,7 +1325,7 @@ async function pageModels() {
                   <td><code>${escapeHtml(m.api_key_env || "-")}</code>${m.has_api_key ? ' <span class="badge badge-success">已配置</span>' : ""}</td>
                   <td>${escapeHtml(m.priority ?? 100)}</td>
                   <td>${m.is_enabled ? `<span class="badge badge-success">是</span>` : `<span class="badge">否</span>`}</td>
-                  <td>${m.is_default ? "✓" : "-"}</td>
+                  <td>${m.is_default ? "是" : "否"}</td>
                   <td>
                     ${
                       canWrite
@@ -1383,7 +1451,7 @@ async function renderModelUsage(model, days) {
     const models = data.models || [];
     const rangeLabel = `${(data.range && data.range.days) || days} 天`;
     const noticeHtml = data.notice
-      ? `<div style="background:#fff7e6;border:1px solid #ffe0a3;color:#8a5a00;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px">⚠ ${escapeHtml(data.notice)}</div>`
+      ? `<div style="background:#fff7e6;border:1px solid #ffe0a3;color:#8a5a00;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px">提示：${escapeHtml(data.notice)}</div>`
       : "";
 
     const statCard = (label, value) =>
@@ -1701,8 +1769,9 @@ async function pageKbDetail(id) {
               <select class="form-control" id="rvSplitMode" style="margin:6px 0 12px">
                 <option value="fixed">固定长度 fixed</option>
                 <option value="sliding">滑动窗口 sliding</option>
-                <option value="paragraph">按段落 paragraph</option>
-                <option value="heading">按标题 heading</option>
+                 <option value="paragraph">按段落 paragraph</option>
+                 <option value="heading">按标题 heading</option>
+                 <option value="markdown">Markdown 结构 markdown</option>
               </select>
               <label class="text-muted">嵌入模型（可留空沿用当前：${escapeHtml(k.embedding_model || "-")}）</label>
               <input class="form-control" id="rvEmbed" value="" placeholder="留空则不改" style="margin:6px 0 12px" />
@@ -1882,9 +1951,10 @@ async function pageDocuments(kbId) {
       <div class="toolbar">
         <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button>
         <span class="spacer"></span>
-        <input type="file" id="adminFile" />
+        <input type="file" id="adminFile" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
         <button class="btn btn-sm" id="btnAdminUpload">上传</button>
       </div>
+      <p class="text-muted" style="margin:0 0 12px"><strong>支持的文件类型：</strong>PDF、DOC、DOCX、TXT、MD（Markdown）。</p>
       <div class="card">
         <h3 class="card-title">文档列表 · 分段 / 预处理 / 向量化状态</h3>
         <div class="table-wrap"><table class="table">
@@ -2359,12 +2429,12 @@ async function pageHitTest() {
               策略 ${escapeHtml(strategyLabel(summary.strategy))}
               · TopK ${escapeHtml(summary.top_k)}
               · 命中 ${escapeHtml(summary.hit_count)}/${escapeHtml(summary.total_questions)}
-              （${pct(summary.hit_rate ?? summary.recall_at_k)}）
+              · 得分（命中率）${pct(summary.score ?? summary.hit_rate ?? summary.recall_at_k)}
               · MRR ${summary.mrr != null ? Number(summary.mrr).toFixed(3) : "-"}
               · 均耗时 ${summary.avg_elapsed_ms != null ? Math.round(summary.avg_elapsed_ms) + "ms" : "-"}
             </p>
             <div class="table-wrap"><table class="table">
-              <thead><tr><th>问题</th><th>命中</th><th>排名</th><th>分数</th><th>耗时</th><th>召回摘要</th></tr></thead>
+              <thead><tr><th>问题</th><th>命中</th><th>排名</th><th>命中片段相关度</th><th>耗时</th><th>召回摘要</th></tr></thead>
               <tbody>
                 ${
                   results.length
@@ -2447,11 +2517,11 @@ async function pageHitTest() {
           <input class="form-control" name="description" placeholder="可选" />
           <label class="form-label" style="margin-top:10px">关联知识库（用于选择期望文档）</label>
           <select class="form-control" id="caseKbPick">${kbOptions || "<option value=''>暂无知识库</option>"}</select>
-          <label class="form-label" style="margin-top:10px">问题列表（每行一题；可用「|文档名关键字」标注期望文档）</label>
+          <label class="form-label" style="margin-top:10px">问题列表（每行一题；必须用「|文档名关键字」标注期望文档）</label>
           <textarea class="form-control" name="questions" rows="8" required placeholder="试用期年假怎么折算？|年假
 加班如何申请调休？|考勤
 礼品超过多少需要上交？|合规"></textarea>
-          <p class="text-muted" style="margin:8px 0 0;font-size:12px">示例：问题文本|文档名关键字。关键字会匹配该库文档文件名，自动填入 expected_doc_ids。</p>
+          <p class="text-muted" style="margin:8px 0 0;font-size:12px">命中率必须与标准答案比较。示例：问题文本|文档名关键字；关键字必须匹配至少一份文档，否则不能创建测试用例。</p>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-close>取消</button>
@@ -2478,15 +2548,21 @@ async function pageHitTest() {
         toast("请填写名称与至少一个问题", "error");
         return;
       }
-      const questions = lines.map((line) => {
+      const invalidLines = [];
+      const questions = lines.map((line, index) => {
         const [q, hint] = line.split("|").map((s) => s.trim());
         let expected_doc_ids = null;
         if (hint) {
           const matched = docs.filter((d) => String(d.filename || "").includes(hint));
           if (matched.length) expected_doc_ids = matched.map((d) => d.id);
         }
+        if (!q || !hint || !expected_doc_ids?.length) invalidLines.push(index + 1);
         return { question: q || line, expected_doc_ids, expected_chunk_ids: null };
       });
+      if (invalidLines.length) {
+        toast(`第 ${invalidLines.join("、")} 行缺少有效的期望文档关键字`, "error");
+        return;
+      }
       try {
         await api.post("/hit-tests/cases", { name, description, questions });
         toast("用例已创建", "success");
@@ -2559,9 +2635,9 @@ async function pageHitTest() {
           <span class="spacer"></span>
           ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnNewCase">新建用例</button>` : `<span class="text-muted">只读</span>`}
         </div>
-        <p class="text-muted" style="margin:0 0 12px">在下方用例列表可<strong>多选</strong>后执行；将按选用顺序逐个跑完。不选用时可填临时问题。</p>
+        <p class="text-muted" style="margin:0 0 12px">在下方用例列表可<strong>多选</strong>后执行；将按选用顺序逐个跑完。只有配置了期望文档或分段的题目才能计算真实命中率。</p>
         <div id="htSelectedBanner" class="text-muted" style="margin-bottom:12px;padding:8px 10px;background:var(--color-bg-tint,#f8f9fa);border-radius:8px">
-          当前：未选用用例（将使用临时问题）
+          当前：未选用测试用例
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
           <div>
@@ -2592,10 +2668,6 @@ async function pageHitTest() {
             <label class="form-label">相似度阈值</label>
             <input class="form-control" id="htThreshold" type="number" min="0" max="1" step="0.05" value="0.15" />
           </div>
-        </div>
-        <div id="htTempWrap" style="margin-top:12px">
-          <label class="form-label">临时问题（未选用例时使用，每行一题）</label>
-          <textarea class="form-control" id="htQuestions" rows="4" placeholder="试用期员工有年假吗？&#10;加班费如何计算？&#10;礼品超过多少必须上交？"></textarea>
         </div>
         <div style="margin-top:12px">
           ${
@@ -2659,13 +2731,13 @@ async function pageHitTest() {
             }
           </div>
           <div class="table-wrap"><table class="table" id="htRunTable">
-            <thead><tr><th>用例</th><th>命中率</th><th>命中</th><th>策略</th><th>时间</th><th></th></tr></thead>
+            <thead><tr><th>用例</th><th>得分（命中率）</th><th>命中</th><th>策略</th><th>时间</th><th></th></tr></thead>
             <tbody>
               ${
                 runs.length
                   ? runs
                       .map((r) => {
-                        const rate = r.hit_rate != null ? r.hit_rate : r.recall_at_k;
+                        const rate = r.score ?? r.hit_rate ?? r.recall_at_k;
                         return `<tr data-run-row="${escapeHtml(String(r.id))}">
                           <td style="max-width:140px">${escapeHtml(caseNameOf(r.case_id))}</td>
                           <td><strong>${pct(rate)}</strong></td>
@@ -2687,8 +2759,6 @@ async function pageHitTest() {
       </div>`;
 
     const banner = document.getElementById("htSelectedBanner");
-    const tempWrap = document.getElementById("htTempWrap");
-    const questionsEl = document.getElementById("htQuestions");
 
     const syncSelectionUi = ({ persist = true } = {}) => {
       if (persist) {
@@ -2722,14 +2792,9 @@ async function pageHitTest() {
         const names = picked.map((c) => escapeHtml(c.name)).join("、");
         banner.innerHTML = `当前已选用 <strong>${picked.length}</strong> 个用例（共 ${totalQ} 题）：${names}。执行测试将按顺序逐个运行。`;
         banner.style.background = "rgba(52,168,83,0.12)";
-        tempWrap.style.opacity = "0.45";
-        questionsEl.disabled = true;
-        questionsEl.value = "";
       } else {
-        banner.textContent = "当前：未选用用例（将使用临时问题）";
+        banner.textContent = "当前：未选用测试用例";
         banner.style.background = "var(--color-bg-tint,#f8f9fa)";
-        tempWrap.style.opacity = "1";
-        questionsEl.disabled = false;
       }
     };
 
@@ -2885,32 +2950,19 @@ async function pageHitTest() {
         const prev = btnRun.textContent;
         try {
           const base = buildBasePayload();
-          if (selectedCaseIds.length) {
-            const summaries = [];
-            for (let i = 0; i < selectedCaseIds.length; i += 1) {
-              const caseId = selectedCaseIds[i];
-              btnRun.textContent = `执行中 ${i + 1}/${selectedCaseIds.length}…`;
-              const run = await api.post("/hit-tests/runs", { ...base, case_id: caseId });
-              summaries.push(
-                `${caseNameOf(caseId)} ${run.hit_count}/${run.total_questions}（${pct(run.hit_rate ?? run.recall_at_k)}）`
-              );
-            }
-            toast(`已完成 ${summaries.length} 个用例：${summaries.join("；")}`, "success");
-          } else {
-            btnRun.textContent = "执行中…";
-            const questions = String(document.getElementById("htQuestions").value || "")
-              .split(/\r?\n/)
-              .map((s) => s.trim())
-              .filter(Boolean);
-            if (!questions.length) {
-              throw new Error(cases.length ? "请先勾选测试用例，或填写临时问题" : "请填写临时问题");
-            }
-            const run = await api.post("/hit-tests/runs", { ...base, questions });
-            toast(
-              `临时问题完成：命中 ${run.hit_count}/${run.total_questions}（${pct(run.hit_rate ?? run.recall_at_k)}）`,
-              "success"
+          if (!selectedCaseIds.length) {
+            throw new Error("请先勾选至少一个带期望文档或分段的测试用例");
+          }
+          const summaries = [];
+          for (let i = 0; i < selectedCaseIds.length; i += 1) {
+            const caseId = selectedCaseIds[i];
+            btnRun.textContent = `执行中 ${i + 1}/${selectedCaseIds.length}…`;
+            const run = await api.post("/hit-tests/runs", { ...base, case_id: caseId });
+            summaries.push(
+              `${caseNameOf(caseId)} ${run.hit_count}/${run.total_questions}（${pct(run.score ?? run.hit_rate ?? run.recall_at_k)}）`
             );
           }
+          toast(`已完成 ${summaries.length} 个用例：${summaries.join("；")}`, "success");
           pageHitTest();
         } catch (e) {
           toast(e.message || "执行失败", "error");
@@ -2953,7 +3005,7 @@ async function pageHitTest() {
                       const cell = (s) => {
                         const x = map[s];
                         if (!x) return "-";
-                        return `${x.is_hit ? "✓" : "✗"} ${x.score != null ? Number(x.score).toFixed(2) : ""}`;
+                        return `${x.is_hit ? "命中" : "未命中"} ${x.score != null ? Number(x.score).toFixed(2) : ""}`;
                       };
                       return `<tr>
                         <td>${escapeHtml(row.question)}</td>
@@ -3025,6 +3077,438 @@ const AUDIT_RESOURCE_LABELS = {
   user: "用户",
   role: "角色",
 };
+
+/* ========== RAGAS 评估 /admin/ragas ========== */
+const RAGAS_METRIC_LABELS = {
+  faithfulness: "忠实度",
+  answer_relevancy: "答案相关性",
+  context_precision: "上下文精确率",
+  context_recall: "上下文召回率",
+};
+
+/** 把 RAGAS 的 0-1 分数渲染为百分比；缺少标准答案的指标显示未评估。 */
+function ragasScore(value) {
+  return value == null || Number.isNaN(Number(value)) ? "未评估" : `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+async function pageRagas() {
+  if (!requirePerm("system:read", "RAGAS 评估")) return;
+  const root = document.getElementById("pageRoot");
+  root.innerHTML = `<div class="loading">加载 RAGAS 评估记录…</div>`;
+  try {
+    const [kbData, runData] = await Promise.all([
+      api.get("/knowledge-bases?page=1&page_size=100"),
+      api.get("/ragas/runs?page=1&page_size=50"),
+    ]);
+    const knowledgeBases = kbData.items || [];
+    const runs = runData.items || [];
+    const kbOptions = knowledgeBases
+      .map((kb) => `<option value="${escapeHtml(kb.id)}">${escapeHtml(kb.name)}</option>`)
+      .join("");
+
+    root.innerHTML = `
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+          <div style="max-width:720px">
+            <h3 class="card-title">RAGAS 0.4 RAG 质量评估</h3>
+            <p class="text-muted" style="margin-bottom:0">从目标知识库最近带引用的真实问答中抽样，评估忠实度、答案相关性与上下文精确率；只有样本带标准答案时才计算上下文召回率。逐样本分数与原因会完整保存。</p>
+          </div>
+          <div style="display:flex;align-items:end;gap:8px;flex-wrap:wrap">
+            <label><span class="form-label">知识库</span><select class="form-control" id="ragasKb" style="min-width:220px">${kbOptions || `<option value="">暂无知识库</option>`}</select></label>
+            <label><span class="form-label">样本数</span><input class="form-control" id="ragasLimit" type="number" min="1" max="50" value="10" style="width:90px" /></label>
+            <button type="button" class="btn btn-primary" id="btnRunRagas" ${knowledgeBases.length ? "" : "disabled"}>开始评估</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <h3 class="card-title">评估记录</h3><span class="badge">共 ${escapeHtml(runData.total ?? runs.length)} 次</span>
+        </div>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>知识库</th><th>状态</th><th>样本</th><th>忠实度</th><th>答案相关性</th><th>上下文精确率</th><th>上下文召回率</th><th>完成时间</th><th></th></tr></thead>
+          <tbody>
+            ${
+              runs.length
+                ? runs
+                    .map(
+                      (run) => `<tr>
+                        <td>${escapeHtml(run.kb_name || run.kb_id)}</td>
+                        <td><span class="badge">${run.status === "completed" ? "已完成" : run.status === "failed" ? "失败" : "运行中"}</span>${run.error_message ? `<div class="text-danger" style="max-width:220px">${escapeHtml(run.error_message)}</div>` : ""}</td>
+                        <td>${escapeHtml(run.sample_count ?? 0)}</td>
+                        <td>${ragasScore(run.metric_scores?.faithfulness)}</td>
+                        <td>${ragasScore(run.metric_scores?.answer_relevancy)}</td>
+                        <td>${ragasScore(run.metric_scores?.context_precision)}</td>
+                        <td>${ragasScore(run.metric_scores?.context_recall)}</td>
+                        <td>${formatDateTime(run.completed_at || run.created_at)}</td>
+                        <td><button type="button" class="btn btn-text btn-sm" data-ragas-detail="${escapeHtml(run.id)}">详细结果</button></td>
+                      </tr>`
+                    )
+                    .join("")
+                : `<tr><td colspan="9" class="text-muted">暂无评估记录，请选择知识库开始评估</td></tr>`
+            }
+          </tbody>
+        </table></div>
+      </div>`;
+
+    document.getElementById("btnRunRagas").onclick = async () => {
+      const kbId = document.getElementById("ragasKb").value;
+      const sampleLimit = Number(document.getElementById("ragasLimit").value);
+      if (!kbId) {
+        toast("请选择知识库", "error");
+        return;
+      }
+      if (!Number.isInteger(sampleLimit) || sampleLimit < 1 || sampleLimit > 50) {
+        toast("样本数必须是 1-50 的整数", "error");
+        return;
+      }
+      const button = document.getElementById("btnRunRagas");
+      button.disabled = true;
+      button.textContent = "评估中…";
+      toast("RAGAS 评估已开始，指标可能调用多次模型，请等待完成");
+      try {
+        const result = await api.post("/ragas/runs", { kb_id: kbId, sample_limit: sampleLimit });
+        toast(`RAGAS 评估完成，共处理 ${result.sample_count || 0} 个样本`);
+        await pageRagas();
+      } catch (error) {
+        toast(`RAGAS 评估失败：${error.message}`, "error");
+        button.disabled = false;
+        button.textContent = "开始评估";
+      }
+    };
+    root.querySelectorAll("[data-ragas-detail]").forEach((button) => {
+      button.onclick = () => openRagasRunDetail(button.getAttribute("data-ragas-detail"));
+    });
+  } catch (error) {
+    root.innerHTML = `<div class="card empty-state">加载 RAGAS 评估失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+
+/** 展示每个真实问答样本的指标分数、RAGAS 原因和检索上下文。 */
+async function openRagasRunDetail(runId) {
+  try {
+    const data = await api.get(`/ragas/runs/${runId}`);
+    const run = data.run || {};
+    const items = data.items || [];
+    const itemHtml = items.length
+      ? items
+          .map((item, index) => {
+            const metricRows = Object.keys(RAGAS_METRIC_LABELS)
+              .map((name) => {
+                const score = item.metric_scores?.[name];
+                const reason = item.metric_reasons?.[name];
+                const error = item.metric_errors?.[name];
+                return `<tr>
+                  <td>${RAGAS_METRIC_LABELS[name]}</td>
+                  <td><strong>${ragasScore(score)}</strong></td>
+                  <td>${reason ? escapeHtml(reason) : error ? `<span class="text-danger">${escapeHtml(error)}</span>` : "未运行"}</td>
+                </tr>`;
+              })
+              .join("");
+            return `<div class="card" style="margin-bottom:12px;background:var(--color-bg-tint,#f8f9fa)">
+              <h4 style="margin-top:0">样本 ${index + 1}</h4>
+              <p><strong>用户问题：</strong>${escapeHtml(item.user_input)}</p>
+              <p style="white-space:pre-wrap"><strong>系统回答：</strong>${escapeHtml(item.response)}</p>
+              <details><summary>检索上下文（${item.retrieved_contexts?.length || 0} 段）</summary>
+                ${(item.retrieved_contexts || []).map((context) => `<pre style="white-space:pre-wrap">${escapeHtml(context)}</pre>`).join("")}
+              </details>
+              <div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>指标</th><th>分数</th><th>RAGAS 原因或错误</th></tr></thead><tbody>${metricRows}</tbody></table></div>
+            </div>`;
+          })
+          .join("")
+      : `<div class="empty-state">该运行没有可展示的样本明细</div>`;
+
+    const mask = document.createElement("div");
+    mask.className = "modal-mask";
+    mask.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(1050px,calc(100vw - 24px));max-height:92vh;overflow:auto">
+        <div class="modal-header"><h3>RAGAS 详细结果 · ${escapeHtml(run.kb_name || "知识库")}</h3></div>
+        <div class="modal-body">
+          <p class="text-muted" style="margin-top:0">状态：${escapeHtml(run.status)} · 样本 ${escapeHtml(run.sample_count ?? 0)} 个 · 完成时间 ${formatDateTime(run.completed_at)}</p>
+          ${itemHtml}
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>关闭</button></div>
+      </div>`;
+    document.body.appendChild(mask);
+    mask.querySelector("[data-close]").onclick = () => mask.remove();
+    mask.addEventListener("click", (event) => {
+      if (event.target === mask) mask.remove();
+    });
+  } catch (error) {
+    toast(`加载 RAGAS 详细结果失败：${error.message}`, "error");
+  }
+}
+
+/* ========== 会话分析 /admin/qa-sessions ========== */
+async function pageQaSessions() {
+  if (!requirePerm("system:read", "会话分析")) return;
+  const root = document.getElementById("pageRoot");
+  root.innerHTML = `<div class="loading">加载会话与 Query 预处理记录…</div>`;
+
+  try {
+    const data = await api.get("/qa/admin/sessions?page=1&page_size=50");
+    const sessions = data.items || [];
+    root.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+          <div>
+            <h3 class="card-title">Query 预处理审计</h3>
+            <p class="text-muted" style="margin:4px 0 14px">查看每轮问答的原始 Query、改写结果、扩展 Query 与 HyDE 假设文档。HyDE 只用于向量召回，不作为回答依据。</p>
+          </div>
+          <span class="badge">共 ${escapeHtml(data.total ?? sessions.length)} 个会话</span>
+        </div>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>会话</th><th>用户</th><th>类型</th><th>消息数</th><th>最后活跃</th><th></th></tr></thead>
+          <tbody>
+            ${
+              sessions.length
+                ? sessions
+                    .map(
+                      (session) => `<tr>
+                        <td>${escapeHtml(session.title || "未命名会话")}</td>
+                        <td>${escapeHtml(session.owner || "-")}</td>
+                        <td>${session.owner_type === "guest" ? "访客" : "注册用户"}</td>
+                        <td>${escapeHtml(session.message_count ?? 0)}</td>
+                        <td>${formatDateTime(session.last_active_at)}</td>
+                        <td><button type="button" class="btn btn-text btn-sm" data-session-detail="${escapeHtml(session.id)}">查看处理结果</button></td>
+                      </tr>`
+                    )
+                    .join("")
+                : `<tr><td colspan="6" class="text-muted">暂无会话记录</td></tr>`
+            }
+          </tbody>
+        </table></div>
+      </div>`;
+
+    root.querySelectorAll("[data-session-detail]").forEach((button) => {
+      button.onclick = () => openQaSessionDetail(button.getAttribute("data-session-detail"));
+    });
+  } catch (error) {
+    root.innerHTML = `<div class="card empty-state">加载会话分析失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+
+/* ========== 角色缓存 /admin/role-caches ========== */
+async function pageRoleCaches() {
+  if (!requirePerm("system:read", "角色缓存知识库")) return;
+  const root = document.getElementById("pageRoot");
+  root.innerHTML = `<div class="loading">加载角色缓存配置…</div>`;
+  const canWrite = hasPermission("kb:write");
+
+  try {
+    const caches = await api.get("/role-caches");
+    root.innerHTML = `
+      <div class="card" style="margin-bottom:12px">
+        <h3 class="card-title">按角色隔离的缓存知识库</h3>
+        <p class="text-muted" style="margin-bottom:0">系统默认每 7 天分析角色可访问文档并生成 20 个缓存问题，同时从用户历史补充缓存中没有的最高频 5 个问题。只有完全相同且来源知识库仍有权限的问题才会直接命中。</p>
+      </div>
+      <div class="card">
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>缓存知识库</th><th>角色</th><th>缓存数</th><th>检测周期</th><th>文档分析</th><th>历史分析</th><th>状态</th><th></th></tr></thead>
+          <tbody>
+            ${
+              caches.length
+                ? caches
+                    .map(
+                      (cache) => `<tr data-role-cache-row="${escapeHtml(cache.role_id)}">
+                        <td><strong>${escapeHtml(cache.name)}</strong></td>
+                        <td>${escapeHtml(cache.role_description || cache.role_name)}</td>
+                        <td>${escapeHtml(cache.question_count ?? 0)}</td>
+                        <td>
+                          <label style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+                            <input class="form-control" style="width:76px" type="number" min="1" max="365" value="${escapeHtml(cache.interval_days)}" data-cache-interval ${canWrite ? "" : "disabled"} /> 天
+                          </label>
+                        </td>
+                        <td>${cache.last_document_analysis_at ? formatDateTime(cache.last_document_analysis_at) : "尚未执行"}</td>
+                        <td>${cache.last_history_analysis_at ? formatDateTime(cache.last_history_analysis_at) : "尚未执行"}</td>
+                        <td><span class="badge">${cache.enabled ? "已启用" : "已停用"}</span></td>
+                        <td style="white-space:nowrap">
+                          <button type="button" class="btn btn-text btn-sm" data-cache-detail>查看问题</button>
+                          ${
+                            canWrite
+                              ? `<button type="button" class="btn btn-text btn-sm" data-cache-save>保存</button>
+                                 <button type="button" class="btn btn-text btn-sm" data-cache-doc>分析文档</button>
+                                 <button type="button" class="btn btn-text btn-sm" data-cache-history>检测历史</button>
+                                 <button type="button" class="btn btn-text btn-sm" data-cache-toggle>${cache.enabled ? "停用" : "启用"}</button>`
+                              : ""
+                          }
+                        </td>
+                      </tr>`
+                    )
+                    .join("")
+                : `<tr><td colspan="8" class="text-muted">暂无角色缓存配置</td></tr>`
+            }
+          </tbody>
+        </table></div>
+      </div>`;
+
+    root.querySelectorAll("[data-role-cache-row]").forEach((row) => {
+      const roleId = row.getAttribute("data-role-cache-row");
+      const current = caches.find((item) => item.role_id === roleId) || {};
+      row.querySelector("[data-cache-detail]").onclick = () => openRoleCacheQuestions(roleId, current.name);
+      if (!canWrite) return;
+
+      const save = async (patch) => {
+        await api.patch(`/role-caches/${roleId}`, patch);
+        toast("缓存配置已保存");
+        await pageRoleCaches();
+      };
+      row.querySelector("[data-cache-save]").onclick = async () => {
+        const intervalDays = Number(row.querySelector("[data-cache-interval]").value);
+        if (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365) {
+          toast("检测周期必须是 1-365 天的整数", "error");
+          return;
+        }
+        try {
+          await save({ interval_days: intervalDays });
+        } catch (error) {
+          toast(error.message, "error");
+        }
+      };
+      row.querySelector("[data-cache-toggle]").onclick = async () => {
+        try {
+          await save({ enabled: !current.enabled });
+        } catch (error) {
+          toast(error.message, "error");
+        }
+      };
+      row.querySelector("[data-cache-doc]").onclick = () => runRoleCacheAnalysis(roleId, "documents");
+      row.querySelector("[data-cache-history]").onclick = () => runRoleCacheAnalysis(roleId, "history");
+    });
+  } catch (error) {
+    root.innerHTML = `<div class="card empty-state">加载角色缓存失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+
+/** 管理员手动触发文档或历史分析；请求完成后自动刷新统计。 */
+async function runRoleCacheAnalysis(roleId, type) {
+  const label = type === "documents" ? "文档分析" : "历史高频检测";
+  toast(`${label}已开始，请等待模型处理完成`);
+  try {
+    const result = await api.post(`/role-caches/${roleId}/analyze-${type}`, {});
+    toast(result.message || `${label}已完成`);
+    await pageRoleCaches();
+  } catch (error) {
+    toast(`${label}失败：${error.message}`, "error");
+  }
+}
+
+/** 弹窗查看角色缓存中的问题、来源及实际命中次数。 */
+async function openRoleCacheQuestions(roleId, cacheName) {
+  try {
+    const data = await api.get(`/role-caches/${roleId}/questions?page=1&page_size=100`);
+    const items = data.items || [];
+    const mask = document.createElement("div");
+    mask.className = "modal-mask";
+    mask.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(1000px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+        <div class="modal-header"><h3>${escapeHtml(cacheName || "缓存问题明细")}</h3></div>
+        <div class="modal-body">
+          <p class="text-muted" style="margin-top:0">共 ${escapeHtml(data.total ?? items.length)} 个缓存问题。文档生成与历史高频问题都必须携带知识库来源范围才能被问答链路命中。</p>
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>问题</th><th>答案摘要</th><th>来源</th><th>历史频次</th><th>缓存命中</th><th>更新时间</th></tr></thead>
+            <tbody>
+              ${
+                items.length
+                  ? items
+                      .map(
+                        (item) => `<tr>
+                          <td>${escapeHtml(item.question)}</td>
+                          <td style="max-width:320px">${escapeHtml((item.answer || "").slice(0, 160))}${(item.answer || "").length > 160 ? "…" : ""}</td>
+                          <td>${item.source === "history_frequent" ? "历史高频" : "文档生成"}</td>
+                          <td>${escapeHtml(item.occurrence_count ?? 1)}</td>
+                          <td>${escapeHtml(item.hit_count ?? 0)}</td>
+                          <td>${formatDateTime(item.updated_at)}</td>
+                        </tr>`
+                      )
+                      .join("")
+                  : `<tr><td colspan="6" class="text-muted">尚未生成缓存问题</td></tr>`
+              }
+            </tbody>
+          </table></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>关闭</button></div>
+      </div>`;
+    document.body.appendChild(mask);
+    mask.querySelector("[data-close]").onclick = () => mask.remove();
+    mask.addEventListener("click", (event) => {
+      if (event.target === mask) mask.remove();
+    });
+  } catch (error) {
+    toast(`加载缓存问题失败：${error.message}`, "error");
+  }
+}
+
+/** 加载并弹窗展示单个会话中每一轮的 Query 预处理结果。 */
+async function openQaSessionDetail(sessionId) {
+  try {
+    const data = await api.get(`/qa/admin/sessions/${sessionId}`);
+    const session = data.session || {};
+    const messages = data.messages || [];
+    const turns = [];
+    let pendingQuestion = null;
+    messages.forEach((message) => {
+      if (message.role === "user") {
+        pendingQuestion = message;
+        return;
+      }
+      if (message.role === "assistant") {
+        turns.push({ question: pendingQuestion, answer: message });
+        pendingQuestion = null;
+      }
+    });
+
+    const turnHtml = turns.length
+      ? turns
+          .map((turn, index) => {
+            const meta = turn.answer?.retrieval_meta || {};
+            const processing = meta.query_processing || {};
+            const original = processing.original_query || meta.original_query || turn.question?.content || "-";
+            const rewritten = processing.rewritten_query || meta.rewritten_query || original;
+            const expansions = Array.isArray(processing.expanded_queries) ? processing.expanded_queries : [];
+            const hyde = processing.hyde_document || "";
+            const rerank = meta.rerank || {};
+            const intent = meta.intent || {};
+            return `
+              <div class="card" style="margin-bottom:12px;background:var(--color-bg-tint,#f8f9fa)">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+                  <strong>第 ${index + 1} 轮</strong>
+                  <span class="badge">${processing.applied ? "已执行预处理" : processing.error ? "已回退原 Query" : "历史记录未包含预处理"}</span>
+                </div>
+                <div style="display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px 12px;margin-top:12px;line-height:1.65">
+                  <span class="text-muted">原始 Query</span><div>${escapeHtml(original)}</div>
+                  <span class="text-muted">识别意图</span><div>${escapeHtml(intent.name || "历史记录未包含意图")} ${intent.confidence != null ? `（${Math.round(Number(intent.confidence) * 100)}%，${intent.detector === "llm" ? "LLM 分类器" : "本地规则"}）` : ""}</div>
+                  <span class="text-muted">改写 Query</span><div>${escapeHtml(rewritten)}</div>
+                  <span class="text-muted">扩展 Query</span><div>${expansions.length ? expansions.map((item) => `<code style="display:inline-block;margin:0 6px 6px 0">${escapeHtml(item)}</code>`).join("") : "-"}</div>
+                  <span class="text-muted">HyDE 假设文档</span><div style="white-space:pre-wrap">${hyde ? escapeHtml(hyde) : "-"}</div>
+                  <span class="text-muted">检索结果</span><div>命中 ${escapeHtml(meta.hit_count ?? 0)} 段；扩展 Query ${escapeHtml(meta.expanded_query_count ?? expansions.length)} 条；HyDE ${meta.hyde_used ? "已参与向量检索" : "未参与"}</div>
+                  <span class="text-muted">Rerank</span><div>${rerank.applied ? `${escapeHtml(rerank.provider || "-")} / ${escapeHtml(rerank.model || "-")}` : `未应用${rerank.error ? `（${escapeHtml(rerank.error)}）` : ""}`}</div>
+                  <span class="text-muted">最终回答</span><div style="white-space:pre-wrap">${escapeHtml(turn.answer?.content || "-")}</div>
+                </div>
+              </div>`;
+          })
+          .join("")
+      : `<div class="empty-state">该会话暂无完整问答轮次</div>`;
+
+    const mask = document.createElement("div");
+    mask.className = "modal-mask";
+    mask.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(960px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+        <div class="modal-header"><h3>${escapeHtml(session.title || "会话详情")}</h3></div>
+        <div class="modal-body">
+          <p class="text-muted" style="margin-top:0">用户：${escapeHtml(session.owner || "-")} · 消息 ${escapeHtml(session.message_count ?? messages.length)} 条 · 最后活跃 ${formatDateTime(session.last_active_at)}</p>
+          ${turnHtml}
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>关闭</button></div>
+      </div>`;
+    document.body.appendChild(mask);
+    mask.querySelector("[data-close]").onclick = () => mask.remove();
+    mask.addEventListener("click", (event) => {
+      if (event.target === mask) mask.remove();
+    });
+  } catch (error) {
+    toast(`加载会话详情失败：${error.message}`, "error");
+  }
+}
 
 async function pageAudit() {
   if (!requirePerm("audit:read", "审计日志")) return;
@@ -3201,6 +3685,8 @@ async function pageMonitor() {
         <li>文档数：${stats.doc_count ?? 0}</li>
         <li>活跃会话：${stats.active_sessions ?? 0}</li>
         <li>任务队列：${stats.task_queue_size ?? 0}</li>
+        <li>LLM Guard 近 24 小时阻拦：${stats.guard_blocked_24h ?? 0}</li>
+        <li>LLM Guard 近 7 天阻拦：${stats.guard_blocked_7d ?? 0}</li>
       </ul>`
       : `<p class="text-muted">${escapeHtml(stats?.error || "暂无统计")}</p>`;
   document.getElementById("pageRoot").innerHTML = `
@@ -3214,6 +3700,30 @@ async function pageMonitor() {
     <div class="card" style="margin-bottom:12px">
       <h3 class="card-title">系统统计</h3>
       ${statsHtml}
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <h3 class="card-title">LLM Guard 最近阻拦</h3>
+      <p class="text-muted">仅展示安全分类与原因码，不展示用户完整问题、密钥或令牌。</p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>时间</th><th>意图</th><th>原因码</th><th>检测层</th><th>置信度</th></tr></thead>
+        <tbody>
+          ${
+            stats?.guard_recent_events?.length
+              ? stats.guard_recent_events
+                  .map(
+                    (event) => `<tr>
+                      <td>${formatDateTime(event.created_at)}</td>
+                      <td>${escapeHtml(event.intent)}</td>
+                      <td><code>${escapeHtml(event.reason_code)}</code></td>
+                      <td>${event.detector === "llm" ? "LLM 分类器" : "本地规则"}</td>
+                      <td>${Math.round(Number(event.confidence || 0) * 100)}%</td>
+                    </tr>`
+                  )
+                  .join("")
+              : `<tr><td colspan="5" class="text-muted">最近没有恶意访问阻拦记录</td></tr>`
+          }
+        </tbody>
+      </table></div>
     </div>
     <div class="card">
       <h3 class="card-title">Grafana 面板</h3>
@@ -3247,6 +3757,9 @@ async function pageMonitor() {
   "/admin/knowledge-bases/:id",
   "/admin/knowledge-bases/:id/documents",
   "/admin/knowledge-bases/:id/snapshots",
+  "/admin/ragas",
+  "/admin/qa-sessions",
+  "/admin/role-caches",
   "/admin/hit-test",
   "/admin/audit",
   "/admin/monitor",

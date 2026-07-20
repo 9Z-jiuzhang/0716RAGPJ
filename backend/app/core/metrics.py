@@ -72,6 +72,12 @@ llm_calls_total = Counter(
     "LLM / embedding / retrieval call counts",
     ["component", "status"],
 )
+# LLM Guard 阻拦计数仅使用固定意图/原因码标签，避免把用户问题写入 Prometheus。
+llm_guard_blocked_total = Counter(
+    "llm_guard_blocked_total",
+    "Total malicious QA requests blocked by LLM Guard",
+    ["intent", "reason_code", "detector"],
+)
 
 
 def metrics_payload() -> tuple[bytes, str]:

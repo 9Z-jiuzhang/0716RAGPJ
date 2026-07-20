@@ -69,6 +69,7 @@ class SplitMode(str, Enum):
     HEADING = "heading"
     PARAGRAPH = "paragraph"
     SLIDING = "sliding"
+    MARKDOWN = "markdown"
 
 
 # 上传首期允许

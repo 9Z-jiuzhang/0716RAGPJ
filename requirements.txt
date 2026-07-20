@@ -43,7 +43,14 @@ openpyxl>=3.1,<4.0
 # LLM 相关
 openai>=1.30,<2.0
 langchain-core>=0.2,<1.0
+# RAGAS 0.4.3 仍导入旧版 LangChain Community 的 VertexAI 兼容路径；
+# 显式固定 0.3 系列，避免解析到已移除该路径的 0.4 系列并减少 pip 回溯时间。
+langchain>=0.3.30,<0.4
+langchain-community>=0.3.31,<0.4
+langchain-openai>=0.3.35,<0.4
 langfuse>=2.40,<3.0
+# RAGAS 0.4 使用 collections 指标 API；固定小版本避免评估接口漂移。
+ragas==0.4.3
 
 # 检索与流式输出（智能问答模块 5.6）
 rank-bm25>=0.2,<1.0

@@ -146,6 +146,7 @@ class MonitorService:
         vectorize_queue_size.set(queue_size)
         active_sessions.set(sessions)
 
+        guard_stats = await self._guard_stats()
         return SystemStatsResponse(
             user_count=user_count,
             kb_count=kb_count,
@@ -154,7 +155,61 @@ class MonitorService:
             task_queue_size=queue_size,
             qa_trend_7d=await self._qa_trend_7d(),
             hit_rate_trend_7d=await self._hit_rate_trend_7d(),
+            guard_blocked_24h=guard_stats["blocked_24h"],
+            guard_blocked_7d=guard_stats["blocked_7d"],
+            guard_recent_events=guard_stats["recent_events"],
         )
+
+    async def _guard_stats(self) -> dict[str, object]:
+        """统计最近恶意访问阻拦次数；返回内容不包含用户问题正文。"""
+        from datetime import timedelta
+
+        from app.models.base import utcnow
+        from app.models.guard import GuardBlockedEvent
+
+        now = utcnow()
+        try:
+            blocked_24h = int(
+                await self.db.scalar(
+                    select(func.count())
+                    .select_from(GuardBlockedEvent)
+                    .where(GuardBlockedEvent.created_at >= now - timedelta(hours=24))
+                )
+                or 0
+            )
+            blocked_7d = int(
+                await self.db.scalar(
+                    select(func.count())
+                    .select_from(GuardBlockedEvent)
+                    .where(GuardBlockedEvent.created_at >= now - timedelta(days=7))
+                )
+                or 0
+            )
+            rows = list(
+                (
+                    await self.db.scalars(
+                        select(GuardBlockedEvent).order_by(GuardBlockedEvent.created_at.desc()).limit(10)
+                    )
+                ).all()
+            )
+            recent_events = [
+                {
+                    "intent": row.intent,
+                    "reason_code": row.reason_code,
+                    "detector": row.detector,
+                    "confidence": round(row.confidence, 4),
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ]
+            return {
+                "blocked_24h": blocked_24h,
+                "blocked_7d": blocked_7d,
+                "recent_events": recent_events,
+            }
+        except Exception:
+            logger.warning("guard stats query failed", exc_info=True)
+            return {"blocked_24h": 0, "blocked_7d": 0, "recent_events": []}
 
     async def _qa_trend_7d(self) -> list[int]:
         """近 7 天每日用户提问数（含今天，按日升序）。"""

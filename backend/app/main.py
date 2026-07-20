@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,8 +42,10 @@ from .models.department import Department
 from .models.knowledge_base import KnowledgeBase
 from .models.model_config import ModelConfig
 from .services.embedding import embedding_service
+from .services.history_retention import history_retention_loop
 from .services.langfuse_service import get_langfuse
 from .services.llm import llm_service
+from .services.role_cache import ensure_role_cache_configs, role_cache_loop
 from .services.session_expiry import session_expiry_loop
 
 
@@ -230,54 +232,68 @@ async def seed_departments() -> None:
 
 
 async def seed_model_configs() -> None:
-    """从 .env 登记默认 LLM/Embedding 配置（幂等，不覆盖已有）。"""
+    """从 .env 分类型登记默认模型配置（幂等，不覆盖管理员已有配置）。
+
+    旧实现只要表中存在任意模型就直接返回，因此升级前已经登记 LLM/Embedding 的
+    数据库永远不会出现 Rerank。现在按模型类型分别补齐，兼容已有生产数据。
+    """
     async with SessionLocal() as db:
-        existing = await db.scalar(select(func.count()).select_from(ModelConfig)) or 0
-        if existing:
-            return
-        defaults = [
-            ModelConfig(
-                name="默认 LLM",
-                model_type="llm",
-                provider=settings.LLM_PROVIDER,
-                model_name=settings.LLM_MODEL,
-                base_url=settings.LLM_BASE_URL or None,
-                is_default=True,
-                is_enabled=True,
-                config={"max_tokens": settings.LLM_MAX_TOKENS},
-                timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
-                api_key_env="LLM_API_KEY",
-            ),
-            ModelConfig(
-                name="默认 Embedding",
-                model_type="embedding",
-                provider=settings.EMBEDDING_PROVIDER,
-                model_name=settings.EMBEDDING_MODEL_NAME,
-                base_url=settings.EMBEDDING_API_BASE or None,
-                is_default=True,
-                is_enabled=True,
-                config={},
-                timeout_seconds=settings.EMBEDDING_TIMEOUT_SECONDS,
-                api_key_env="EMBEDDING_API_KEY",
-            ),
-        ]
-        if settings.RERANK_MODEL:
+        existing_types = set((await db.scalars(select(ModelConfig.model_type).distinct())).all())
+        defaults: list[ModelConfig] = []
+        if "llm" not in existing_types:
             defaults.append(
                 ModelConfig(
-                    name="默认 Rerank",
-                    model_type="rerank",
-                    provider=settings.RERANK_PROVIDER or "custom",
-                    model_name=settings.RERANK_MODEL,
+                    name="默认 LLM",
+                    model_type="llm",
+                    provider=settings.LLM_PROVIDER,
+                    model_name=settings.LLM_MODEL,
+                    base_url=settings.LLM_BASE_URL or None,
+                    is_default=True,
+                    is_enabled=True,
+                    config={"max_tokens": settings.LLM_MAX_TOKENS},
+                    timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
+                    api_key_env="LLM_API_KEY",
+                )
+            )
+        if "embedding" not in existing_types:
+            defaults.append(
+                ModelConfig(
+                    name="默认 Embedding",
+                    model_type="embedding",
+                    provider=settings.EMBEDDING_PROVIDER,
+                    model_name=settings.EMBEDDING_MODEL_NAME,
+                    base_url=settings.EMBEDDING_API_BASE or None,
                     is_default=True,
                     is_enabled=True,
                     config={},
-                    timeout_seconds=60,
+                    timeout_seconds=settings.EMBEDDING_TIMEOUT_SECONDS,
+                    api_key_env="EMBEDDING_API_KEY",
+                )
+            )
+        if "rerank" not in existing_types:
+            defaults.append(
+                ModelConfig(
+                    name="Cohere Rerank（默认）",
+                    model_type="rerank",
+                    provider=settings.RERANK_PROVIDER or "cohere",
+                    model_name=settings.RERANK_MODEL or "rerank-v4.0-pro",
+                    base_url=settings.RERANK_BASE_URL or "https://api.cohere.ai",
+                    is_default=True,
+                    is_enabled=True,
+                    config={"candidate_multiplier": settings.RERANK_CANDIDATE_MULTIPLIER},
+                    timeout_seconds=settings.RERANK_TIMEOUT_SECONDS,
                     api_key_env="RERANK_API_KEY",
                 )
             )
         for row in defaults:
             db.add(row)
         await db.commit()
+
+
+async def seed_role_cache_configs() -> None:
+    """为当前所有角色创建默认 7 天周期的缓存知识库配置。"""
+    async with SessionLocal() as db:
+        await ensure_role_cache_configs(db, commit=True)
 
 
 @asynccontextmanager
@@ -292,6 +308,7 @@ async def lifespan(_: FastAPI):
     await seed_identity_data()
     await seed_departments()
     await seed_model_configs()
+    await seed_role_cache_configs()
     await init_redis()
     try:
         init_chroma()
@@ -301,9 +318,19 @@ async def lifespan(_: FastAPI):
 
     stop_expiry = asyncio.Event()
     expiry_task: asyncio.Task | None = None
+    retention_task: asyncio.Task | None = None
+    role_cache_task: asyncio.Task | None = None
     # 测试环境不启后台扫描，避免干扰用例与连接生命周期
     if "pytest" not in sys.modules and not os.environ.get("PYTEST_CURRENT_TEST"):
         expiry_task = asyncio.create_task(session_expiry_loop(stop_expiry), name="session-expiry")
+        retention_task = asyncio.create_task(
+            history_retention_loop(stop_expiry),
+            name="history-retention",
+        )
+        role_cache_task = asyncio.create_task(
+            role_cache_loop(stop_expiry),
+            name="role-cache-scheduler",
+        )
 
     yield
 
@@ -312,6 +339,18 @@ async def lifespan(_: FastAPI):
         expiry_task.cancel()
         try:
             await expiry_task
+        except asyncio.CancelledError:
+            pass
+    if retention_task is not None:
+        retention_task.cancel()
+        try:
+            await retention_task
+        except asyncio.CancelledError:
+            pass
+    if role_cache_task is not None:
+        role_cache_task.cancel()
+        try:
+            await role_cache_task
         except asyncio.CancelledError:
             pass
 

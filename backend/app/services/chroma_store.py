@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import uuid
 from collections.abc import Sequence
@@ -66,14 +67,16 @@ def collection_name_for(kb_id: uuid.UUID | str, index_version: str) -> str:
 
 def distance_to_score(distance: float) -> float:
     """
-    将 Chroma 距离转换为 (0, 1] 区间的相关性得分。
+    将 Chroma cosine 距离转换为 [0, 1] 区间的相关性得分。
 
-    默认使用 L2/cosine 距离的常用映射：score = 1 / (1 + distance)。
-    距离越小，得分越高。
+    Collection 固定使用 ``hnsw:space=cosine``，因此真实 cosine similarity
+    为 ``1 - distance``。旧公式 ``1 / (1 + distance)`` 会把接近正交的
+    distance=1 错误显示成 50%，也是大量结果集中在 55% 左右的原因之一。
     """
-    if distance < 0:
-        distance = 0.0
-    return 1.0 / (1.0 + float(distance))
+    numeric_distance = float(distance)
+    if not math.isfinite(numeric_distance):
+        return 0.0
+    return max(0.0, min(1.0, 1.0 - numeric_distance))
 
 
 class ChromaVectorStore:
@@ -292,6 +295,10 @@ class ChromaVectorStore:
                 chunk_index = int(chunk_index_raw)
             except (TypeError, ValueError):
                 chunk_index = 0
+            metadata = dict(meta)
+            # 保留原始距离和得分来源，便于排查前端展示值，不暴露文档之外的敏感数据。
+            metadata["vector_distance"] = round(distance, 8)
+            metadata["score_source"] = "cosine_similarity"
             hits.append(
                 VectorHit(
                     chunk_id=str(chunk_id),
@@ -302,7 +309,7 @@ class ChromaVectorStore:
                     content=str(content),
                     distance=distance,
                     score=distance_to_score(distance),
-                    metadata=dict(meta),
+                    metadata=metadata,
                 )
             )
         return hits

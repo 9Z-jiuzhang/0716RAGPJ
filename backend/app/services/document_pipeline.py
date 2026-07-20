@@ -14,7 +14,7 @@ from app.models import DocumentChunk
 from app.models.enums import DocumentStatus, SnapshotTrigger
 from app.repositories import document as doc_repo
 from app.services import embedding, parsers, storage, vector_store
-from app.services.chunking import merge_rules, split_text
+from app.services.chunking import adapt_rules_for_file_type, merge_rules, split_text
 from app.services.document_state import apply_status
 from app.services.normalize import normalize_text
 from app.services.observability import langfuse_span, record_metric, write_audit
@@ -188,7 +188,7 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
             apply_status(doc, DocumentStatus.PENDING_SEGMENT.value)
     await db.flush()
     record_metric("segment", "start")
-    rules = merge_rules(doc.segment_rules, None)
+    rules = adapt_rules_for_file_type(merge_rules(doc.segment_rules, None), doc.file_type)
     previews = split_text(doc.normalized_text or "", rules)
     chunks = [
         DocumentChunk(

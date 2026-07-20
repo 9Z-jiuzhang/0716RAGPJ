@@ -4,6 +4,7 @@
 - POST /qa/ask          — 流式问答（可选认证，访客可访问公开库）
 - GET  /qa/sessions      — 本人会话列表（需登录）
 - GET  /qa/sessions/{id} — 会话消息历史（需登录）
+- GET  /qa/admin/sessions — 管理员会话与 Query 预处理分析
 - PUT  /qa/sessions/{id} — 重命名会话（需登录）
 - DELETE /qa/sessions/{id} — 删除会话（需登录）
 - POST /qa/feedback      — 回答反馈（需登录）
@@ -17,7 +18,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, get_optional_current_user
+from app.core.dependencies import get_current_user, get_optional_current_user, require_permission
 from app.core.qa_pipeline import qa_pipeline
 from app.memory.session_store import session_store
 from app.models.identity import User
@@ -93,6 +94,7 @@ def _message_to_dict(msg: QAMessage) -> dict[str, Any]:
         "request_id": msg.request_id,
         "strategy": msg.strategy,
         "latency_ms": msg.latency_ms,
+        "retrieval_meta": msg.retrieval_meta,
     }
 
 
@@ -118,7 +120,10 @@ def _normalize_sse_payload(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 @router.post(
     "/ask",
     summary="发送问题（SSE）",
-    description="流式问答。Content-Type: text/event-stream。事件：chunk / citations / done / error。",
+    description=(
+        "流式问答。Content-Type: text/event-stream。"
+        "事件：guard_blocked / intent / cache_hit / query_processing / chunk / citations / done / error。"
+    ),
     response_class=StreamingResponse,
 )
 async def ask_question(
@@ -298,3 +303,104 @@ async def submit_feedback(
     msg.retrieval_meta = meta
     await db.commit()
     return BaseResponse(message="反馈已记录", request_id=request_id)
+
+
+@router.get("/admin/sessions", response_model=BaseResponse, summary="管理员会话分析列表")
+async def list_admin_sessions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission("system:read")),
+    request_id: str = Depends(_request_id),
+) -> BaseResponse:
+    """跨用户分页返回会话，用于查看 Query 改写、扩展和 HyDE 处理结果。"""
+    filters = (QASession.status != "deleted",)
+    total = await db.scalar(select(func.count()).select_from(QASession).where(*filters))
+    rows = (
+        await db.execute(
+            select(QASession, User)
+            .outerjoin(User, User.id == QASession.user_id)
+            .where(*filters)
+            .order_by(QASession.last_active_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+
+    items: list[dict[str, Any]] = []
+    for session, owner in rows:
+        items.append(
+            {
+                "id": str(session.id),
+                "title": session.title,
+                "owner": (
+                    owner.nickname or owner.username if owner is not None else f"访客 {str(session.guest_id or '')[:8]}"
+                ),
+                "owner_type": "user" if owner is not None else "guest",
+                "message_count": session.message_count,
+                "status": session.status,
+                "last_active_at": session.last_active_at.isoformat(),
+                "created_at": session.created_at.isoformat(),
+            }
+        )
+
+    return BaseResponse(
+        data={
+            "items": items,
+            "total": int(total or 0),
+            "page": page,
+            "page_size": page_size,
+        },
+        request_id=request_id,
+    )
+
+
+@router.get(
+    "/admin/sessions/{session_id}",
+    response_model=BaseResponse,
+    summary="管理员会话分析详情",
+)
+async def get_admin_session_detail(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_permission("system:read")),
+    request_id: str = Depends(_request_id),
+) -> BaseResponse:
+    """返回完整会话消息及 assistant 消息中的 Query 预处理审计元数据。"""
+    row = (
+        await db.execute(
+            select(QASession, User)
+            .outerjoin(User, User.id == QASession.user_id)
+            .where(
+                QASession.id == session_id,
+                QASession.status != "deleted",
+            )
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+    session, owner = row
+    messages = (
+        await db.scalars(
+            select(QAMessage).where(QAMessage.session_id == session.id).order_by(QAMessage.created_at.asc())
+        )
+    ).all()
+
+    return BaseResponse(
+        data={
+            "session": {
+                "id": str(session.id),
+                "title": session.title,
+                "owner": (
+                    owner.nickname or owner.username if owner is not None else f"访客 {str(session.guest_id or '')[:8]}"
+                ),
+                "owner_type": "user" if owner is not None else "guest",
+                "message_count": session.message_count,
+                "status": session.status,
+                "last_active_at": session.last_active_at.isoformat(),
+                "created_at": session.created_at.isoformat(),
+            },
+            "messages": [_message_to_dict(message) for message in messages],
+        },
+        request_id=request_id,
+    )
