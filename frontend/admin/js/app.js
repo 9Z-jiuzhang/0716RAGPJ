@@ -159,7 +159,6 @@ function renderHomeIntro() {
         <h1>构建你的智能知识中枢</h1>
         <p>连接文档、数据与大模型，让知识随时可被精准检索。</p>
       </div>
-      ${hasPermission("kb:read") ? `<button class="btn hero-action" type="button" data-go="/admin/knowledge-bases">+ 新建知识库</button>` : ""}
     </section>
     <div class="dashboard-note">
       支持多格式文档解析、混合检索、权限隔离与审计追踪；所有统计数据均来自当前系统。
@@ -1545,7 +1544,7 @@ async function pageKbList() {
             <p>${escapeHtml(k.description || "暂未填写知识库简介，可进入详情页补充说明。")}</p>
             <div class="kb-card-meta"><span>${escapeHtml(k.doc_count ?? 0)} 份文档</span><span>${formatDateTime(k.updated_at)}</span></div>
             <div class="kb-card-access">${accessScopeBadge(k)}</div>
-            <div class="kb-card-actions"><button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">查看详情</button><button class="btn btn-text btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}/documents">文档管理</button></div>
+            <div class="kb-card-actions"><button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">查看详情</button><button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}/documents">文档管理</button></div>
           </div>
         </article>`).join("") || `<div class="card empty-state">暂未创建可访问的知识库</div>`}
       </section>`;
@@ -1954,7 +1953,7 @@ async function pageDocuments(kbId) {
         <input type="file" id="adminFile" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
         <button class="btn btn-sm" id="btnAdminUpload">上传</button>
       </div>
-      <p class="text-muted" style="margin:0 0 12px"><strong>支持的文件类型：</strong>PDF、DOC、DOCX、TXT、MD（Markdown）。</p>
+      <p class="text-muted" style="margin:0 0 12px"><strong>支持的文件类型：</strong>PDF、Word（DOC/DOCX）、TXT、Markdown（MD）。</p>
       <div class="card">
         <h3 class="card-title">文档列表 · 分段 / 预处理 / 向量化状态</h3>
         <div class="table-wrap"><table class="table">
@@ -3245,9 +3244,41 @@ async function pageQaSessions() {
   root.innerHTML = `<div class="loading">加载会话与 Query 预处理记录…</div>`;
 
   try {
-    const data = await api.get("/qa/admin/sessions?page=1&page_size=50");
+    // 配置与会话记录彼此独立，并行加载可以缩短管理页首屏等待时间。
+    const [data, queryConfig] = await Promise.all([
+      api.get("/qa/admin/sessions?page=1&page_size=50"),
+      api.get("/query-processing"),
+    ]);
     const sessions = data.items || [];
+    const canWrite = hasPermission("kb:write");
     root.innerHTML = `
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+          <div>
+            <h3 class="card-title">Query 预处理策略</h3>
+            <p class="text-muted" style="margin:4px 0 14px">默认仅开启 Query 改写。扩展与 HyDE 会增加模型和检索开销，可按业务精度要求开启；缓存命中时始终跳过这些步骤直接返回。</p>
+          </div>
+          ${canWrite ? `<button type="button" class="btn btn-primary btn-sm" data-query-config-save>保存策略</button>` : ""}
+        </div>
+        <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" data-query-rewrite ${queryConfig.rewrite_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} />
+            启用 Query 改写
+          </label>
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" data-query-expansion ${queryConfig.expansion_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} />
+            启用 Query 扩展
+          </label>
+          <label style="display:flex;align-items:center;gap:8px">
+            扩展数量
+            <input class="form-control" style="width:72px" type="number" min="0" max="5" value="${escapeHtml(queryConfig.expansion_count ?? 1)}" data-query-expansion-count ${canWrite && queryConfig.expansion_enabled ? "" : "disabled"} />
+          </label>
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" data-query-hyde ${queryConfig.hyde_enabled ? "checked" : ""} ${canWrite ? "" : "disabled"} />
+            启用 HyDE 假设文档
+          </label>
+        </div>
+      </div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
           <div>
@@ -3278,6 +3309,34 @@ async function pageQaSessions() {
           </tbody>
         </table></div>
       </div>`;
+
+    if (canWrite) {
+      const expansionToggle = root.querySelector("[data-query-expansion]");
+      const expansionCount = root.querySelector("[data-query-expansion-count]");
+      // 扩展关闭时禁用数量输入，防止管理员误以为数量仍会生效。
+      expansionToggle.onchange = () => {
+        expansionCount.disabled = !expansionToggle.checked;
+      };
+      root.querySelector("[data-query-config-save]").onclick = async () => {
+        const count = Number(expansionCount.value);
+        if (!Number.isInteger(count) || count < 0 || count > 5) {
+          toast("Query 扩展数量必须是 0-5 的整数", "error");
+          return;
+        }
+        try {
+          await api.put("/query-processing", {
+            rewrite_enabled: root.querySelector("[data-query-rewrite]").checked,
+            expansion_enabled: expansionToggle.checked,
+            expansion_count: count,
+            hyde_enabled: root.querySelector("[data-query-hyde]").checked,
+          });
+          toast("Query 预处理策略已保存");
+          await pageQaSessions();
+        } catch (error) {
+          toast(`保存 Query 预处理策略失败：${error.message}`, "error");
+        }
+      };
+    }
 
     root.querySelectorAll("[data-session-detail]").forEach((button) => {
       button.onclick = () => openQaSessionDetail(button.getAttribute("data-session-detail"));

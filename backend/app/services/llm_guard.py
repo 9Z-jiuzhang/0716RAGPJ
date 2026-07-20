@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.core.metrics import llm_guard_blocked_total
 from app.models.guard import GuardBlockedEvent
 from app.models.identity import User
-from app.services.llm import LLMServiceError, llm_service
+from app.services.llm import LLMServiceError, guard_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,8 @@ class LLMGuardService:
 
     async def _classify_with_llm(self, question: str) -> GuardDecision:
         """调用结构化 LLM 分类器处理本地无法明确归类的输入。"""
-        raw = await llm_service.chat(
+        # 安全分类只需要短 JSON，使用独立高速模型，避免占用主回答模型的长推理通道。
+        raw = await guard_llm_service.chat(
             [
                 {"role": "system", "content": _INTENT_PROMPT},
                 {"role": "user", "content": question[:2000]},

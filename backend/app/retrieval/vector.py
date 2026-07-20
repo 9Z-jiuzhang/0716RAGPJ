@@ -19,6 +19,52 @@ logger = logging.getLogger(__name__)
 class VectorRetriever:
     """基于 Chroma 的语义向量检索器。"""
 
+    async def search_many(
+        self,
+        queries: Sequence[tuple[str, str]],
+        targets: Sequence[KBTarget],
+        *,
+        top_k: int = 5,
+    ) -> list[tuple[str, list[RetrievalHit]]]:
+        """批量向量化多个 Query，再分别执行 Chroma 检索。
+
+        ``queries`` 使用 ``(通道标签, 查询文本)``，返回值保留相同标签供 RRF
+        标记命中来源。所有 Query 在一次 ``embed_texts`` 调用中提交，避免主查询、
+        扩展查询和 HyDE 逐条产生远程 Embedding 往返。
+        """
+        if not queries or not targets:
+            return []
+
+        cleaned_queries: list[tuple[str, str]] = []
+        for label, query in queries:
+            cleaned = (query or "").strip()
+            if cleaned:
+                cleaned_queries.append((label, cleaned))
+        if not cleaned_queries:
+            return []
+
+        try:
+            # Embedding 服务自身会按厂商上限分批；默认扩展数量较少时这里仅发一次 HTTP 请求。
+            embeddings = await embedding_service.embed_texts([query for _, query in cleaned_queries])
+        except EmbeddingServiceError as exc:
+            logger.warning("批量向量检索跳过：Embedding 不可用 — %s", exc)
+            return []
+
+        if len(embeddings) != len(cleaned_queries):
+            logger.warning(
+                "批量向量检索跳过：Embedding 数量不匹配（查询 %d，向量 %d）",
+                len(cleaned_queries),
+                len(embeddings),
+            )
+            return []
+
+        results: list[tuple[str, list[RetrievalHit]]] = []
+        for (label, _), query_embedding in zip(cleaned_queries, embeddings, strict=True):
+            hits = await self._search_by_embedding(query_embedding, targets, top_k=top_k)
+            if hits:
+                results.append((label, hits))
+        return results
+
     async def search(
         self,
         query: str,
@@ -34,11 +80,18 @@ class VectorRetriever:
         if not query.strip() or not targets:
             return []
 
-        try:
-            query_embedding = await embedding_service.embed_query(query)
-        except EmbeddingServiceError as exc:
-            logger.warning("向量检索跳过：Embedding 不可用 — %s", exc)
-            return []
+        # 单 Query 接口继续保留给其他调用方，并复用批量实现保证只有一套检索逻辑。
+        results = await self.search_many([("query", query)], targets, top_k=top_k)
+        return results[0][1] if results else []
+
+    async def _search_by_embedding(
+        self,
+        query_embedding: list[float],
+        targets: Sequence[KBTarget],
+        *,
+        top_k: int,
+    ) -> list[RetrievalHit]:
+        """使用已生成的向量查询 Chroma，不再触发任何 Embedding 请求。"""
 
         try:
             kb_targets = [(t.kb_id, t.index_version) for t in targets]

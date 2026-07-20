@@ -10,6 +10,7 @@ from .index_version import IndexVersion
 from .knowledge_base import KBPermission, KnowledgeBase
 from .model_config import ModelConfig
 from .qa import QAMessage, QASession
+from .query_processing import QueryProcessingConfig
 from .ragas_evaluation import RagasEvaluationItem, RagasEvaluationRun
 from .role_cache import RoleCacheConfig, RoleCachedQuestion
 from .snapshot import Snapshot, SnapshotDocument
@@ -37,6 +38,7 @@ __all__ = [
     "VectorizeTask",
     "QASession",
     "QAMessage",
+    "QueryProcessingConfig",
     "ModelConfig",
     "RoleCacheConfig",
     "RoleCachedQuestion",

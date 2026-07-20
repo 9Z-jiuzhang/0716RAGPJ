@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from app.core.qa_pipeline import QAPipeline
 from app.models.role_cache import RoleCachedQuestion
 from app.services.role_cache import (
     CacheAnalysisResult,
@@ -27,6 +29,20 @@ def test_normalize_cache_question_only_ignores_formatting_differences() -> None:
     """空白、全半角和末尾标点应归一，但不同词序不会被误判为相同问题。"""
     assert normalize_cache_question(" 年假有几天？ ") == normalize_cache_question("年假有几天?")
     assert normalize_cache_question("年假有几天") != normalize_cache_question("几天年假")
+
+
+def test_cache_lookup_stays_before_query_processing_and_retrieval() -> None:
+    """缓存精确命中必须早于 Query 模型、Embedding、Rerank 和回答生成。"""
+    source = inspect.getsource(QAPipeline.run)
+
+    cache_position = source.index("role_cache_service.lookup")
+    query_position = source.index("get_query_processing_options")
+    retrieval_position = source.index("hybrid_retriever.retrieve")
+    assert cache_position < query_position < retrieval_position
+    # 命中分支中的 return 是跳过后续模型链路的关键短路，不允许只标记命中后继续执行。
+    cache_branch = source[cache_position:query_position]
+    assert "if cache_match is not None" in cache_branch
+    assert "return" in cache_branch
 
 
 @pytest.mark.asyncio

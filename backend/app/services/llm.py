@@ -33,24 +33,46 @@ class LLMServiceError(Exception):
 
 
 class LLMService:
-    """OpenAI 兼容协议的大模型客户端。"""
+    """OpenAI 兼容协议的大模型客户端。
 
-    def __init__(self) -> None:
+    可选覆盖参数用于构建 Guard、Query 预处理等独立轻量客户端。覆盖项为空时
+    自动复用主 LLM 配置，因此无需重复填写密钥，同时仍能隔离模型、超时和连接池。
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str | None = None,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: int | None = None,
+        default_max_tokens: int | None = None,
+    ) -> None:
+        self._model_override = (model or "").strip() or None
+        self._api_base_override = (api_base or "").strip() or None
+        self._api_key_override = (api_key or "").strip() or None
+        self._timeout_override = timeout_seconds
+        self._default_max_tokens = default_max_tokens
         self._client: httpx.AsyncClient | None = None
 
     @property
     def api_base(self) -> str:
         """规范化 API Base，去掉末尾斜杠。"""
-        base = settings.llm_api_base_resolved or "https://api.openai.com/v1"
+        base = self._api_base_override or settings.llm_api_base_resolved or "https://api.openai.com/v1"
         return base.rstrip("/")
 
     @property
     def model(self) -> str:
-        return settings.LLM_MODEL
+        return self._model_override or settings.LLM_MODEL
+
+    @property
+    def timeout_seconds(self) -> int:
+        """返回该客户端自己的超时，避免轻量任务继承主回答的长超时。"""
+        return self._timeout_override or settings.LLM_TIMEOUT_SECONDS
 
     def _ensure_api_key(self) -> str:
         """校验 API Key 已配置。"""
-        key = (settings.LLM_API_KEY or "").strip()
+        key = self._api_key_override or (settings.LLM_API_KEY or "").strip()
         if not key:
             raise LLMServiceError("LLM_API_KEY 未配置，无法调用大模型")
         return key
@@ -59,7 +81,7 @@ class LLMService:
         """懒加载共享 AsyncClient，复用连接池。"""
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(settings.LLM_TIMEOUT_SECONDS, connect=10.0),
+                timeout=httpx.Timeout(self.timeout_seconds, connect=min(10.0, float(self.timeout_seconds))),
                 headers={
                     "Authorization": f"Bearer {self._ensure_api_key()}",
                     "Content-Type": "application/json",
@@ -88,7 +110,7 @@ class LLMService:
             "messages": messages,
             "temperature": temperature,
             "stream": stream,
-            "max_tokens": max_tokens or settings.LLM_MAX_TOKENS,
+            "max_tokens": max_tokens or self._default_max_tokens or settings.LLM_MAX_TOKENS,
         }
         if extra:
             payload.update(extra)
@@ -119,7 +141,7 @@ class LLMService:
         try:
             response = await client.post(url, json=payload)
         except httpx.TimeoutException as exc:
-            raise LLMServiceError(f"LLM 请求超时（>{settings.LLM_TIMEOUT_SECONDS}s）") from exc
+            raise LLMServiceError(f"LLM 请求超时（>{self.timeout_seconds}s）") from exc
         except httpx.HTTPError as exc:
             raise LLMServiceError(f"LLM 网络错误: {exc}") from exc
 
@@ -203,11 +225,12 @@ class LLMService:
                             usage_sink.update(usage)
                     delta = self._extract_delta_content(chunk)
                     if delta:
+                        # 保留模型附带的推理标签，由前端与最终回答分开展示，便于用户查看过程。
                         yield delta
         except LLMServiceError:
             raise
         except httpx.TimeoutException as exc:
-            raise LLMServiceError(f"LLM 流式请求超时（>{settings.LLM_TIMEOUT_SECONDS}s）") from exc
+            raise LLMServiceError(f"LLM 流式请求超时（>{self.timeout_seconds}s）") from exc
         except httpx.HTTPError as exc:
             raise LLMServiceError(f"LLM 流式网络错误: {exc}") from exc
 
@@ -238,3 +261,20 @@ class LLMService:
 
 # 模块级单例，供问答编排与摘要模块复用
 llm_service = LLMService()
+
+# Guard 和 Query 预处理使用独立的轻量模型客户端。独立连接池可以避免短任务与主回答
+# 争用连接；API Key/Base URL 为空时仅复用凭据和地址，不会复用主模型实例。
+guard_llm_service = LLMService(
+    model=settings.LLM_GUARD_MODEL,
+    api_base=settings.LLM_GUARD_BASE_URL,
+    api_key=settings.LLM_GUARD_API_KEY,
+    timeout_seconds=settings.LLM_GUARD_TIMEOUT_SECONDS,
+    default_max_tokens=192,
+)
+query_processing_llm_service = LLMService(
+    model=settings.QA_QUERY_PROCESSING_MODEL,
+    api_base=settings.QA_QUERY_PROCESSING_BASE_URL,
+    api_key=settings.QA_QUERY_PROCESSING_API_KEY,
+    timeout_seconds=settings.QA_QUERY_PROCESSING_TIMEOUT_SECONDS,
+    default_max_tokens=settings.QA_QUERY_PROCESSING_MAX_TOKENS,
+)

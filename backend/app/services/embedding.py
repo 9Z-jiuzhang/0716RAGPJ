@@ -22,6 +22,45 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BATCH_SIZE = max(1, settings.EMBEDDING_BATCH_SIZE)
 
 
+class EmbeddingServiceError(Exception):
+    """Embedding 配置或远程调用失败时抛出的业务异常。
+
+    统一异常类型能够让同步文档流水线和异步问答检索得到相同、可理解的错误信息，
+    避免底层 HTTP 客户端把非法密钥表现为难以定位的编码异常。
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None, detail: Any = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail
+
+
+def _resolve_embedding_api_key() -> str:
+    """读取并校验 Embedding 密钥，返回可安全写入 HTTP 请求头的值。
+
+    配置文件中的中文提示语、``change-me`` 等占位值不是真实密钥。如果直接交给
+    OpenAI/httpx 客户端，非 ASCII 内容会在构造 Authorization 请求头时触发
+    ``UnicodeEncodeError``，最终让文档在已经上传后卡在向量化阶段。这里提前校验，
+    既不输出密钥内容，也能向任务状态写入明确的配置错误。
+    """
+    key = (settings.EMBEDDING_API_KEY or settings.LLM_API_KEY or "").strip()
+    normalized = key.casefold()
+    placeholder_markers = (
+        "change-me",
+        "your-api-key",
+        "replace-me",
+        "请填写",
+        "请填入",
+        "在此填写",
+        "密钥",
+    )
+    if not key or any(marker in normalized for marker in placeholder_markers):
+        raise EmbeddingServiceError("EMBEDDING_API_KEY 未配置有效密钥，无法生成文档向量")
+    if not key.isascii():
+        raise EmbeddingServiceError("EMBEDDING_API_KEY 包含非 ASCII 字符，请检查是否仍为中文占位内容")
+    return key
+
+
 # ---------- 同步接口（文档模块） ----------
 
 
@@ -29,7 +68,7 @@ _DEFAULT_BATCH_SIZE = max(1, settings.EMBEDDING_BATCH_SIZE)
 def get_embedding_client() -> OpenAI:
     """返回同步 OpenAI 兼容客户端（DashScope / OpenAI）。"""
     return OpenAI(
-        api_key=settings.EMBEDDING_API_KEY or settings.LLM_API_KEY,
+        api_key=_resolve_embedding_api_key(),
         base_url=settings.embedding_api_base_resolved,
     )
 
@@ -54,15 +93,6 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 # ---------- 异步接口（问答模块） ----------
 
 
-class EmbeddingServiceError(Exception):
-    """Embedding 调用失败时抛出的业务异常。"""
-
-    def __init__(self, message: str, *, status_code: int | None = None, detail: Any = None):
-        super().__init__(message)
-        self.status_code = status_code
-        self.detail = detail
-
-
 class EmbeddingService:
     """OpenAI 兼容协议的异步文本向量化客户端。"""
 
@@ -80,10 +110,8 @@ class EmbeddingService:
         return settings.EMBEDDING_MODEL_NAME
 
     def _ensure_api_key(self) -> str:
-        key = (settings.EMBEDDING_API_KEY or settings.LLM_API_KEY or "").strip()
-        if not key:
-            raise EmbeddingServiceError("EMBEDDING_API_KEY 未配置，无法生成向量")
-        return key
+        """复用统一密钥校验，保证同步上传与异步查询的行为完全一致。"""
+        return _resolve_embedding_api_key()
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:

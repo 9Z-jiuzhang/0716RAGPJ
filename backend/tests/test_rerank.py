@@ -101,7 +101,7 @@ async def test_rerank_without_key_keeps_original_order(monkeypatch: pytest.Monke
 async def test_hybrid_retriever_expands_candidates_before_rerank(monkeypatch: pytest.MonkeyPatch) -> None:
     """检索器应扩大候选集，并把 Rerank 状态写入统一结果。"""
     hits = [_hit("first", 0.8), _hit("second", 0.7)]
-    vector_search = AsyncMock(return_value=hits)
+    vector_search = AsyncMock(return_value=[("primary", hits)])
     fulltext_search = AsyncMock(return_value=[])
     rerank_call = AsyncMock(
         return_value=RerankOutcome(
@@ -111,7 +111,7 @@ async def test_hybrid_retriever_expands_candidates_before_rerank(monkeypatch: py
             model="rerank-v4.0-pro",
         )
     )
-    monkeypatch.setattr("app.retrieval.hybrid.vector_retriever.search", vector_search)
+    monkeypatch.setattr("app.retrieval.hybrid.vector_retriever.search_many", vector_search)
     monkeypatch.setattr("app.retrieval.hybrid.fulltext_retriever.search", fulltext_search)
     monkeypatch.setattr("app.retrieval.hybrid.rerank_service.rerank", rerank_call)
 

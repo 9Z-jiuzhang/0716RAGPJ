@@ -39,10 +39,18 @@ try:
     import app.core.database as database_module
     from app.core.config import get_settings
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
 
     get_settings.cache_clear()
     config_module.settings = get_settings()
-    database_module.engine = create_async_engine(config_module.settings.database_url, pool_pre_ping=True)
+    # pytest-asyncio 默认按测试创建事件循环。测试引擎若复用连接池，会把 asyncpg 连接
+    # 带到下一个事件循环并触发“Future attached to a different loop”，因此测试专用引擎
+    # 使用 NullPool；生产引擎仍保留正常连接池，不受此处影响。
+    database_module.engine = create_async_engine(
+        config_module.settings.database_url,
+        pool_pre_ping=True,
+        poolclass=NullPool,
+    )
     database_module.SessionLocal = async_sessionmaker(
         database_module.engine, expire_on_commit=False, class_=AsyncSession
     )
@@ -101,7 +109,7 @@ class FakeRedis:
         return False
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
     """注入 FakeRedis，供问答模块单测使用。"""
     client = FakeRedis()
@@ -127,7 +135,7 @@ async def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
     return client
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client_mocked(fake_redis: FakeRedis, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
     """
     Mock DB / Chroma 的 AsyncClient，供 QA API 契约测试（无需真实依赖）。
@@ -158,11 +166,15 @@ async def client_mocked(fake_redis: FakeRedis, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("app.main.seed_identity_data", AsyncMock())
     monkeypatch.setattr("app.main.seed_model_configs", AsyncMock())
     monkeypatch.setattr("app.main.seed_role_cache_configs", AsyncMock())
+    # Query 策略和轻量模型连接池属于新增生命周期资源，Mock 客户端不应访问真实数据库或网络。
+    monkeypatch.setattr("app.main.seed_query_processing_config", AsyncMock())
     monkeypatch.setattr("app.main.ensure_schema_patches", AsyncMock())
     monkeypatch.setattr("app.main.init_chroma", lambda: MagicMock())
     monkeypatch.setattr("app.main.close_chroma", lambda: None)
     monkeypatch.setattr("app.core.chroma.ping_chroma", lambda: True)
     monkeypatch.setattr("app.main.llm_service.aclose", AsyncMock())
+    monkeypatch.setattr("app.main.guard_llm_service.aclose", AsyncMock())
+    monkeypatch.setattr("app.main.query_processing_llm_service.aclose", AsyncMock())
     monkeypatch.setattr("app.main.embedding_service.aclose", AsyncMock())
 
     from app.main import app

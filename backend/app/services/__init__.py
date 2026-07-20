@@ -9,7 +9,7 @@ from app.services.embedding import (
 )
 from app.services.index_switch import IndexSwitchService
 from app.services.knowledge_base import KnowledgeBaseService
-from app.services.llm import LLMService, llm_service
+from app.services.llm import LLMService, guard_llm_service, llm_service, query_processing_llm_service
 from app.services.snapshot import SnapshotService
 from app.services.snapshot_hooks import take_auto_snapshot
 from app.services.task_queue import TaskQueueService
@@ -30,6 +30,8 @@ __all__ = [
     "take_auto_snapshot",
     "LLMService",
     "llm_service",
+    "guard_llm_service",
+    "query_processing_llm_service",
     "EmbeddingService",
     "embedding_service",
     "embed_texts",

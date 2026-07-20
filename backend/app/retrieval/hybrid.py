@@ -84,23 +84,23 @@ class HybridRetriever:
         fulltext_lists: list[tuple[str, list[RetrievalHit]]] = []
 
         if strategy in ("vector", "hybrid"):
-            for label, query_text in search_variants:
-                try:
-                    hits = await vector_retriever.search(query_text, targets, top_k=candidate_k)
-                    if hits:
-                        vector_lists.append((f"vector_{label}", hits))
-                except Exception as exc:  # noqa: BLE001 — 单条 Query 失败不得阻断其他召回路
-                    logger.warning("向量检索失败（%s），继续其他查询：%s", label, exc)
-
             # HyDE 只通过假设文档的向量寻找语义相近片段，避免假设内容参与字面全文匹配。
             cleaned_hyde = (hyde_document or "").strip()
+            vector_variants = list(search_variants)
             if cleaned_hyde:
-                try:
-                    hyde_hits = await vector_retriever.search(cleaned_hyde, targets, top_k=candidate_k)
-                    if hyde_hits:
-                        vector_lists.append(("vector_hyde", hyde_hits))
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("HyDE 向量检索失败，继续使用其他召回结果：%s", exc)
+                vector_variants.append(("hyde", cleaned_hyde))
+
+            try:
+                # 主 Query、所有扩展 Query 与 HyDE 一次性向量化；Chroma 结果仍按通道
+                # 独立保留，确保 RRF 融合语义和管理端审计信息不发生变化。
+                batched_hits = await vector_retriever.search_many(
+                    vector_variants,
+                    targets,
+                    top_k=candidate_k,
+                )
+                vector_lists.extend((f"vector_{label}", hits) for label, hits in batched_hits)
+            except Exception as exc:  # noqa: BLE001 — 向量路失败仍允许全文路和降级回答继续
+                logger.warning("批量向量检索失败，继续使用其他召回结果：%s", exc)
 
         if strategy in ("fulltext", "hybrid"):
             # 同一个 AsyncSession 不做并发 SQL，按顺序执行以避免事务状态相互影响。

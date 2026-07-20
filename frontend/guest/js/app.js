@@ -53,7 +53,9 @@ function resetLocalChatContext() {
 
 /**
  * 拆分模型推理标签与最终回答。
- * 兼容 <think> / <think> / <thinking>，含流式未闭合。
+ *
+ * 推理过程与最终答案分开渲染，避免标签原样显示在正文中；后端已要求两部分均使用中文。
+ * 同时兼容流式输出尚未闭合的标签，确保用户可在生成过程中查看已经产生的推理内容。
  */
 function splitModelReasoning(raw) {
   const text = String(raw || "");
@@ -78,10 +80,10 @@ function splitModelReasoning(raw) {
   return { reasoning: reasoning.trim(), answer, reasoningOpen: false };
 }
 
-/** 渲染助手气泡：推理默认折叠，正文在外 */
+/** 渲染助手气泡：推理默认折叠，最终回答单独展示。 */
 function renderAssistantBubbleHtml(rawText, extrasHtml = "") {
   const { reasoning, answer, reasoningOpen } = splitModelReasoning(rawText);
-  const answerHtml = escapeHtml((answer || "").trim() || (reasoningOpen ? "（模型推理中…）" : ""));
+  const answerHtml = escapeHtml((answer || "").trim() || (reasoningOpen ? "（正在生成最终回答…）" : ""));
   let reasoningHtml = "";
   if (reasoning) {
     const label = reasoningOpen ? "推理过程（生成中）" : "推理过程";
@@ -479,7 +481,7 @@ async function sendQuestion() {
             traces.forEach((t) => handleTrace(t));
             return;
           }
-          // 增量文本：拆分模型推理标签，正文展示，推理默认折叠
+          // 增量文本：推理标签由前端分开展示，正文中仅显示最终回答。
           if (event === "chunk") {
             bubble.classList.add("streaming-cursor");
             rawAssistantText += data.content || data || "";
@@ -793,7 +795,7 @@ async function pageUpload() {
     <div class="card upload-panel">
       <h2 class="card-title">上传文档到知识库</h2>
       <p class="text-muted">当前身份：${getRoleLabel()}${getDepartment() ? ` · 部门 ${getDepartment()}` : ""}。管理员/超管可上传至任意库；员工仅本部门或授权知识库。</p>
-      <p class="text-muted"><strong>支持的文件类型：</strong>PDF、DOC、DOCX、TXT、MD（Markdown）。文件类型与大小由服务端最终校验。</p>
+      <p class="text-muted"><strong>支持的文件类型：</strong>PDF、Word（DOC/DOCX）、TXT、Markdown（MD）。文件类型与大小由服务端最终校验。</p>
       <div class="form-group">
         <label>目标知识库</label>
         <select class="form-control" id="kbSelect">
@@ -805,7 +807,7 @@ async function pageUpload() {
             .join("")}
         </select>
       </div>
-      <div class="upload-drop" id="dropZone">点击或拖拽 PDF、DOC、DOCX、TXT、MD 文件到此处</div>
+      <div class="upload-drop" id="dropZone">点击或拖拽 PDF、Word（DOC/DOCX）、TXT、Markdown（MD）文件到此处</div>
       <input type="file" id="fileInput" class="hidden" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
       <div class="form-group" style="margin-top:12px">
         <label>处理进度</label>

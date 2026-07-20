@@ -70,7 +70,7 @@ async def test_ambiguous_request_uses_llm_intent_classifier(
     monkeypatch.setattr(settings, "LLM_GUARD_CLASSIFIER_ENABLED", True)
     monkeypatch.setattr(settings, "LLM_GUARD_BLOCK_THRESHOLD", 0.65)
     monkeypatch.setattr(
-        "app.services.llm_guard.llm_service.chat",
+        "app.services.llm_guard.guard_llm_service.chat",
         AsyncMock(
             return_value=(
                 '{"intent":"authorization_bypass","malicious":true,' '"confidence":0.91,"reason_code":"model_reason"}'
@@ -103,7 +103,7 @@ async def test_classifier_failure_defaults_to_fail_open(
     monkeypatch.setattr(settings, "LLM_GUARD_CLASSIFIER_ENABLED", True)
     monkeypatch.setattr(settings, "LLM_GUARD_FAIL_CLOSED", False)
     monkeypatch.setattr(
-        "app.services.llm_guard.llm_service.chat",
+        "app.services.llm_guard.guard_llm_service.chat",
         AsyncMock(side_effect=LLMServiceError("上游不可用")),
     )
     db = AsyncMock()

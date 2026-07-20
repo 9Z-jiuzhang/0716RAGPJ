@@ -15,8 +15,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
-from app.services.llm import LLMServiceError, llm_service
+from app.models.query_processing import QueryProcessingConfig
+from app.services.llm import LLMServiceError, query_processing_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +72,73 @@ def _sanitize_rewrite_output(raw: str, *, fallback: str) -> str:
 
 
 @dataclass
+class QueryProcessingOptions:
+    """一次问答实际使用的 Query 预处理策略。"""
+
+    rewrite_enabled: bool
+    expansion_enabled: bool
+    expansion_count: int
+    hyde_enabled: bool
+
+    @classmethod
+    def from_settings(cls) -> QueryProcessingOptions:
+        """数据库尚未初始化时使用环境变量中的安全默认值。"""
+        return cls(
+            rewrite_enabled=settings.QA_QUERY_REWRITE_ENABLED,
+            expansion_enabled=settings.QA_QUERY_EXPANSION_ENABLED,
+            expansion_count=max(0, min(settings.QA_QUERY_EXPANSION_COUNT, 5)),
+            hyde_enabled=settings.QA_HYDE_ENABLED,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为可落库的审计信息，便于管理员确认当轮实际开关。"""
+        return {
+            "rewrite_enabled": self.rewrite_enabled,
+            "expansion_enabled": self.expansion_enabled,
+            "expansion_count": self.expansion_count,
+            "hyde_enabled": self.hyde_enabled,
+        }
+
+
+async def ensure_query_processing_config(
+    db: AsyncSession,
+    *,
+    commit: bool = False,
+) -> QueryProcessingConfig:
+    """幂等创建全局默认配置；默认关闭扩展和 HyDE 以降低问答耗时。"""
+    config = await db.scalar(select(QueryProcessingConfig).where(QueryProcessingConfig.config_key == "default"))
+    if config is None:
+        defaults = QueryProcessingOptions.from_settings()
+        config = QueryProcessingConfig(
+            config_key="default",
+            rewrite_enabled=defaults.rewrite_enabled,
+            expansion_enabled=defaults.expansion_enabled,
+            expansion_count=defaults.expansion_count,
+            hyde_enabled=defaults.hyde_enabled,
+        )
+        db.add(config)
+        if commit:
+            await db.commit()
+            await db.refresh(config)
+        else:
+            await db.flush()
+    return config
+
+
+async def get_query_processing_options(db: AsyncSession) -> QueryProcessingOptions:
+    """读取管理员策略；异常或缺失时使用环境变量默认值保证问答可用。"""
+    config = await db.scalar(select(QueryProcessingConfig).where(QueryProcessingConfig.config_key == "default"))
+    if config is None:
+        return QueryProcessingOptions.from_settings()
+    return QueryProcessingOptions(
+        rewrite_enabled=config.rewrite_enabled,
+        expansion_enabled=config.expansion_enabled,
+        expansion_count=max(0, min(config.expansion_count, 5)),
+        hyde_enabled=config.hyde_enabled,
+    )
+
+
+@dataclass
 class QueryProcessingResult:
     """一次 Query 预处理的完整、可序列化结果。"""
 
@@ -77,6 +148,7 @@ class QueryProcessingResult:
     hyde_document: str | None = None
     applied: bool = False
     error: str | None = None
+    options: dict[str, Any] = field(default_factory=dict)
 
     def to_meta(self) -> dict[str, Any]:
         """转换为可安全写入 JSON 字段的管理端展示数据。"""
@@ -86,6 +158,7 @@ class QueryProcessingResult:
             "expanded_queries": list(self.expanded_queries),
             "hyde_document": self.hyde_document,
             "applied": self.applied,
+            "options": dict(self.options),
             # 仅记录稳定错误码，不保存上游响应正文，避免泄露配置或敏感信息。
             "error": self.error,
         }
@@ -98,28 +171,34 @@ class QueryProcessor:
         self,
         question: str,
         history: list[dict[str, str]],
+        *,
+        options: QueryProcessingOptions | None = None,
     ) -> QueryProcessingResult:
         """执行预处理；禁用或失败时返回以原问题为主查询的安全结果。"""
         original = (question or "").strip()
+        effective_options = options or QueryProcessingOptions.from_settings()
         fallback = QueryProcessingResult(
             original_query=original,
             rewritten_query=original,
             applied=False,
+            options=effective_options.to_dict(),
         )
         if not original:
             return fallback
-        if not (settings.QA_QUERY_REWRITE_ENABLED or settings.QA_QUERY_EXPANSION_ENABLED or settings.QA_HYDE_ENABLED):
+        if not (
+            effective_options.rewrite_enabled or effective_options.expansion_enabled or effective_options.hyde_enabled
+        ):
             return fallback
 
         safe_history = self._sanitize_history(history)
         user_payload = {
             "history": safe_history,
             "latest_question": original,
-            "expansion_count": max(0, min(settings.QA_QUERY_EXPANSION_COUNT, 5)),
+            "expansion_count": effective_options.expansion_count,
             "enabled": {
-                "rewrite": settings.QA_QUERY_REWRITE_ENABLED,
-                "expansion": settings.QA_QUERY_EXPANSION_ENABLED,
-                "hyde": settings.QA_HYDE_ENABLED,
+                "rewrite": effective_options.rewrite_enabled,
+                "expansion": effective_options.expansion_enabled,
+                "hyde": effective_options.hyde_enabled,
             },
         }
         messages = [
@@ -131,13 +210,15 @@ class QueryProcessor:
         ]
 
         try:
-            raw = await llm_service.chat(
+            # 改写、扩展和 HyDE 共用一次结构化调用，但由独立轻量模型处理，
+            # 不再让主回答模型串行承担预处理工作。
+            raw = await query_processing_llm_service.chat(
                 messages,
                 temperature=0.1,
                 max_tokens=settings.QA_QUERY_PROCESSING_MAX_TOKENS,
             )
             parsed = self._parse_json_object(raw)
-            return self._build_result(original, parsed)
+            return self._build_result(original, parsed, effective_options)
         except LLMServiceError as exc:
             logger.warning("Query 预处理模型调用失败，回退原问题：%s", exc)
             fallback.error = "llm_unavailable"
@@ -189,19 +270,24 @@ class QueryProcessor:
         cleaned = " ".join(_strip_model_reasoning(value).split()).strip(" \"'`")
         return cleaned[:max_length].strip()
 
-    def _build_result(self, original: str, parsed: dict[str, Any]) -> QueryProcessingResult:
+    def _build_result(
+        self,
+        original: str,
+        parsed: dict[str, Any],
+        options: QueryProcessingOptions,
+    ) -> QueryProcessingResult:
         """按配置开关清洗、去重并构建最终结果。"""
         rewritten = original
-        if settings.QA_QUERY_REWRITE_ENABLED:
+        if options.rewrite_enabled:
             candidate = self._clean_query(parsed.get("rewrite"), max_length=80)
             if candidate:
                 rewritten = candidate
 
         expansions: list[str] = []
         raw_expansions = parsed.get("expansions")
-        if settings.QA_QUERY_EXPANSION_ENABLED and isinstance(raw_expansions, list):
+        if options.expansion_enabled and isinstance(raw_expansions, list):
             seen = {original.casefold(), rewritten.casefold()}
-            limit = max(0, min(settings.QA_QUERY_EXPANSION_COUNT, 5))
+            limit = options.expansion_count
             for raw_query in raw_expansions:
                 query = self._clean_query(raw_query, max_length=100)
                 normalized = query.casefold()
@@ -213,7 +299,7 @@ class QueryProcessor:
                     break
 
         hyde_document: str | None = None
-        if settings.QA_HYDE_ENABLED:
+        if options.hyde_enabled:
             candidate = self._clean_query(parsed.get("hyde_document"), max_length=500)
             hyde_document = candidate or None
 
@@ -223,6 +309,7 @@ class QueryProcessor:
             expanded_queries=expansions,
             hyde_document=hyde_document,
             applied=(rewritten != original or bool(expansions) or bool(hyde_document)),
+            options=options.to_dict(),
         )
 
 

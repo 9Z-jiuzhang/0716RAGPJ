@@ -9,6 +9,7 @@ from .hit_tests import router as hit_tests_router
 from .models import router as models_router
 from .monitor import router as monitor_router
 from .qa import router as qa_router
+from .query_processing import router as query_processing_router
 from .ragas import router as ragas_router
 from .role_caches import router as role_caches_router
 from .roles import router as roles_router
@@ -26,5 +27,6 @@ api_router.include_router(snapshots_router)
 api_router.include_router(audit_router)
 api_router.include_router(monitor_router)
 api_router.include_router(qa_router)
+api_router.include_router(query_processing_router)
 api_router.include_router(ragas_router)
 api_router.include_router(role_caches_router)

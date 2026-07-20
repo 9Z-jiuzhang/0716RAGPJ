@@ -44,7 +44,8 @@ from .models.model_config import ModelConfig
 from .services.embedding import embedding_service
 from .services.history_retention import history_retention_loop
 from .services.langfuse_service import get_langfuse
-from .services.llm import llm_service
+from .services.llm import guard_llm_service, llm_service, query_processing_llm_service
+from .services.query_processing import ensure_query_processing_config
 from .services.role_cache import ensure_role_cache_configs, role_cache_loop
 from .services.session_expiry import session_expiry_loop
 
@@ -296,6 +297,12 @@ async def seed_role_cache_configs() -> None:
         await ensure_role_cache_configs(db, commit=True)
 
 
+async def seed_query_processing_config() -> None:
+    """创建全局 Query 预处理默认策略，默认仅启用低成本改写。"""
+    async with SessionLocal() as db:
+        await ensure_query_processing_config(db, commit=True)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     setup_logging()
@@ -309,6 +316,7 @@ async def lifespan(_: FastAPI):
     await seed_departments()
     await seed_model_configs()
     await seed_role_cache_configs()
+    await seed_query_processing_config()
     await init_redis()
     try:
         init_chroma()
@@ -356,6 +364,9 @@ async def lifespan(_: FastAPI):
 
     get_langfuse().flush()
     await llm_service.aclose()
+    # 三个模型客户端拥有独立连接池，应用退出时必须分别释放。
+    await guard_llm_service.aclose()
+    await query_processing_llm_service.aclose()
     await embedding_service.aclose()
     await close_redis()
     close_chroma()

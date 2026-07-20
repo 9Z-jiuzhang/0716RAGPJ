@@ -11,6 +11,7 @@ from app.api.v1.qa import _message_to_dict
 from app.core.config import settings
 from app.retrieval.hybrid import HybridRetriever
 from app.retrieval.types import KBTarget, RetrievalHit
+from app.retrieval.vector import VectorRetriever
 from app.services.llm import LLMServiceError
 from app.services.query_processing import QueryProcessor
 from app.services.rerank import RerankOutcome
@@ -42,7 +43,7 @@ async def test_query_processor_returns_all_three_results(monkeypatch: pytest.Mon
     {"rewrite":"员工年假申请流程","expansions":["年假怎么申请","员工年假申请流程","休假审批步骤"],"hyde_document":"员工提交年假申请后，由直属负责人按流程审批。"}
     ```"""
     monkeypatch.setattr(
-        "app.services.query_processing.llm_service.chat",
+        "app.services.query_processing.query_processing_llm_service.chat",
         AsyncMock(return_value=model_output),
     )
 
@@ -62,7 +63,7 @@ async def test_query_processor_returns_all_three_results(monkeypatch: pytest.Mon
 async def test_query_processor_falls_back_without_interrupting_qa(monkeypatch: pytest.MonkeyPatch) -> None:
     """LLM 不可用时必须使用原 Query，并返回稳定错误码而非敏感异常正文。"""
     monkeypatch.setattr(
-        "app.services.query_processing.llm_service.chat",
+        "app.services.query_processing.query_processing_llm_service.chat",
         AsyncMock(side_effect=LLMServiceError("上游错误，可能包含敏感响应")),
     )
 
@@ -79,13 +80,23 @@ async def test_query_processor_falls_back_without_interrupting_qa(monkeypatch: p
 async def test_hybrid_retriever_fuses_expansion_and_hyde_hits(monkeypatch: pytest.MonkeyPatch) -> None:
     """同一片段被主 Query、扩展 Query、HyDE 多次召回时应在 RRF 中获得提升。"""
 
-    async def fake_vector_search(query: str, _targets: object, *, top_k: int) -> list[RetrievalHit]:
+    async def fake_vector_search_many(
+        queries: list[tuple[str, str]],
+        _targets: object,
+        *,
+        top_k: int,
+    ) -> list[tuple[str, list[RetrievalHit]]]:
         assert top_k >= 2
-        if query == "主查询":
-            return [_hit("a", 0.9), _hit("b", 0.8)]
-        if query == "扩展查询":
-            return [_hit("b", 0.85), _hit("c", 0.7)]
-        return [_hit("b", 0.75)]
+        assert queries == [
+            ("primary", "主查询"),
+            ("expansion_1", "扩展查询"),
+            ("hyde", "假设答案文档"),
+        ]
+        return [
+            ("primary", [_hit("a", 0.9), _hit("b", 0.8)]),
+            ("expansion_1", [_hit("b", 0.85), _hit("c", 0.7)]),
+            ("hyde", [_hit("b", 0.75)]),
+        ]
 
     async def fake_rerank(
         _db: object,
@@ -97,7 +108,7 @@ async def test_hybrid_retriever_fuses_expansion_and_hyde_hits(monkeypatch: pytes
         assert query == "主查询"
         return RerankOutcome(hits=hits[:top_k])
 
-    monkeypatch.setattr("app.retrieval.hybrid.vector_retriever.search", fake_vector_search)
+    monkeypatch.setattr("app.retrieval.hybrid.vector_retriever.search_many", fake_vector_search_many)
     monkeypatch.setattr("app.retrieval.hybrid.rerank_service.rerank", fake_rerank)
 
     result = await HybridRetriever().retrieve(
@@ -115,6 +126,25 @@ async def test_hybrid_retriever_fuses_expansion_and_hyde_hits(monkeypatch: pytes
     assert result.expanded_query_count == 1
     assert result.hyde_used is True
     assert "vector_hyde" in result.hits[0].metadata["matched_queries"]
+
+
+@pytest.mark.asyncio
+async def test_vector_retriever_batches_all_query_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """多个 Query 必须通过一次 embed_texts 调用提交，不能逐条调用远程向量接口。"""
+    embed_call = AsyncMock(return_value=[[0.1], [0.2], [0.3]])
+    chroma_call = AsyncMock(return_value=[])
+    monkeypatch.setattr("app.retrieval.vector.embedding_service.embed_texts", embed_call)
+    monkeypatch.setattr("app.retrieval.vector.chroma_store.aquery_multi_kb", chroma_call)
+    target = KBTarget(kb_id=uuid4(), name="制度库", index_version="v1")
+
+    await VectorRetriever().search_many(
+        [("primary", "主查询"), ("expansion_1", "扩展查询"), ("hyde", "假设答案")],
+        [target],
+        top_k=3,
+    )
+
+    embed_call.assert_awaited_once_with(["主查询", "扩展查询", "假设答案"])
+    assert chroma_call.await_count == 3
 
 
 def test_message_serializer_exposes_query_processing_meta() -> None:

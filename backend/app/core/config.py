@@ -61,6 +61,18 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: int = 120
     LLM_MAX_TOKENS: int = 2048
 
+    # ---------- 轻量任务模型 ----------
+    # Guard 与 Query 预处理不再占用主回答模型。默认使用 MiniMax 官方高速文本模型；
+    # Base URL 与 API Key 留空时复用主 LLM 的连接信息，但客户端和连接池相互独立。
+    LLM_GUARD_MODEL: str = "MiniMax-M2.7-highspeed"
+    LLM_GUARD_BASE_URL: str = ""
+    LLM_GUARD_API_KEY: str = ""
+    LLM_GUARD_TIMEOUT_SECONDS: int = 20
+    QA_QUERY_PROCESSING_MODEL: str = "MiniMax-M2.7-highspeed"
+    QA_QUERY_PROCESSING_BASE_URL: str = ""
+    QA_QUERY_PROCESSING_API_KEY: str = ""
+    QA_QUERY_PROCESSING_TIMEOUT_SECONDS: int = 30
+
     # ---------- Embedding 嵌入模型 ----------
     EMBEDDING_PROVIDER: str = "dashscope"
     EMBEDDING_API_KEY: str = "change-me"
@@ -125,12 +137,12 @@ class Settings(BaseSettings):
     QA_RRF_K: int = 60
     QA_GUEST_SESSION_TTL_MINUTES: int = 30
     # ---------- 用户 Query 预处理 ----------
-    # 三项能力默认启用；模型调用或解析失败时会自动使用原问题继续检索，不会中断问答。
+    # 默认仅开启改写；Query 扩展与 HyDE 属于高耗时增强项，管理员可在会话页随时开启。
     QA_QUERY_REWRITE_ENABLED: bool = True
-    QA_QUERY_EXPANSION_ENABLED: bool = True
-    # 扩展 Query 数量限制在 0-5，默认生成 3 条语义相近、关键词互补的查询。
-    QA_QUERY_EXPANSION_COUNT: int = 3
-    QA_HYDE_ENABLED: bool = True
+    QA_QUERY_EXPANSION_ENABLED: bool = False
+    # 扩展 Query 数量限制在 0-5；开启时默认只生成 1 条，减少检索与融合开销。
+    QA_QUERY_EXPANSION_COUNT: int = 1
+    QA_HYDE_ENABLED: bool = False
     # 改写、扩展和 HyDE 合并为一次结构化调用，限制输出长度以控制耗时与成本。
     QA_QUERY_PROCESSING_MAX_TOKENS: int = 768
     # ---------- 按角色缓存知识库 ----------
