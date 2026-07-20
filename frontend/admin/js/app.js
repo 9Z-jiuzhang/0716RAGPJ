@@ -50,38 +50,46 @@ function guard() {
   return true;
 }
 
-/** 渲染管理端壳层（顶栏主导 + 全宽内容；右上保留智能对话/退出） */
+/** 渲染管理端壳层：侧栏导航 + 顶部工具栏，权限判断逻辑保持不变。 */
 function renderShell(title) {
   if (!guard()) return false;
   const user = getUser() || {};
   const path = currentPath();
-  const roleText = `${escapeHtml(user.nickname || user.username || "管理员")} · ${getRoleLabel()}`;
+  const displayName = escapeHtml(user.nickname || user.username || "管理员");
+  const roleText = `${displayName} · ${getRoleLabel()}`;
 
   document.getElementById("app").innerHTML = `
-    <div class="app-shell">
-      <header class="topnav">
-        <div class="topnav-brand" data-go="/admin" title="管理首页">
+    <div class="app-shell app-shell-admin">
+      <aside class="sidebar" aria-label="管理导航">
+        <div class="sidebar-brand" data-go="/admin" title="管理首页">
           <i class="logo-dot"></i>
-          <span>管理控制台${isSuperAdmin() ? " · 超管" : ""}</span>
+          <span><b>Knowledge</b> AI<small>智能知识中枢</small></span>
         </div>
-        <nav class="topnav-links" aria-label="管理导航">
+        <div class="sidebar-caption">工作台</div>
+        <nav class="sidebar-links">
           ${MENUS.map((m) => {
             // 严格按权限码显示（超级管理员 hasPermission 全放行）
             if (!hasPermission(m.perm)) return "";
             const active = path === m.path || (m.path !== "/admin" && path.startsWith(m.path));
-            return `<div class="nav-item ${active ? "active" : ""}" data-go="${m.path}">${m.label}</div>`;
+            return `<button type="button" class="nav-item ${active ? "active" : ""}" data-go="${m.path}"><i></i>${m.label}</button>`;
           }).join("")}
         </nav>
-        <div class="topnav-actions">
-          <span class="text-muted">${roleText}</span>
-          <a class="btn btn-secondary btn-sm" href="/#/">智能对话</a>
-          <button type="button" class="btn btn-text" id="btnLogout">退出</button>
+        <div class="sidebar-user">
+          <span class="avatar-mark">${displayName.slice(0, 1)}</span>
+          <span><b>${displayName}</b><small>${escapeHtml(getRoleLabel())}</small></span>
         </div>
-      </header>
-      <div class="page-bar">
-        <div class="page-bar-title">${escapeHtml(title)}</div>
-      </div>
-      <main class="content" id="pageRoot"></main>
+      </aside>
+      <section class="app-main">
+        <header class="topnav">
+          <div class="page-bar-title">${escapeHtml(title)}</div>
+          <div class="topnav-actions">
+            <span class="role-chip">${roleText}</span>
+            <a class="btn btn-secondary btn-sm" href="/#/">智能对话</a>
+            <button type="button" class="btn btn-text" id="btnLogout">退出</button>
+          </div>
+        </header>
+        <main class="content" id="pageRoot"></main>
+      </section>
     </div>`;
 
   document.querySelectorAll("[data-go]").forEach((el) => {
@@ -137,24 +145,16 @@ async function dispatchRender() {
 /* ========== 首页 /admin（系统介绍 + 当前角色 + 运行概览） ========== */
 function renderHomeIntro() {
   return `
-    <div class="card">
-      <h2 class="card-title">企业智能知识库系统</h2>
-      <p style="margin:0 0 10px;line-height:1.8">
-        本系统是一套面向企业内部的<strong>检索增强生成（RAG）知识库与智能问答平台</strong>，
-        帮助企业将分散的制度、文档、手册等沉淀为统一、可检索、可溯源的知识资产，
-        并通过大模型提供自然语言问答服务。
-      </p>
-      <p class="text-muted" style="margin:0 0 10px;line-height:1.8">
-        在<strong>知识管理</strong>方面，支持 PDF / Word / Markdown 等多格式文档上传、自动解析、
-        智能分段与向量化入库，并提供索引版本与回退快照，保证知识更新可控可追溯；
-        在<strong>智能问答</strong>方面，采用向量检索与全文检索融合的混合检索策略，
-        结合大模型进行流式作答，并附带引用来源，避免凭空编造。
-      </p>
-      <p class="text-muted" style="margin:0;line-height:1.8">
-        在<strong>安全与治理</strong>方面，以部门为核心实现访问隔离：访客仅能访问「访客专用」知识库，
-        员工可访问本部门授权及访客专用的知识库，管理员则可访问全部；同时提供角色权限管理、
-        审计日志、系统监控与大模型用量统计，满足企业级的权限管控与运维观测需求。
-      </p>
+    <section class="dashboard-hero">
+      <div>
+        <span class="eyebrow">知识运营控制台</span>
+        <h1>构建你的智能知识中枢</h1>
+        <p>连接文档、数据与大模型，让知识随时可被精准检索。</p>
+      </div>
+      ${hasPermission("kb:read") ? `<button class="btn hero-action" type="button" data-go="/admin/knowledge-bases">+ 新建知识库</button>` : ""}
+    </section>
+    <div class="dashboard-note">
+      支持多格式文档解析、混合检索、权限隔离与审计追踪；所有统计数据均来自当前系统。
     </div>`;
 }
 

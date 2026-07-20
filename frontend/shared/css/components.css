@@ -423,3 +423,17 @@ textarea.form-control {
   gap: 8px;
   margin-top: 12px;
 }
+
+/* 深色企业级主题：只替换视觉令牌，不改变现有组件的交互或 DOM 结构。 */
+.btn { background: linear-gradient(135deg, #7764FF, #5B34D6); }
+.btn:hover { background: linear-gradient(135deg, #907FFF, #6944EB); box-shadow: 0 12px 26px rgba(109, 83, 255, 0.34); }
+.btn-secondary { background: rgba(255, 255, 255, 0.045); color: #DAD5FF; border-color: var(--color-border); }
+.btn-secondary:hover, .btn-text:hover { background: rgba(141, 124, 255, 0.14); }
+.card { padding: 18px 20px; backdrop-filter: blur(18px); }
+.form-control { background: rgba(7, 11, 27, 0.52); color: var(--color-text); }
+.table { background: transparent; }
+.table th { background: rgba(255, 255, 255, 0.035); }
+.badge { background: rgba(124, 92, 252, 0.16); color: #D1C8FF; }
+.badge-success { background: rgba(45, 212, 191, 0.14); }
+.badge-danger { background: rgba(251, 113, 133, 0.14); }
+.modal, .toast { background: #151A31; }

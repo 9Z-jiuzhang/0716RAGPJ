@@ -19,7 +19,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: var(--color-text);
-  background: var(--color-bg);
+  background: radial-gradient(circle at 72% -10%, rgba(103, 75, 229, 0.25), transparent 30%), var(--color-bg);
   -webkit-font-smoothing: antialiased;
 }
 

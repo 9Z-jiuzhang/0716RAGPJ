@@ -485,6 +485,23 @@ details.citation-item[open] > summary.citation-meta::before {
   border-bottom: none;
 }
 
+/* 访客问答端同步采用深色玻璃拟态，消息、引用和表单逻辑保持不变。 */
+.qa-layout { max-width: 1040px; gap: 18px; }
+.qa-messages { background: rgba(18, 23, 44, .72); backdrop-filter: blur(18px); }
+.msg-row.user .msg-bubble { background: linear-gradient(135deg, #7764FF, #5635D4); }
+.msg-row.assistant .msg-bubble { background: rgba(255, 255, 255, .055); color: var(--color-text); border: 1px solid var(--color-border); }
+.qa-composer { background: rgba(18, 23, 44, .86); backdrop-filter: blur(18px); }
+.qa-composer textarea { background: rgba(7, 11, 27, .46); color: var(--color-text); }
+.qa-composer textarea:focus { background: rgba(7, 11, 27, .75); }
+.citations { background: rgba(92, 71, 199, .13); border-left-color: #58D8C0; }
+.citation-item, .confidence { background: rgba(7, 11, 27, .46); }
+.citation-meta { color: #C9C2FF; }
+.upload-drop { background: rgba(92, 71, 199, .10); border-color: #8071EE; }
+.upload-drop:hover, .upload-drop.dragover { background: rgba(92, 71, 199, .20); border-color: #69DFC9; }
+.auth-page, .auth-wrap { background: radial-gradient(circle at 52% 5%, rgba(104, 79, 233, .34), transparent 36%), var(--color-bg); }
+.auth-card { background: rgba(18, 23, 44, .88); border-color: rgba(166, 180, 255, .22); backdrop-filter: blur(20px); }
+.auth-page-brand { color: #F3F5FF; }
+
 @media (max-width: 960px) {
   .msg-bubble {
     max-width: 92%;
