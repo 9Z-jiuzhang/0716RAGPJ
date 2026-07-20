@@ -6,33 +6,33 @@
 
 :root {
   /* 主色调 */
-  --color-primary: #7C5CFC;
+  --color-primary: #3467D6;
   /* 辅助色（偏亮） */
-  --color-primary-light: #9D8BFF;
+  --color-primary-light: #6F9BFF;
   /* 辅助色（偏深）——主按钮悬停、统计数字、品牌字 */
-  --color-primary-dark: #C4B5FD;
+  --color-primary-dark: #214AAB;
   /* 页面浅色背景 */
-  --color-bg: #080B18;
+  --color-bg: #F4F7FC;
   /* 极淡蓝点缀（上传区、空面板等） */
-  --color-bg-tint: #12172C;
+  --color-bg-tint: #EEF4FF;
   /* 行悬停 / 次要选中底 */
-  --color-bg-hover: #1B2140;
+  --color-bg-hover: #E6EEFF;
   /* 卡片/面板白色 */
-  --color-surface: rgba(18, 23, 44, 0.82);
+  --color-surface: rgba(255, 255, 255, 0.84);
   /* 主文字 */
-  --color-text: #F3F5FF;
+  --color-text: #1E2A46;
   /* 次要文字 */
-  --color-text-secondary: #A8B1CF;
+  --color-text-secondary: #6A7895;
   /* 边框色 */
-  --color-border: rgba(166, 180, 255, 0.16);
+  --color-border: #DDE6F5;
   /* 成功 */
-  --color-success: #2DD4BF;
+  --color-success: #149E8A;
   /* 警告 */
   --color-warning: #FBBF24;
   /* 危险/错误 */
-  --color-danger: #FB7185;
+  --color-danger: #D64A62;
   /* 输入聚焦环 */
-  --color-focus-ring: rgba(124, 92, 252, 0.32);
+  --color-focus-ring: rgba(52, 103, 214, 0.20);
   /* 顶栏高度 */
   --header-height: 68px;
   /* 侧栏宽度（已废弃左右布局，保留兼容旧引用） */
@@ -44,11 +44,11 @@
   /* 弹窗圆角 */
   --radius-modal: 16px;
   /* 轻阴影（卡片） */
-  --shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+  --shadow: 0 12px 30px rgba(47, 78, 134, 0.10);
   /* 弹窗抬升阴影 */
-  --shadow-modal: 0 28px 80px rgba(0, 0, 0, 0.48);
+  --shadow-modal: 0 24px 60px rgba(47, 78, 134, 0.18);
   /* 主按钮轻阴影 */
-  --shadow-btn: 0 8px 20px rgba(109, 83, 255, 0.25);
+  --shadow-btn: 0 8px 18px rgba(52, 103, 214, 0.22);
   /* 过渡 */
   --transition: 150ms ease;
   /* 字体 */

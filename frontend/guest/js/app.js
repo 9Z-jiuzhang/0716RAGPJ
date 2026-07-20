@@ -25,8 +25,10 @@ import {
   getDepartment,
 } from "/assets/js/auth.js";
 import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
+import { initFlowField } from "/assets/js/flow-field.js?v=ui-20260720";
 
 clearDemoFlags();
+initFlowField();
 
 /** 当前问答会话 ID（多轮上下文） */
 let currentSessionId = null;
@@ -213,8 +215,15 @@ function pageChat() {
       <div class="qa-chat-column">
         <div class="qa-messages" id="msgList">
           <div class="empty-state" id="msgEmpty">
-            ${tip}<br/>
-            回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。
+            <div class="qa-welcome-mark">AI</div>
+            <h1>有什么可以帮你检索？</h1>
+            <p>${tip}</p>
+            <div class="qa-welcome-note">回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。</div>
+            <div class="qa-suggestions">
+              <button type="button" data-question="请介绍当前可访问的知识库内容">了解知识库内容</button>
+              <button type="button" data-question="如何上传并管理文档？">如何管理文档</button>
+              <button type="button" data-question="请说明平台的权限访问规则">查看权限规则</button>
+            </div>
           </div>
         </div>
         <div class="qa-composer">
@@ -228,6 +237,12 @@ function pageChat() {
   const input = document.getElementById("questionInput");
   const btn = document.getElementById("btnSend");
   btn.addEventListener("click", () => sendQuestion());
+  document.querySelectorAll("[data-question]").forEach((item) => {
+    item.addEventListener("click", () => {
+      input.value = item.getAttribute("data-question") || "";
+      input.focus();
+    });
+  });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();

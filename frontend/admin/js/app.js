@@ -9,8 +9,10 @@ import { route, startRouter, navigate, currentPath } from "/assets/js/router.js"
 import { api, clearDemoFlags } from "/assets/js/api.js";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js";
 import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
+import { initFlowField } from "/assets/js/flow-field.js?v=ui-20260720";
 
 clearDemoFlags();
+initFlowField();
 
 /** 管理端菜单（按权限码裁剪；前端隐藏不能替代后端鉴权） */
 const MENUS = [
@@ -1459,37 +1461,30 @@ async function pageKbList() {
   try {
     const data = await api.get("/knowledge-bases?page=1&page_size=50");
     const items = data.items || [];
+    const statusLabel = (status) => ({ active: "已同步", ready: "已就绪", processing: "处理中" }[String(status || "").toLowerCase()] || status || "待配置");
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card">
-        <div class="toolbar">
-          <strong>知识库</strong>
-          <span class="spacer"></span>
-          ${hasPermission("kb:write") ? `<button class="btn btn-sm" id="btnCreateKb">创建知识库</button>` : `<span class="text-muted">只读</span>`}
-        </div>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>名称</th><th>类型</th><th>访问范围</th><th>文档数</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
-          <tbody>
-            ${items
-              .map(
-                (k) => `<tr>
-                  <td>${escapeHtml(k.name)}</td>
-                  <td>${escapeHtml(k.type || "-")}</td>
-                  <td>${accessScopeBadge(k)}</td>
-                  <td>${escapeHtml(k.doc_count ?? 0)}</td>
-                  <td>${escapeHtml(k.status || "-")}</td>
-                  <td>${formatDateTime(k.updated_at)}</td>
-                  <td>
-                    <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">详情</button>
-                    <button class="btn btn-text btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}/documents">文档</button>
-                  </td>
-                </tr>`
-              )
-              .join("")}
-          </tbody>
-        </table></div>
-      </div>`;
+      <section class="page-hero compact">
+        <div><span class="eyebrow">KNOWLEDGE SPACES</span><h1>我的知识库</h1><p>管理企业知识资产、文档索引与访问范围。</p></div>
+        ${hasPermission("kb:write") ? `<button class="btn hero-action" id="btnCreateKb">+ 新建知识库</button>` : `<span class="role-chip">只读访问</span>`}
+      </section>
+      <div class="kb-summary-row"><span>共 <b>${items.length}</b> 个知识库</span><span>仅展示当前账号有权访问的内容</span></div>
+      <section class="kb-card-grid">
+        ${hasPermission("kb:write") ? `<button type="button" class="kb-create-card" id="btnCreateKbCard"><span>+</span><b>创建新知识库</b><small>配置类型、访问范围和分段策略</small></button>` : ""}
+        ${items.map((k) => `<article class="kb-card">
+          <div class="kb-card-cover"><span>${escapeHtml((k.name || "知").slice(0, 1))}</span><em>${escapeHtml(k.type || "通用知识")}</em></div>
+          <div class="kb-card-body">
+            <div class="kb-card-heading"><h3>${escapeHtml(k.name)}</h3><span class="status-dot ${String(k.status || "").toLowerCase() === "processing" ? "is-processing" : ""}">${escapeHtml(statusLabel(k.status))}</span></div>
+            <p>${escapeHtml(k.description || "暂未填写知识库简介，可进入详情页补充说明。")}</p>
+            <div class="kb-card-meta"><span>${escapeHtml(k.doc_count ?? 0)} 份文档</span><span>${formatDateTime(k.updated_at)}</span></div>
+            <div class="kb-card-access">${accessScopeBadge(k)}</div>
+            <div class="kb-card-actions"><button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">查看详情</button><button class="btn btn-text btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}/documents">文档管理</button></div>
+          </div>
+        </article>`).join("") || `<div class="card empty-state">暂未创建可访问的知识库</div>`}
+      </section>`;
     document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
     const btnCreate = document.getElementById("btnCreateKb");
+    const btnCreateCard = document.getElementById("btnCreateKbCard");
+    if (btnCreateCard) btnCreateCard.onclick = () => btnCreate?.click();
     if (btnCreate) {
       btnCreate.onclick = async () => {
         const departments = await loadDepartmentOptions();

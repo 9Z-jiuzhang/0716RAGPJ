@@ -485,22 +485,75 @@ details.citation-item[open] > summary.citation-meta::before {
   border-bottom: none;
 }
 
-/* 访客问答端同步采用深色玻璃拟态，消息、引用和表单逻辑保持不变。 */
+.qa-messages { display: flex; align-items: center; justify-content: center; }
+.qa-messages:has(.msg-row) { display: block; }
+.qa-messages .empty-state { width: min(720px, 100%); padding: 30px; border: 0; background: transparent; }
+.qa-welcome-mark { display: inline-flex; align-items: center; justify-content: center; width: 50px; height: 50px; margin-bottom: 15px; border-radius: 16px; background: linear-gradient(135deg, #8A76FF, #40D3BA); box-shadow: 0 14px 34px rgba(104, 82, 239, .32); color: #09111C; font-size: 16px; font-weight: 850; }
+.qa-messages .empty-state h1 { margin: 0 0 9px; color: #F6F4FF; font-size: 27px; letter-spacing: -.04em; }
+.qa-messages .empty-state p { margin: 0; color: #B7C0DA; line-height: 1.75; }
+.qa-welcome-note { margin: 13px 0 19px; color: #828DAC; font-size: 12px; }
+.qa-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; }
+.qa-suggestions button { border: 1px solid var(--color-border); border-radius: 999px; padding: 8px 12px; background: rgba(121, 98, 255, .09); color: #CFC9FF; font: inherit; font-size: 12px; cursor: pointer; transition: .16s ease; }
+.qa-suggestions button:hover { border-color: rgba(111, 232, 208, .6); background: rgba(87, 210, 190, .13); color: #E9FFFF; }
+.qa-composer { position: relative; padding: 12px; border-color: rgba(146, 129, 255, .28); box-shadow: 0 18px 42px rgba(0,0,0,.25); }
+.qa-composer::before { content: ""; position: absolute; inset: -1px; z-index: -1; border-radius: inherit; background: linear-gradient(90deg, rgba(125, 102, 255, .45), rgba(64, 209, 186, .35)); filter: blur(10px); opacity: .35; }
+
+/* 明亮云雾问答界面 */
 .qa-layout { max-width: 1040px; gap: 18px; }
-.qa-messages { background: rgba(18, 23, 44, .72); backdrop-filter: blur(18px); }
-.msg-row.user .msg-bubble { background: linear-gradient(135deg, #7764FF, #5635D4); }
-.msg-row.assistant .msg-bubble { background: rgba(255, 255, 255, .055); color: var(--color-text); border: 1px solid var(--color-border); }
-.qa-composer { background: rgba(18, 23, 44, .86); backdrop-filter: blur(18px); }
-.qa-composer textarea { background: rgba(7, 11, 27, .46); color: var(--color-text); }
-.qa-composer textarea:focus { background: rgba(7, 11, 27, .75); }
-.citations { background: rgba(92, 71, 199, .13); border-left-color: #58D8C0; }
-.citation-item, .confidence { background: rgba(7, 11, 27, .46); }
-.citation-meta { color: #C9C2FF; }
-.upload-drop { background: rgba(92, 71, 199, .10); border-color: #8071EE; }
-.upload-drop:hover, .upload-drop.dragover { background: rgba(92, 71, 199, .20); border-color: #69DFC9; }
-.auth-page, .auth-wrap { background: radial-gradient(circle at 52% 5%, rgba(104, 79, 233, .34), transparent 36%), var(--color-bg); }
-.auth-card { background: rgba(18, 23, 44, .88); border-color: rgba(166, 180, 255, .22); backdrop-filter: blur(20px); }
-.auth-page-brand { color: #F3F5FF; }
+.qa-messages { background: rgba(255,255,255,.82); }.msg-row.user .msg-bubble { background: linear-gradient(135deg, #4A7EE1, #3564C9); }.msg-row.assistant .msg-bubble { background: #F6F9FF; color: #2A3859; border-color: #E0E9F7; }
+.qa-composer { background: rgba(255,255,255,.92); border-color: #CFE0F8; box-shadow: 0 18px 38px rgba(52,91,145,.12); }.qa-composer textarea { background: #F6F9FF; color: #27385B; }.qa-composer textarea:focus { background: #FFF; }
+.citations { background: #EEF8F6; border-left-color: #42B7A5; }.citation-item, .confidence { background: #FFF; }.citation-meta { color: #3262BF; }
+.auth-page, .auth-wrap { background: radial-gradient(circle at 52% 5%, rgba(111,159,255,.25), transparent 36%), var(--color-bg); }.auth-card { background: rgba(255,255,255,.88); border-color: #DDE7F6; }.auth-page-brand { color: #2B3E68; }
+.qa-welcome-mark { background: linear-gradient(135deg, #5684E7, #49BCAA); box-shadow: 0 14px 28px rgba(69,125,214,.24); color: #FFF; }.qa-messages .empty-state h1 { color: #263961; }.qa-messages .empty-state p { color: #647490; }.qa-welcome-note { color: #8491A9; }.qa-suggestions button { border-color: #D7E4F6; background: #F3F7FF; color: #4162A3; }.qa-suggestions button:hover { border-color: #79BFC0; background: #EAF8F5; color: #237C73; }
+
+/* 登录页与动态网格融合：页面底色透明，网格从卡片下方贯穿全屏。 */
+.auth-page,
+.auth-wrap {
+  position: relative;
+  isolation: isolate;
+  background: transparent !important;
+}
+.auth-page::before,
+.auth-wrap::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: transparent;
+}
+.auth-card {
+  background: rgba(255,255,255,.91) !important;
+  box-shadow: 0 24px 56px rgba(54, 91, 147, .16);
+}
+
+/* 认证页必须首屏可见：不再按超高屏幕的垂直中心向下推。 */
+.auth-page {
+  height: 100dvh;
+  min-height: 0;
+  justify-content: flex-start;
+  gap: 14px;
+  padding: clamp(58px, 10vh, 116px) 16px 24px;
+  overflow-y: auto;
+}
+.auth-card { margin: 0; }
+
+/* 访客入口始终保持足够对比度，不使用“悬停后才变白”的文本按钮样式。 */
+.auth-page > .btn-text {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid #D6E3F6;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .76);
+  color: #285CBF !important;
+  font-weight: 600;
+  box-shadow: 0 8px 18px rgba(62, 105, 170, .09);
+}
+.auth-page > .btn-text:hover,
+.auth-page > .btn-text:focus-visible {
+  background: #EAF2FF;
+  color: #1E4EAA !important;
+  border-color: #AFC8F2;
+}
 
 @media (max-width: 960px) {
   .msg-bubble {

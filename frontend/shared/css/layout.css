@@ -20,9 +20,9 @@
   gap: 12px;
   min-height: var(--header-height);
   padding: 0 28px;
-  background: rgba(9, 12, 28, 0.72);
+  background: rgba(255, 255, 255, 0.82);
   border-bottom: 1px solid var(--color-border);
-  box-shadow: none;
+  box-shadow: 0 8px 24px rgba(56, 87, 141, 0.07);
   backdrop-filter: blur(16px);
 }
 
@@ -33,7 +33,7 @@
   flex-shrink: 0;
   font-weight: 700;
   font-size: 15px;
-  color: var(--color-primary-dark);
+  color: #24477E;
   letter-spacing: 0.02em;
   cursor: pointer;
   user-select: none;
@@ -43,8 +43,8 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.2);
+  background: linear-gradient(135deg, #4D83E8, #4AB9A8);
+  box-shadow: 0 0 0 3px rgba(77, 131, 232, 0.14);
   flex-shrink: 0;
 }
 
@@ -66,7 +66,7 @@
   height: var(--header-height);
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: #647490;
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
@@ -76,14 +76,14 @@
 }
 
 .nav-item:hover {
-  color: var(--color-primary-dark);
-  background: var(--color-bg-tint);
+  color: #2D62C3;
+  background: #EDF4FF;
 }
 
 .nav-item.active {
-  color: var(--color-primary);
+  color: #2D62C3;
   font-weight: 600;
-  border-bottom-color: var(--color-primary);
+  border-bottom-color: #4B82E6;
   background: transparent;
 }
 
