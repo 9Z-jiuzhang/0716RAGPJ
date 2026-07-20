@@ -21,6 +21,10 @@ async def test_login_and_me(client):
     assert payload["code"] == 0
     assert payload["data"]["access_token"]
     assert payload["data"]["expires_in"] == 30 * 60
+    # 统一登录：一次返回用户与落地分流（管理员 → 管理端）
+    assert payload["data"]["user"]["username"] == "admin"
+    assert payload["data"]["landing"] == "admin"
+    assert payload["data"]["landing_href"] == "/admin/"
 
     token = payload["data"]["access_token"]
     me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})

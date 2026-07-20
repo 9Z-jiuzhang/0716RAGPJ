@@ -1,15 +1,13 @@
 /* ============================================================
- * 全局基础样式：重置、排版、通用工具类
+ * TechStart Dark · 全局基础 + 背景光晕
  * ============================================================ */
 
-/* 盒模型统一为 border-box，避免宽高计算偏差 */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
-/* 页面默认字体与背景，严格使用手册浅色背景 */
 html,
 body {
   margin: 0;
@@ -17,24 +15,34 @@ body {
   min-height: 100%;
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.5;
-  color: var(--color-text);
-  background: transparent;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--color-text-body);
+  background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
 }
 
-/* 链接默认使用主色，去掉下划线 */
+/* 深空背景光晕（非死黑） */
+body {
+  background-color: var(--color-bg);
+  background-image:
+    radial-gradient(ellipse 70% 50% at 10% -10%, rgba(99, 102, 241, 0.28), transparent 55%),
+    radial-gradient(ellipse 55% 45% at 95% 100%, rgba(168, 85, 247, 0.22), transparent 50%),
+    radial-gradient(ellipse 40% 35% at 50% 40%, rgba(34, 211, 238, 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+
 a {
   color: var(--color-primary);
   text-decoration: none;
-  transition: color var(--transition);
+  transition: var(--transition);
 }
 
 a:hover {
-  color: var(--color-primary-dark);
+  color: #c4b5fd;
+  text-decoration: none;
 }
 
-/* 列表默认去点 */
 ul,
 ol {
   margin: 0;
@@ -42,61 +50,137 @@ ol {
   list-style: none;
 }
 
-/* 按钮/输入统一继承字体 */
 button,
 input,
 select,
 textarea {
   font-family: inherit;
   font-size: inherit;
+  color: inherit;
 }
 
 h1,
 h2,
-h3 {
+h3,
+h4,
+h5,
+h6 {
   margin: 0;
   font-weight: 600;
   color: var(--color-text);
+  letter-spacing: -0.02em;
 }
 
-/* 应用根节点占满视口 */
 #app {
   min-height: 100vh;
   position: relative;
   z-index: 1;
 }
 
-html,
-body {
-  background: transparent;
+.ambient-orbs {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.ambient-orbs i {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.55;
+}
+
+.ambient-orbs i:nth-child(1) {
+  width: 420px;
+  height: 420px;
+  left: -80px;
+  top: -60px;
+  background: #6366f1;
+}
+
+.ambient-orbs i:nth-child(2) {
+  width: 360px;
+  height: 360px;
+  right: -40px;
+  bottom: 10%;
+  background: #a855f7;
 }
 
 .flow-field-canvas {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  opacity: .92;
+  display: none !important;
 }
 
-/* 隐藏元素工具类 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 85, 247, 0.55) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(168, 85, 247, 0.45);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 85, 247, 0.7);
+}
+
 .hidden {
   display: none !important;
 }
 
-/* 文本次要色 */
 .text-muted {
   color: var(--color-text-secondary);
 }
 
-/* 危险文字 */
 .text-danger {
   color: var(--color-danger);
 }
 
-/* 成功文字 */
 .text-success {
   color: var(--color-success);
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-text-body);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.list-plain {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list-plain li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: var(--glass-border);
+  border-radius: var(--radius);
+  background: var(--glass-bg);
+  color: var(--color-text-body);
+  font-size: 13px;
+}
+
+.list-plain code {
+  color: var(--color-primary);
+  font-size: 12px;
 }

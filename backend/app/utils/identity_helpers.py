@@ -3,7 +3,7 @@
 from app.core.config import settings
 from app.core.seed_data import ROLE_DISPLAY_NAMES
 from app.models import User
-from app.schemas.identity import TokenResponse, UserResponse
+from app.schemas.identity import LoginResponse, TokenResponse, UserResponse
 
 # 角色等级：越高权限越大。操作者仅可管理/删除等级严格低于自己的用户。
 ROLE_RANK: dict[str, int] = {
@@ -80,4 +80,26 @@ def build_token_response(access_token: str, refresh_token: str) -> TokenResponse
         refresh_token=refresh_token,
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
+def resolve_login_landing(user: User) -> tuple[str, str]:
+    """统一登录后的前端分流：平台管理员进控制台，其余进问答端。"""
+    if is_platform_admin_user(user):
+        return "admin", "/admin/"
+    return "app", "/#/chat"
+
+
+def build_login_response(user: User, access_token: str, refresh_token: str) -> LoginResponse:
+    """访客与管理员共用同一登录接口的完整响应。"""
+    token = build_token_response(access_token, refresh_token)
+    landing, landing_href = resolve_login_landing(user)
+    return LoginResponse(
+        access_token=token.access_token,
+        refresh_token=token.refresh_token,
+        token_type=token.token_type,
+        expires_in=token.expires_in,
+        user=present_user(user),
+        landing=landing,
+        landing_href=landing_href,
     )

@@ -1,10 +1,10 @@
 /**
  * 访客端应用入口（手册 5.1.1）
- * - 未登录访客：仅智能问答
+ * - 默认落地页：统一入口（访客 ENTER / 账号 SIGN IN）
+ * - 未登录访客：可 ENTER 进入智能问答
  * - 注册用户：问答 + 历史 + 个人中心
  * - 员工：再加文档上传
- * - 管理员：登录后进入管理端
- * 登录页独立；注册内嵌于登录页
+ * - 管理员：统一登录后进入管理端
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js";
@@ -25,10 +25,10 @@ import {
   getDepartment,
 } from "/assets/js/auth.js";
 import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
-import { initFlowField } from "/assets/js/flow-field.js?v=ui-20260720";
+import { initMotion } from "/assets/js/motion.js";
 
 clearDemoFlags();
-initFlowField();
+initMotion();
 
 /** 当前问答会话 ID（多轮上下文） */
 let currentSessionId = null;
@@ -104,21 +104,31 @@ function formatRetrievalRelevance(value) {
   return `${(bounded * 100).toFixed(1)}%`;
 }
 
-/** 登录成功后按角色跳转 */
-function redirectAfterLogin() {
+/** 登录成功后按角色跳转（优先使用后端 landing_href） */
+function redirectAfterLogin(landingHref) {
+  if (landingHref && typeof landingHref === "string") {
+    if (landingHref.startsWith("/admin")) {
+      location.href = landingHref;
+      return;
+    }
+    if (landingHref.includes("#")) {
+      location.href = landingHref;
+      return;
+    }
+  }
   const target = getPostLoginTarget();
   if (target.type === "admin") {
     location.href = target.href;
     return;
   }
-  navigate(target.path || "/");
+  navigate(target.path || "/chat");
   dispatchRender();
 }
 
 /** 按角色生成顶栏导航项（访客仅问答） */
 function buildNavItems(path, role) {
   const items = [];
-  items.push({ path: "/", label: "智能问答", show: true });
+  items.push({ path: "/chat", label: "智能问答", show: true });
   // 员工与管理员可上传
   items.push({ path: "/upload", label: "文档上传", show: canUpload() });
   // 已登录才有历史与个人中心（访客不可见）
@@ -133,7 +143,7 @@ function buildNavItems(path, role) {
     .join("");
 }
 
-/** 渲染业务页顶栏壳层（登录页不使用） */
+/** 渲染业务页顶栏壳层（落地页不使用） */
 function renderShell(activeTitle, { wide = false } = {}) {
   const logged = isLoggedIn();
   const user = getUser();
@@ -144,9 +154,10 @@ function renderShell(activeTitle, { wide = false } = {}) {
     : "访客 · 仅公开知识库问答";
 
   document.getElementById("app").innerHTML = `
+    <div class="ambient-orbs" aria-hidden="true"><i></i><i></i></div>
     <div class="app-shell">
       <header class="topnav">
-        <div class="topnav-brand" data-go="/" title="回到问答">
+        <div class="topnav-brand" data-go="/chat" title="回到问答">
           <i class="logo-dot"></i>
           <span>AI 知识库</span>
         </div>
@@ -161,9 +172,6 @@ function renderShell(activeTitle, { wide = false } = {}) {
           }
         </div>
       </header>
-      <div class="page-bar">
-        <div class="page-bar-title">${escapeHtml(activeTitle)}</div>
-      </div>
       <main class="content ${wide ? "content-wide" : ""}" id="pageRoot"></main>
     </div>
   `;
@@ -179,19 +187,29 @@ function renderShell(activeTitle, { wide = false } = {}) {
       clearAuth();
       resetLocalChatContext();
       toast("已退出", "success");
-      // 退出后直接回到独立登录页
-      navigate("/login");
+      navigate("/");
       dispatchRender();
     });
   }
 }
 
 /** 路由分发 */
+function playPageEnter() {
+  const root = document.getElementById("pageRoot");
+  if (!root) return;
+  root.classList.remove("page-enter");
+  void root.offsetWidth;
+  root.classList.add("page-enter");
+}
+
 function dispatchRender() {
+  playPageEnter();
   const path = currentPath();
-  // 注册并入登录页
-  if (path === "/login" || path === "/register") return pageAuth(path === "/register" ? "register" : "login");
-  // 访客不可进历史/个人中心/上传：提示登录或权限
+  // 默认入口即为统一登录（无营销落地页）
+  if (path === "/" || path === "/login" || path === "/register") {
+    return pageMaterioAuth(path === "/register" ? "register" : "login");
+  }
+  if (path === "/chat") return pageChat();
   if (path === "/history") return pageHistory();
   if (path === "/profile") return pageProfile();
   if (path === "/upload") return pageUpload();
@@ -546,59 +564,95 @@ async function sendQuestion() {
   }
 }
 
-/* ========================= 独立登录页（内嵌注册） ========================= */
-function pageAuth(initialTab = "login") {
-  // 已登录则按角色回首页 / 管理端
+/* ========================= 统一登录入口（沉浸一体布局） ========================= */
+/** 全页动效舞台 + 大标题 + 嵌入式登录卡（无左右分割） */
+function pageMaterioAuth(mode = "login") {
   if (isLoggedIn()) {
     redirectAfterLogin();
     return;
   }
 
-  // 独立全屏，不走业务顶栏
   document.getElementById("app").innerHTML = `
-    <div class="auth-page">
-      <div class="auth-page-brand" data-go="/">
-        <i class="logo-dot"></i>
-        <span>AI 知识库</span>
-      </div>
-      <div class="card auth-card">
-        <div class="auth-tabs" role="tablist">
-          <button type="button" class="auth-tab ${initialTab === "login" ? "active" : ""}" data-tab="login">登录</button>
-          <button type="button" class="auth-tab ${initialTab === "register" ? "active" : ""}" data-tab="register">注册</button>
+    <div class="auth-materio">
+      <div class="ambient-orbs" aria-hidden="true"><i></i><i></i></div>
+      <div class="auth-materio-glow" aria-hidden="true"></div>
+      <div class="auth-materio-stage">
+        <header class="auth-materio-brand">
+          <i class="landing-logo"></i>
+          <strong>AI 知识库</strong>
+        </header>
+        <div class="auth-materio-hero">
+          <p class="auth-materio-kicker">Enterprise Knowledge OS</p>
+          <h1>企业知识，<span>即问即答</span></h1>
+          <p class="auth-materio-lead">统一入口连接问答、知识库与管理控制台。<br/>安全、可审计、可扩展。</p>
+          <ul class="auth-materio-points">
+            <li>混合检索 · 流式问答</li>
+            <li>RBAC · 部门隔离</li>
+            <li>命中评测 · 全链路观测</li>
+          </ul>
         </div>
-        <div id="authPanel"></div>
+        <section class="auth-materio-card glass-panel">
+          <div class="auth-materio-head">
+            <h2 id="authTitle">欢迎回来</h2>
+            <p id="authLead">登录账号后开始使用知识平台</p>
+          </div>
+          <div class="auth-tabs" role="tablist">
+            <button type="button" class="auth-tab ${mode !== "register" ? "active" : ""}" data-tab="login">登录</button>
+            <button type="button" class="auth-tab ${mode === "register" ? "active" : ""}" data-tab="register">注册</button>
+          </div>
+          <div id="authPanel"></div>
+          <p class="auth-materio-guest">
+            无需账号？<button type="button" class="btn-text" id="btnGuestEnter">以访客进入问答</button>
+          </p>
+        </section>
       </div>
-      <button type="button" class="btn btn-text" data-go="/">以访客身份继续问答（仅公开库）</button>
     </div>
   `;
 
   const panel = document.getElementById("authPanel");
   const showTab = (tab) => {
-    document.querySelectorAll(".auth-tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-    // 仅同步 hash，避免再次触发整页重渲染
-    const next = tab === "register" ? "#/register" : "#/login";
+    const next = tab === "register" ? "#/register" : "#/";
     if (location.hash !== next) history.replaceState(null, "", next);
-    if (tab === "register") renderRegisterForm(panel);
-    else renderLoginForm(panel);
+    document.querySelectorAll(".auth-tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+    const title = document.getElementById("authTitle");
+    const lead = document.getElementById("authLead");
+    if (tab === "register") {
+      title.textContent = "创建账号";
+      lead.textContent = "注册后默认可问答；权限由管理员分配";
+      renderRegisterForm(panel);
+    } else {
+      title.textContent = "欢迎回来";
+      lead.textContent = "访客 / 员工 / 管理员同一入口，登录后自动分流";
+      renderLoginForm(panel);
+    }
   };
 
   document.querySelectorAll(".auth-tab").forEach((btn) => {
     btn.addEventListener("click", () => showTab(btn.dataset.tab));
   });
-  document.querySelectorAll("[data-go]").forEach((el) => {
-    el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
-  });
-
-  showTab(initialTab === "register" ? "register" : "login");
+  document.getElementById("btnGuestEnter").onclick = () => {
+    navigate("/chat");
+    dispatchRender();
+  };
+  showTab(mode === "register" ? "register" : "login");
 }
 
 /** 登录表单 */
 function renderLoginForm(panel) {
   panel.innerHTML = `
-    <p class="text-muted auth-lead">不同角色登录后看到的入口不同：访客仅问答，员工可上传，管理员进控制台。</p>
-    <div class="form-group"><label>用户名</label><input class="form-control" id="loginUser" type="text" autocomplete="username" placeholder="用户名" /></div>
-    <div class="form-group"><label>密码</label><input class="form-control" id="loginPass" type="password" autocomplete="current-password" placeholder="密码" /></div>
-    <button class="btn" id="btnDoLogin" style="width:100%">登录</button>
+    <div class="form-group">
+      <label for="loginUser">用户名</label>
+      <input class="form-control auth-input" id="loginUser" type="text" autocomplete="username" placeholder="请输入用户名" />
+    </div>
+    <div class="form-group">
+      <label for="loginPass">密码</label>
+      <input class="form-control auth-input" id="loginPass" type="password" autocomplete="current-password" placeholder="请输入密码" />
+    </div>
+    <div class="auth-materio-row">
+      <label class="auth-check"><input type="checkbox" id="loginRemember" /> 记住我</label>
+      <span class="text-muted auth-hint-inline">统一登录 · 按角色跳转</span>
+    </div>
+    <button class="btn auth-materio-submit" id="btnDoLogin">登录</button>
   `;
   document.getElementById("btnDoLogin").addEventListener("click", doLogin);
   document.getElementById("loginPass").addEventListener("keydown", (e) => {
@@ -606,15 +660,14 @@ function renderLoginForm(panel) {
   });
 }
 
-/** 注册表单（默认注册用户，无上传） */
+/** 注册表单 */
 function renderRegisterForm(panel) {
   panel.innerHTML = `
-    <p class="text-muted auth-lead">注册后默认「注册用户」角色，可问答与查看本人历史；上传需管理员分配员工权限。</p>
-    <div class="form-group"><label>用户名（3-50）</label><input class="form-control" id="regUser" /></div>
-    <div class="form-group"><label>邮箱</label><input class="form-control" id="regEmail" type="email" /></div>
-    <div class="form-group"><label>昵称（可选）</label><input class="form-control" id="regNick" /></div>
-    <div class="form-group"><label>密码（至少 8 位）</label><input class="form-control" id="regPass" type="password" /></div>
-    <button class="btn" id="btnDoReg" style="width:100%">注册并前往登录</button>
+    <div class="form-group"><label>用户名（3-50）</label><input class="form-control auth-input" id="regUser" placeholder="用户名" /></div>
+    <div class="form-group"><label>邮箱</label><input class="form-control auth-input" id="regEmail" type="email" placeholder="name@company.com" /></div>
+    <div class="form-group"><label>昵称（可选）</label><input class="form-control auth-input" id="regNick" placeholder="显示名称" /></div>
+    <div class="form-group"><label>密码（至少 8 位）</label><input class="form-control auth-input" id="regPass" type="password" placeholder="设置密码" /></div>
+    <button class="btn auth-materio-submit" id="btnDoReg">注册并前往登录</button>
   `;
   document.getElementById("btnDoReg").addEventListener("click", doRegister);
 }
@@ -626,22 +679,25 @@ async function doLogin() {
   try {
     const data = await api.post("/auth/login", { username, password });
     if (!data?.access_token) throw new Error("登录失败：未返回令牌");
+    const user = data.user || { username };
     replaceAuthSession({
       access_token: data.access_token,
       refresh_token: data.refresh_token,
-      user: { username },
+      user,
     });
-    const me = await api.get("/auth/me");
-    replaceAuthSession({
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-      user: me,
-    });
-    // 登录后身份变化：丢弃访客期会话，避免「无权访问该会话」
+    // 若后端已带 user 则不必再拉；否则补齐资料
+    if (!data.user) {
+      const me = await api.get("/auth/me");
+      replaceAuthSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        user: me,
+      });
+    }
     resetLocalChatContext();
     const role = getPrimaryRole();
     toast(`登录成功（${getRoleLabel(role)}）`, "success");
-    redirectAfterLogin();
+    redirectAfterLogin(data.landing_href);
   } catch (e) {
     clearAuth();
     toast(e.message || "登录失败", "error");
@@ -659,8 +715,7 @@ async function doRegister() {
   try {
     await api.post("/auth/register", { username, email, password, nickname: nickname || undefined });
     toast("注册成功，请登录", "success");
-    // 切回登录页并预填用户名
-    pageAuth("login");
+    pageMaterioAuth("login");
     setTimeout(() => {
       const el = document.getElementById("loginUser");
       if (el) el.value = username;
@@ -683,12 +738,19 @@ async function pageHistory() {
     const data = await api.get("/qa/sessions?page=1&page_size=50");
     const items = data.items || data || [];
     if (!items.length) {
-      document.getElementById("pageRoot").innerHTML = `<div class="card empty-state">暂无历史会话</div>`;
+      document.getElementById("pageRoot").innerHTML = `
+        <header class="page-head"><div><h1>对话历史</h1><p class="page-desc">查看并继续你的问答会话。</p></div></header>
+        <div class="card empty-state">暂无历史会话</div>`;
       return;
     }
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card">
-        <h2 class="card-title">我的会话</h2>
+      <header class="page-head">
+        <div><h1>对话历史</h1><p class="page-desc">共 ${items.length} 个会话</p></div>
+      </header>
+      <div class="card panel-fill">
+        <div class="card-header">
+          <div class="card-header-text"><h3 class="card-title">我的会话</h3></div>
+        </div>
         <div id="historyList">
           ${items
             .map(
@@ -705,7 +767,7 @@ async function pageHistory() {
       btn.addEventListener("click", () => {
         // 记录待打开会话，跳转问答页后由 pageChat 统一加载消息
         pendingOpenSessionId = btn.getAttribute("data-open");
-        navigate("/");
+        navigate("/chat");
       });
     });
   } catch (e) {
@@ -735,18 +797,33 @@ async function pageProfile() {
       /* 使用本地 */
     }
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card" style="max-width:560px">
-        <h2 class="card-title">个人资料</h2>
-        <div class="form-group"><label>用户名</label><input class="form-control" id="pfUser" value="${escapeHtml(me.username || "")}" disabled /></div>
-        <div class="form-group"><label>昵称</label><input class="form-control" id="pfNick" value="${escapeHtml(me.nickname || "")}" /></div>
-        <div class="form-group"><label>邮箱</label><input class="form-control" id="pfEmail" value="${escapeHtml(me.email || "")}" /></div>
-        <div class="form-group"><label>角色</label><div>${escapeHtml((me.roles || [me.role]).filter(Boolean).join(", ") || "-")}</div></div>
-        <div class="form-group"><label>最近登录</label><div class="text-muted">${formatDateTime(me.last_login_at)}</div></div>
-        <button class="btn" id="btnSaveProfile">保存资料</button>
-        <hr style="border:none;border-top:1px solid var(--color-border);margin:20px 0" />
-        <h3 class="card-title">我的上传记录</h3>
-        <p class="text-muted">上传记录请在管理端知识库文档列表中查看。</p>
+      <header class="page-head">
+        <div><h1>个人中心</h1><p class="page-desc">维护账号资料与上传说明。</p></div>
+      </header>
+      <div class="page-grid">
+        <div class="card span-6">
+          <div class="card-header"><div class="card-header-text"><h3 class="card-title">个人资料</h3></div></div>
+          <div class="form-group"><label>用户名</label><input class="form-control" id="pfUser" value="${escapeHtml(me.username || "")}" disabled /></div>
+          <div class="form-group"><label>昵称</label><input class="form-control" id="pfNick" value="${escapeHtml(me.nickname || "")}" /></div>
+          <div class="form-group"><label>邮箱</label><input class="form-control" id="pfEmail" value="${escapeHtml(me.email || "")}" /></div>
+          <div class="form-group"><label>角色</label><div>${escapeHtml((me.roles || [me.role]).filter(Boolean).join(", ") || "-")}</div></div>
+          <div class="form-group"><label>最近登录</label><div class="text-muted">${formatDateTime(me.last_login_at)}</div></div>
+          <button class="btn" id="btnSaveProfile">保存资料</button>
+        </div>
+        <div class="card span-6">
+          <div class="card-header"><div class="card-header-text"><h3 class="card-title">我的上传记录</h3></div></div>
+          <div class="meta-list">
+            <div class="meta-row"><span class="meta-label">查看入口</span><span class="meta-value">管理端 · 知识库文档列表</span></div>
+            <div class="meta-row"><span class="meta-label">上传权限</span><span class="meta-value">${canUpload() ? "已开通" : "未开通"}</span></div>
+            <div class="meta-row"><span class="meta-label">当前角色</span><span class="meta-value">${escapeHtml(getRoleLabel())}</span></div>
+          </div>
+          <p class="page-desc" style="margin-top:16px">上传记录请在管理端知识库文档列表中查看；员工仅可上传至本部门或授权知识库。</p>
+          ${canUpload() ? `<button class="btn btn-secondary btn-sm" data-go="/upload" style="margin-top:12px">去上传文档</button>` : ""}
+        </div>
       </div>`;
+    document.querySelectorAll("[data-go]").forEach((el) => {
+      el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
+    });
     document.getElementById("btnSaveProfile").onclick = async () => {
       const nickname = document.getElementById("pfNick").value.trim();
       const email = document.getElementById("pfEmail").value.trim();
@@ -792,10 +869,15 @@ async function pageUpload() {
   }
 
   document.getElementById("pageRoot").innerHTML = `
-    <div class="card upload-panel">
-      <h2 class="card-title">上传文档到知识库</h2>
-      <p class="text-muted">当前身份：${getRoleLabel()}${getDepartment() ? ` · 部门 ${getDepartment()}` : ""}。管理员/超管可上传至任意库；员工仅本部门或授权知识库。</p>
-      <p class="text-muted"><strong>支持的文件类型：</strong>PDF、Word（DOC/DOCX）、TXT、Markdown（MD）。文件类型与大小由服务端最终校验。</p>
+    <header class="page-head">
+      <div>
+        <h1>文档上传</h1>
+        <p class="page-desc">当前身份：${getRoleLabel()}${getDepartment() ? ` · 部门 ${getDepartment()}` : ""}。支持 PDF、Word、TXT、Markdown。</p>
+      </div>
+    </header>
+    <div class="page-grid">
+    <div class="card upload-panel span-8">
+      <div class="card-header"><div class="card-header-text"><h3 class="card-title">上传到知识库</h3></div></div>
       <div class="form-group">
         <label>目标知识库</label>
         <select class="form-control" id="kbSelect">
@@ -809,15 +891,18 @@ async function pageUpload() {
       </div>
       <div class="upload-drop" id="dropZone">点击或拖拽 PDF、Word（DOC/DOCX）、TXT、Markdown（MD）文件到此处</div>
       <input type="file" id="fileInput" class="hidden" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
-      <div class="form-group" style="margin-top:12px">
-        <label>处理进度</label>
-        <div class="card" style="padding:10px">
-          <div id="uploadProgress" class="text-muted">尚未开始</div>
-          <div style="height:8px;background:#E8F0FE;border-radius:4px;margin-top:8px;overflow:hidden">
-            <div id="uploadBar" style="height:100%;width:0;background:var(--color-primary);transition:width .2s"></div>
-          </div>
-        </div>
+    </div>
+    <div class="card span-4">
+      <div class="card-header"><div class="card-header-text"><h3 class="card-title">处理进度</h3></div></div>
+      <div id="uploadProgress" class="text-muted">尚未开始</div>
+      <div style="height:8px;background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;margin-top:12px;overflow:hidden">
+        <div id="uploadBar" style="height:100%;width:0;background:var(--color-primary);transition:width .2s"></div>
       </div>
+      <div class="meta-list" style="margin-top:16px">
+        <div class="meta-row"><span class="meta-label">文件类型</span><span class="meta-value">PDF / Word / TXT / MD</span></div>
+        <div class="meta-row"><span class="meta-label">权限说明</span><span class="meta-value">员工限本部门或授权库</span></div>
+      </div>
+    </div>
     </div>`;
 
   const drop = document.getElementById("dropZone");
@@ -864,7 +949,7 @@ async function handleUpload(file) {
 }
 
 /* ========================= 启动 ========================= */
-["/", "/login", "/register", "/history", "/profile", "/upload", "*"].forEach((p) => {
+["/", "/login", "/register", "/chat", "/history", "/profile", "/upload", "*"].forEach((p) => {
   route(p, () => dispatchRender());
 });
 

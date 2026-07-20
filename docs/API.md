@@ -176,8 +176,9 @@ Authorization: Bearer <access_token>
 ### 3.2 用户登录
 
 - `POST /auth/login` — **公开** — 请求：`username`、`password`
+- **统一入口**：访客 / 员工 / 管理员同一接口；前端根据 `landing` 分流。
 
-响应 `data`（`TokenResponse`）：
+响应 `data`（`LoginResponse`，在 Token 基础上扩展）：
 
 | 字段 | 说明 |
 |------|------|
@@ -185,6 +186,9 @@ Authorization: Bearer <access_token>
 | refresh_token | 刷新 JWT |
 | token_type | 固定 `bearer` |
 | expires_in | access 有效秒数 |
+| user | 用户对象（同 [3.4](#34-当前用户信息)） |
+| landing | `admin`=管理端，`app`=问答端 |
+| landing_href | 前端跳转，如 `/admin/` 或 `/#/chat` |
 
 凭证错误 → `401`；用户被禁用 → `403`。
 

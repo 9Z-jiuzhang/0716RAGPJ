@@ -21,7 +21,7 @@ from app.schemas.identity import (
     RegisterRequest,
     UserUpdateRequest,
 )
-from app.utils.identity_helpers import build_token_response, present_user
+from app.utils.identity_helpers import build_login_response, build_token_response, present_user
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +59,7 @@ async def login(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
+    """统一登录：访客/员工/管理员同一接口，响应含用户资料与落地分流。"""
     user = await db.scalar(select(User).where(User.username == data.username))
     if not user or not verify_password(data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="账号或密码错误")
@@ -66,9 +67,15 @@ async def login(
         raise HTTPException(status_code=403, detail="账号已禁用或待验证")
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
+    await db.refresh(user)
     return ok(
-        build_token_response(create_access_token(str(user.id)), create_refresh_token(str(user.id))),
+        build_login_response(
+            user,
+            create_access_token(str(user.id)),
+            create_refresh_token(str(user.id)),
+        ),
         request_id=request_id,
+        message="登录成功",
     )
 
 

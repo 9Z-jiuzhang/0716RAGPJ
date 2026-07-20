@@ -1,0 +1,295 @@
+/* ============================================================
+ * TechStart Pro · 动效与视觉增强
+ * 缓动 / 呼吸 / 涟漪 / 图表生长 / 聚光追踪
+ * ============================================================ */
+
+:root {
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-micro: 180ms;
+  --duration-page: 340ms;
+  --transition: all var(--duration-micro) var(--ease-standard);
+  --page-transition: var(--duration-page) var(--ease-standard);
+}
+
+/* ---------- 背景：流动光晕 + 粒子层 ---------- */
+.bg-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.bg-fx-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.55;
+}
+
+.ambient-orbs i:nth-child(1) {
+  animation: orb-drift-a 22s var(--ease-standard) infinite alternate;
+}
+
+.ambient-orbs i:nth-child(2) {
+  animation: orb-drift-b 28s var(--ease-standard) infinite alternate;
+}
+
+@keyframes orb-drift-a {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.45;
+  }
+  100% {
+    transform: translate(12%, 8%) scale(1.08);
+    opacity: 0.7;
+  }
+}
+
+@keyframes orb-drift-b {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.4;
+  }
+  100% {
+    transform: translate(-10%, -6%) scale(1.12);
+    opacity: 0.65;
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
+    opacity: 0.85;
+  }
+  50% {
+    box-shadow: 0 0 28px rgba(168, 85, 247, 0.45);
+    opacity: 1;
+  }
+}
+
+@keyframes chart-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ripple-fade {
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+/* ---------- 页面进入 ---------- */
+#pageRoot.page-enter {
+  animation: page-enter var(--page-transition);
+}
+
+/* ---------- 按钮：光晕 + 涟漪容器 ---------- */
+.btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    transform var(--duration-micro) var(--ease-standard),
+    box-shadow var(--duration-micro) var(--ease-standard),
+    filter var(--duration-micro) var(--ease-standard),
+    background var(--duration-micro) var(--ease-standard),
+    border-color var(--duration-micro) var(--ease-standard),
+    color var(--duration-micro) var(--ease-standard);
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 8px 28px rgba(168, 85, 247, 0.45),
+    0 0 12px rgba(99, 102, 241, 0.4);
+}
+
+.btn .btn-ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(0);
+  pointer-events: none;
+  animation: ripple-fade 300ms var(--ease-standard) forwards;
+  z-index: 1;
+}
+
+/* ---------- 输入框：聚焦发光微扩 ---------- */
+.form-control {
+  transition:
+    border-color var(--duration-micro) var(--ease-standard),
+    box-shadow var(--duration-micro) var(--ease-standard),
+    background var(--duration-micro) var(--ease-standard),
+    transform var(--duration-micro) var(--ease-standard);
+}
+
+.form-control:focus {
+  transform: scale(1.005);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.55), 0 0 15px rgba(99, 102, 241, 0.4);
+}
+
+.qa-composer {
+  transition:
+    border-color var(--duration-micro) var(--ease-standard),
+    box-shadow var(--duration-micro) var(--ease-standard);
+}
+
+.qa-composer:focus-within {
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.4), 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- 玻璃卡片：鼠标追踪高光（.fx-spot 由 JS 注入，避免与伪元素冲突） ---------- */
+.card,
+.glass-panel,
+.stat-card,
+.dash-shortcut,
+.kb-card {
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color var(--duration-micro) var(--ease-standard),
+    background var(--duration-micro) var(--ease-standard),
+    box-shadow var(--duration-micro) var(--ease-standard),
+    transform var(--duration-micro) var(--ease-standard);
+}
+
+.fx-spot {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    280px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    rgba(255, 255, 255, 0.12),
+    transparent 42%
+  );
+  opacity: 0;
+  transition: opacity var(--duration-micro) var(--ease-standard);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.card:hover > .fx-spot,
+.glass-panel:hover > .fx-spot,
+.stat-card:hover > .fx-spot,
+.dash-shortcut:hover > .fx-spot,
+.kb-card:hover > .fx-spot {
+  opacity: 1;
+}
+
+/* ---------- 图表生长 ---------- */
+.bar-chart .bar {
+  transform-origin: bottom center;
+  transform: scaleY(0);
+  animation: chart-grow 720ms var(--ease-standard) forwards;
+  animation-delay: calc(var(--bar-i, 0) * 40ms);
+}
+
+.bar-chart .bar:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 0 18px rgba(168, 85, 247, 0.65);
+}
+
+/* ---------- 导航微交互 ---------- */
+.sidebar .nav-item {
+  transition:
+    color var(--duration-micro) var(--ease-standard),
+    background var(--duration-micro) var(--ease-standard),
+    border-color var(--duration-micro) var(--ease-standard),
+    box-shadow var(--duration-micro) var(--ease-standard),
+    transform var(--duration-micro) var(--ease-standard);
+}
+
+.sidebar .nav-item i {
+  transition:
+    transform var(--duration-micro) var(--ease-spring),
+    background var(--duration-micro) var(--ease-standard),
+    opacity var(--duration-micro) var(--ease-standard),
+    box-shadow var(--duration-micro) var(--ease-standard);
+}
+
+.sidebar .nav-item:hover i {
+  transform: scale(1.15);
+  background: #a855f7;
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.6);
+}
+
+.sidebar .nav-item.active {
+  animation: none;
+}
+
+.topnav-links .nav-item,
+.topnav-links a,
+.topnav-links .nav-link {
+  position: relative;
+  transition: color var(--duration-micro) var(--ease-standard);
+}
+
+.topnav-links .nav-item::after,
+.topnav-links a::after,
+.topnav-links .nav-link::after {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: -4px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-primary-gradient);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform var(--duration-micro) var(--ease-standard);
+  opacity: 0.9;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+}
+
+.topnav-links .nav-item:hover::after,
+.topnav-links .nav-item.active::after,
+.topnav-links a:hover::after,
+.topnav-links a.active::after,
+.topnav-links .nav-link:hover::after,
+.topnav-links .nav-link.active::after {
+  transform: scaleX(1);
+}
+
+/* ---------- 减弱动效 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .bg-fx,
+  .ambient-orbs {
+    display: none !important;
+  }
+
+  .bar-chart .bar {
+    transform: none;
+    animation: none;
+    height: var(--bar-h, 4px);
+  }
+}

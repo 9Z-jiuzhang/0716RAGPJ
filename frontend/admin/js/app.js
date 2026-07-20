@@ -9,26 +9,47 @@ import { route, startRouter, navigate, currentPath } from "/assets/js/router.js"
 import { api, clearDemoFlags } from "/assets/js/api.js";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js";
 import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
-import { initFlowField } from "/assets/js/flow-field.js?v=ui-20260720";
+import { initMotion, runCountUps } from "/assets/js/motion.js";
 
 clearDemoFlags();
-initFlowField();
+initMotion();
 
-/** 管理端菜单（按权限码裁剪；前端隐藏不能替代后端鉴权） */
-const MENUS = [
-  { path: "/admin", label: "首页", perm: "system:read" },
-  { path: "/admin/users", label: "用户管理", perm: "user:read" },
-  { path: "/admin/roles", label: "角色管理", perm: "role:read" },
-  { path: "/admin/departments", label: "部门管理", perm: "department:read" },
-  { path: "/admin/models", label: "大模型管理", perm: "model:read" },
-  { path: "/admin/knowledge-bases", label: "知识库管理", perm: "kb:read" },
-  { path: "/admin/ragas", label: "RAGAS 评估", perm: "system:read" },
-  { path: "/admin/qa-sessions", label: "会话分析", perm: "system:read" },
-  { path: "/admin/role-caches", label: "角色缓存", perm: "system:read" },
-  { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
-  { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
-  { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
+/** 管理端菜单（分组展示；按权限码裁剪；前端隐藏不能替代后端鉴权） */
+const MENU_GROUPS = [
+  {
+    title: "工作台",
+    items: [{ path: "/admin", label: "首页", perm: "system:read" }],
+  },
+  {
+    title: "组织与权限",
+    items: [
+      { path: "/admin/users", label: "用户管理", perm: "user:read" },
+      { path: "/admin/roles", label: "角色管理", perm: "role:read" },
+      { path: "/admin/departments", label: "部门管理", perm: "department:read" },
+    ],
+  },
+  {
+    title: "知识资产",
+    items: [
+      { path: "/admin/models", label: "大模型管理", perm: "model:read" },
+      { path: "/admin/knowledge-bases", label: "知识库管理", perm: "kb:read" },
+    ],
+  },
+  {
+    title: "质量与运维",
+    items: [
+      { path: "/admin/ragas", label: "RAGAS 评估", perm: "system:read" },
+      { path: "/admin/qa-sessions", label: "会话分析", perm: "system:read" },
+      { path: "/admin/role-caches", label: "角色缓存", perm: "system:read" },
+      { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
+      { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
+      { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
+    ],
+  },
 ];
+
+/** 扁平菜单（路由/兼容用） */
+const MENUS = MENU_GROUPS.flatMap((g) => g.items);
 
 /** 页面级权限门禁（防深链绕过菜单隐藏） */
 function requirePerm(perm, title) {
@@ -44,12 +65,12 @@ function requirePerm(perm, title) {
 function guard() {
   if (!isLoggedIn()) {
     toast("请先登录管理端", "error");
-    location.href = "/#/login";
+    location.href = "/#/";
     return false;
   }
   if (!canAccessAdmin()) {
     toast("当前账号无管理端权限", "error");
-    location.href = "/#/";
+    location.href = "/#/chat";
     return false;
   }
   return true;
@@ -64,19 +85,27 @@ function renderShell(title) {
   const roleText = `${displayName} · ${getRoleLabel()}`;
 
   document.getElementById("app").innerHTML = `
+    <div class="ambient-orbs" aria-hidden="true"><i></i><i></i></div>
     <div class="app-shell app-shell-admin">
       <aside class="sidebar" aria-label="管理导航">
         <div class="sidebar-brand" data-go="/admin" title="管理首页">
           <i class="logo-dot"></i>
           <span><b>Knowledge</b> AI<small>智能知识中枢</small></span>
         </div>
-        <div class="sidebar-caption">工作台</div>
-        <nav class="sidebar-links">
-          ${MENUS.map((m) => {
-            // 严格按权限码显示（超级管理员 hasPermission 全放行）
-            if (!hasPermission(m.perm)) return "";
-            const active = path === m.path || (m.path !== "/admin" && path.startsWith(m.path));
-            return `<button type="button" class="nav-item ${active ? "active" : ""}" data-go="${m.path}"><i></i>${m.label}</button>`;
+        <nav class="sidebar-nav" aria-label="管理导航分组">
+          ${MENU_GROUPS.map((group) => {
+            const links = group.items
+              .filter((m) => hasPermission(m.perm))
+              .map((m) => {
+                const active = path === m.path || (m.path !== "/admin" && path.startsWith(m.path));
+                return `<button type="button" class="nav-item ${active ? "active" : ""}" data-go="${m.path}"><i></i>${m.label}</button>`;
+              })
+              .join("");
+            if (!links) return "";
+            return `<div class="sidebar-group">
+              <div class="sidebar-caption">${group.title}</div>
+              <div class="sidebar-links">${links}</div>
+            </div>`;
           }).join("")}
         </nav>
         <div class="sidebar-user">
@@ -89,7 +118,7 @@ function renderShell(title) {
           <div class="page-bar-title">${escapeHtml(title)}</div>
           <div class="topnav-actions">
             <span class="role-chip">${roleText}</span>
-            <a class="btn btn-secondary btn-sm" href="/#/">智能对话</a>
+            <a class="btn btn-secondary btn-sm" href="/#/chat">智能对话</a>
             <button type="button" class="btn btn-text" id="btnLogout">退出</button>
           </div>
         </header>
@@ -104,19 +133,22 @@ function renderShell(title) {
     const ok = await confirmDialog({ title: "退出", message: "确定退出管理端吗？", confirmText: "退出" });
     if (!ok) return;
     clearAuth();
-    location.href = "/#/login";
+    location.href = "/#/";
   };
   return true;
 }
 
-/** 条形图渲染 */
-function renderBars(values, { percent = false } = {}) {
-  const max = Math.max(...values.map(Number), 0.0001);
-  return `<div class="bar-chart">${values
+/** 条形图渲染（支持轴标签） */
+function renderBars(values, { percent = false, labels = null } = {}) {
+  const nums = values.map(Number);
+  const max = Math.max(...nums, 0.0001);
+  const labs = Array.isArray(labels) && labels.length === nums.length ? labels : null;
+  return `<div class="bar-chart ${labs ? "bar-chart-labeled" : ""}">${nums
     .map((v, i) => {
-      const h = Math.round((Number(v) / max) * 100);
+      const h = Math.max(4, Math.round((Number(v) / max) * 100));
       const label = percent ? `${Math.round(Number(v) * 100)}%` : String(v);
-      return `<div class="bar" style="height:${h}%" title="${label}"><span>${label}</span></div>`;
+      const axis = labs ? `<em>${escapeHtml(String(labs[i]))}</em>` : "";
+      return `<div class="bar" style="--bar-h:${h}%;--bar-i:${i}" title="${label}"><span>${label}</span>${axis}</div>`;
     })
     .join("")}</div>`;
 }
@@ -126,9 +158,29 @@ function closeAllModals() {
   document.querySelectorAll(".modal-mask, .modal-backdrop").forEach((el) => el.remove());
 }
 
+/** Materio 统一页头：标题 + 说明 + 右侧操作（desc 为纯文本） */
+function pageHead({ title, desc = "", actions = "" }) {
+  return `<header class="page-head">
+    <div>
+      <h1>${escapeHtml(title)}</h1>
+      ${desc ? `<p class="page-desc">${escapeHtml(desc)}</p>` : ""}
+    </div>
+    ${actions ? `<div class="page-head-actions">${actions}</div>` : ""}
+  </header>`;
+}
+
 /** 路由分发 */
+function playPageEnter() {
+  const root = document.getElementById("pageRoot");
+  if (!root) return;
+  root.classList.remove("page-enter");
+  void root.offsetWidth;
+  root.classList.add("page-enter");
+}
+
 async function dispatchRender() {
   closeAllModals();
+  playPageEnter();
   const path = currentPath();
   // 知识库详情 / 文档 / 快照
   let m;
@@ -150,27 +202,11 @@ async function dispatchRender() {
   return pageDashboard();
 }
 
-/* ========== 首页 /admin（系统介绍 + 当前角色 + 运行概览） ========== */
-function renderHomeIntro() {
-  return `
-    <section class="dashboard-hero">
-      <div>
-        <span class="eyebrow">知识运营控制台</span>
-        <h1>构建你的智能知识中枢</h1>
-        <p>连接文档、数据与大模型，让知识随时可被精准检索。</p>
-      </div>
-    </section>
-    <div class="dashboard-note">
-      支持多格式文档解析、混合检索、权限隔离与审计追踪；所有统计数据均来自当前系统。
-    </div>`;
-}
-
-function renderCurrentRoleCard() {
+/* ========== 首页 /admin：精简欢迎区 + 指标 + 图表 + 快捷入口 ========== */
+function renderDashboardWelcome() {
   const user = getUser() || {};
   const name = escapeHtml(user.nickname || user.username || "用户");
   const roleLabel = escapeHtml(getRoleLabel());
-  const dept = escapeHtml(user.department || "");
-
   const hour = new Date().getHours();
   let timeGreeting = "你好";
   if (hour < 6) timeGreeting = "夜深了";
@@ -179,56 +215,118 @@ function renderCurrentRoleCard() {
   else if (hour < 18) timeGreeting = "下午好";
   else timeGreeting = "晚上好";
 
-  let roleGreeting;
-  if (isSuperAdmin()) {
-    roleGreeting = "您是<strong>超级管理员</strong>，拥有系统的全部权限（含模型配置），可访问所有知识库，祝管理顺利。";
-  } else if (hasPermission("user:read") || hasPermission("role:read")) {
-    roleGreeting = "您是<strong>管理员</strong>，可管理用户、角色、部门、知识库与系统运维，可访问所有知识库。";
-  } else if (dept) {
-    roleGreeting = `您是<strong>${dept} 部门员工</strong>，可访问本部门授权及「访客专用」的知识库，欢迎开始今天的工作。`;
-  } else {
-    roleGreeting = "欢迎使用智能知识库系统，可访问「访客专用」及您被授权的知识库。";
-  }
+  let focus = "查看运行指标，处理知识库与问答运营。";
+  if (isSuperAdmin()) focus = "可配置模型、权限与全库资产。";
+  else if (hasPermission("user:read") || hasPermission("role:read")) focus = "可管理用户、知识库与系统运维。";
 
   return `
-    <div class="card">
-      <h3 class="card-title">${timeGreeting}，${name}！</h3>
-      <p class="text-muted" style="margin:0;line-height:1.8">
-        当前登录身份：<strong>${roleLabel}</strong>。${roleGreeting}
-      </p>
-    </div>`;
+    <section class="dash-welcome">
+      <div class="dash-welcome-main">
+        <p class="dash-welcome-kicker">知识运营控制台</p>
+        <h1>${timeGreeting}，${name} 👋</h1>
+        <p>当前身份 <strong>${roleLabel}</strong> · ${focus}</p>
+      </div>
+      <div class="dash-welcome-actions">
+        ${hasPermission("kb:read") ? `<button type="button" class="btn" data-go="/admin/knowledge-bases">知识库</button>` : ""}
+        <a class="btn btn-secondary" href="/#/chat">去问答</a>
+      </div>
+    </section>`;
+}
+
+function renderDashboardShortcuts() {
+  const items = [
+    { path: "/admin/knowledge-bases", label: "知识库", perm: "kb:read", desc: "文档与向量" },
+    { path: "/admin/users", label: "用户", perm: "user:read", desc: "账号与角色" },
+    { path: "/admin/hit-test", label: "命中测试", perm: "test:read", desc: "检索评测" },
+    { path: "/admin/qa-sessions", label: "会话分析", perm: "system:read", desc: "问答洞察" },
+    { path: "/admin/monitor", label: "系统监控", perm: "system:read", desc: "Grafana" },
+    { path: "/admin/audit", label: "审计日志", perm: "audit:read", desc: "操作追踪" },
+  ].filter((i) => hasPermission(i.perm));
+
+  if (!items.length) return "";
+  return `
+    <section class="dash-section">
+      <div class="dash-section-head"><h2>快捷入口</h2></div>
+      <div class="dash-shortcut-grid">
+        ${items
+          .map(
+            (i) => `<button type="button" class="dash-shortcut" data-go="${i.path}">
+              <strong>${i.label}</strong><span>${i.desc}</span>
+            </button>`
+          )
+          .join("")}
+      </div>
+    </section>`;
+}
+
+function weekLabels(n) {
+  const out = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    out.push(`${d.getMonth() + 1}/${d.getDate()}`);
+  }
+  return out;
 }
 
 async function pageDashboard() {
   if (!requirePerm("system:read", "首页")) return;
-  const headerHtml = `${renderHomeIntro()}${renderCurrentRoleCard()}`;
-  document.getElementById("pageRoot").innerHTML = `${headerHtml}<div class="loading">加载统计数据…</div>`;
+  const welcome = renderDashboardWelcome();
+  document.getElementById("pageRoot").innerHTML = `${welcome}<div class="loading">加载统计数据…</div>`;
   try {
     const s = await api.get("/monitor/stats");
+    const qa = s.qa_trend_7d || [0, 0, 0, 0, 0, 0, 0];
+    const hit = s.hit_rate_trend_7d || [0, 0, 0, 0, 0, 0, 0];
+    const err = s.error_24h || [0, 0, 0, 0];
+    const qaLabels = weekLabels(qa.length);
+    const hitLabels = weekLabels(hit.length);
+    const errLabels = err.length === 4 ? ["0-6h", "6-12h", "12-18h", "18-24h"] : err.map((_, i) => `#${i + 1}`);
+
     document.getElementById("pageRoot").innerHTML = `
-      ${headerHtml}
-      <div class="card" style="background:transparent;box-shadow:none;padding:0;margin:8px 0 0">
-        <h3 class="card-title">运行概览</h3>
-      </div>
-      <div class="stat-grid">
-        <div class="stat-card"><div class="label">知识库总数</div><div class="value">${s.kb_count ?? "-"}</div></div>
-        <div class="stat-card"><div class="label">文档总数</div><div class="value">${s.doc_count ?? "-"}</div></div>
-        <div class="stat-card"><div class="label">用户总数</div><div class="value">${s.user_count ?? "-"}</div></div>
-        <div class="stat-card"><div class="label">活跃会话</div><div class="value">${s.active_sessions ?? "-"}</div></div>
-        <div class="stat-card"><div class="label">近 24 小时恶意阻拦</div><div class="value">${s.guard_blocked_24h ?? 0}</div></div>
-      </div>
-      <div class="chart-grid">
-        <div class="card"><h3 class="card-title">近 7 天问答量</h3>${renderBars(s.qa_trend_7d || [0, 0, 0, 0, 0, 0, 0])}</div>
-        <div class="card"><h3 class="card-title">近 7 天命中率</h3>${renderBars(s.hit_rate_trend_7d || [0, 0, 0, 0, 0, 0, 0], { percent: true })}</div>
-        <div class="card"><h3 class="card-title">近 24 小时错误趋势</h3>${renderBars(s.error_24h || [0, 0, 0, 0])}</div>
-        <div class="card">
-          <h3 class="card-title">LLM Guard 安全窗口</h3>
-          <p style="margin:8px 0">最近 24 小时阻拦 <strong>${s.guard_blocked_24h ?? 0}</strong> 次，最近 7 天共 <strong>${s.guard_blocked_7d ?? 0}</strong> 次。</p>
-          <p class="text-muted" style="margin-bottom:0">阻拦统计涵盖提示注入、窃密、越权、破坏性操作与危险命令执行。</p>
+      ${welcome}
+      <section class="dash-section">
+        <div class="dash-section-head"><h2>核心指标</h2><span class="text-muted">实时汇总</span></div>
+        <div class="stat-grid dash-stat-grid">
+          <div class="stat-card"><div class="label">知识库</div><div class="value" data-count-up="${s.kb_count ?? 0}">0</div></div>
+          <div class="stat-card"><div class="label">文档</div><div class="value" data-count-up="${s.doc_count ?? 0}">0</div></div>
+          <div class="stat-card"><div class="label">用户</div><div class="value" data-count-up="${s.user_count ?? 0}">0</div></div>
+          <div class="stat-card"><div class="label">活跃会话</div><div class="value" data-count-up="${s.active_sessions ?? 0}">0</div></div>
         </div>
-      </div>`;
+      </section>
+      <section class="dash-section page-grid dash-bento">
+        <div class="card dash-chart-card span-8">
+          <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 7 天问答量</h3></div></div>
+          ${renderBars(qa, { labels: qaLabels })}
+        </div>
+        <div class="card dash-chart-card span-4">
+          <div class="card-header"><div class="card-header-text"><h3 class="card-title">安全窗口</h3></div></div>
+          <div class="dash-security-metrics">
+            <div><span class="label">近 24h 阻拦</span><strong data-count-up="${s.guard_blocked_24h ?? 0}">0</strong></div>
+            <div><span class="label">近 7 天阻拦</span><strong data-count-up="${s.guard_blocked_7d ?? 0}">0</strong></div>
+          </div>
+          <p class="text-muted dash-security-note">涵盖提示注入、窃密、越权与危险命令。</p>
+        </div>
+        <div class="card dash-chart-card span-4">
+          <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 7 天命中率</h3></div></div>
+          ${renderBars(hit, { percent: true, labels: hitLabels })}
+        </div>
+        <div class="card dash-chart-card span-8">
+          <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 24 小时错误</h3></div></div>
+          ${renderBars(err, { labels: errLabels })}
+        </div>
+      </section>
+      ${renderDashboardShortcuts()}`;
+
+    document.querySelectorAll("#pageRoot [data-go]").forEach((el) => {
+      el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
+    });
+    runCountUps(document.getElementById("pageRoot"));
   } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `${headerHtml}<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+    document.getElementById("pageRoot").innerHTML = `${welcome}<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+    document.querySelectorAll("#pageRoot [data-go]").forEach((el) => {
+      el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
+    });
   }
 }
 
@@ -413,13 +511,29 @@ async function pageUsers() {
     const data = await api.get("/users?page=1&page_size=50");
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card">
-        <div class="toolbar"><strong>用户列表</strong><span class="spacer"></span>
-          <span class="text-muted">${canWrite ? "可新增用户、启用/禁用、变更角色、删除权限更低的用户" : "只读"}</span>
-          ${canWrite ? `<button class="btn btn-sm" id="btnNewUser">新增用户</button>` : ""}
+      ${pageHead({
+        title: "用户管理",
+        desc: canWrite ? "可新增用户、启用/禁用、变更角色、删除权限更低的用户。" : "当前为只读，可查看用户列表。",
+        actions: canWrite ? `<button class="btn btn-sm" id="btnNewUser">新增用户</button>` : "",
+      })}
+      <div class="card panel-fill users-panel">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">用户列表</h3>
+            <p class="card-sub">共 ${items.length} 人</p>
+          </div>
         </div>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>账号</th><th>昵称</th><th>状态</th><th>角色</th><th>部门</th><th>创建时间</th><th>最近登录</th><th>操作</th></tr></thead>
+        <div class="table-wrap"><table class="table table-users">
+          <thead><tr>
+            <th class="col-name">账号</th>
+            <th>昵称</th>
+            <th class="col-status">状态</th>
+            <th>角色</th>
+            <th>部门</th>
+            <th class="col-time">创建时间</th>
+            <th class="col-time">最近登录</th>
+            <th class="col-actions">操作</th>
+          </tr></thead>
           <tbody>
             ${items
               .map((u) => {
@@ -430,22 +544,24 @@ async function pageUsers() {
                 const canManage = canWrite && !locked && targetRank < myRank;
                 const ops = canWrite
                   ? locked
-                    ? `<span class="text-muted">权限不足</span>`
+                    ? `<span class="cell-muted">权限不足</span>`
                     : canManage
-                      ? `<button class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
-                    <button class="btn btn-secondary btn-sm" data-role="${escapeHtml(u.id)}">变更角色</button>
-                    <button class="btn btn-danger btn-sm" data-del-user="${escapeHtml(u.id)}">删除</button>`
-                      : `<span class="text-muted">权限不足</span>`
-                  : `<span class="text-muted">—</span>`;
+                      ? `<div class="table-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-role="${escapeHtml(u.id)}">角色</button>
+                    <button type="button" class="btn btn-danger btn-sm" data-del-user="${escapeHtml(u.id)}">删除</button>
+                  </div>`
+                      : `<span class="cell-muted">权限不足</span>`
+                  : `<span class="cell-muted">—</span>`;
                 return `<tr data-id="${escapeHtml(u.id)}">
-                  <td>${escapeHtml(u.username)}</td>
+                  <td class="col-name"><strong class="cell-primary">${escapeHtml(u.username)}</strong></td>
                   <td>${escapeHtml(u.nickname || "-")}</td>
-                  <td>${st}</td>
-                  <td>${escapeHtml(roleLabelOf(u))}</td>
+                  <td class="col-status">${st}</td>
+                  <td class="cell-role">${escapeHtml(roleLabelOf(u))}</td>
                   <td>${escapeHtml(u.department || "-")}</td>
-                  <td>${formatDateTime(u.created_at)}</td>
-                  <td>${formatDateTime(u.last_login_at)}</td>
-                  <td>${ops}</td>
+                  <td class="col-time"><span class="cell-time">${formatDateTime(u.created_at)}</span></td>
+                  <td class="col-time"><span class="cell-time">${formatDateTime(u.last_login_at)}</span></td>
+                  <td class="col-actions">${ops}</td>
                 </tr>`;
               })
               .join("")}
@@ -617,13 +733,27 @@ async function pageRoles() {
     const data = await api.get("/roles?page=1&page_size=50");
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card">
-        <div class="toolbar"><strong>角色与权限</strong><span class="spacer"></span>
-          ${canWrite ? `<button class="btn btn-sm" id="btnNewRole">新建角色</button>` : `<span class="text-muted">只读</span>`}
+      ${pageHead({
+        title: "角色管理",
+        desc: "内置：超级管理员 / 管理员 / 员工 / 访客。仅超级管理员可配置角色权限。",
+        actions: canWrite ? `<button class="btn btn-sm" id="btnNewRole">新建角色</button>` : "",
+      })}
+      <div class="card panel-fill">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">角色与权限</h3>
+            <p class="card-sub">共 ${items.filter((r) => r.name !== "user" && r.name !== "kb_admin").length} 个角色</p>
+          </div>
         </div>
-        <p class="text-muted" style="margin:0 0 12px">内置：超级管理员 / 管理员 / 员工 / 访客。仅超级管理员可配置角色权限；普通管理员不可修改「超级管理员」角色。</p>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>中文名</th><th>标识</th><th>说明</th><th class="col-builtin">内置</th><th>权限数</th><th class="col-actions">操作</th></tr></thead>
+        <div class="table-wrap"><table class="table table-roles">
+          <thead><tr>
+            <th class="col-name">中文名</th>
+            <th class="col-code">标识</th>
+            <th class="col-desc">说明</th>
+            <th class="col-builtin">内置</th>
+            <th>权限数</th>
+            <th class="col-actions">操作</th>
+          </tr></thead>
           <tbody>
             ${items
               .filter((r) => r.name !== "user" && r.name !== "kb_admin")
@@ -631,10 +761,11 @@ async function pageRoles() {
                 const isSuperRole = r.name === "super_admin";
                 const canEditThis = canWrite && (isSuperAdmin() || !isSuperRole);
                 const canConfigPerms = isSuperAdmin() && canEditThis;
+                const desc = r.description || "";
                 return `<tr>
-                  <td><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
-                  <td><code>${escapeHtml(r.name)}</code></td>
-                  <td>${escapeHtml(r.description || "")}</td>
+                  <td class="col-name"><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
+                  <td class="col-code"><code>${escapeHtml(r.name)}</code></td>
+                  <td class="col-desc" title="${escapeHtml(desc)}"><span class="cell-clamp">${escapeHtml(desc)}</span></td>
                   <td class="col-builtin">${r.is_builtin ? `<span class="badge">内置</span>` : "-"}</td>
                   <td>${(r.permissions || []).length}</td>
                   <td class="col-actions">
@@ -822,31 +953,38 @@ async function pageDepartments() {
     const data = await api.get("/departments?page=1&page_size=100");
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card">
-        <div class="toolbar"><strong>部门管理</strong><span class="spacer"></span>
-          ${canWrite ? `<button type="button" class="btn btn-sm" id="btnNewDept">新建部门</button>` : `<span class="text-muted">只读</span>`}
+      ${pageHead({
+        title: "部门管理",
+        desc: "维护部门介绍、成员与关联知识库；部门编码用于上传与访问隔离。",
+        actions: canWrite ? `<button type="button" class="btn btn-sm" id="btnNewDept">新建部门</button>` : "",
+      })}
+      <div class="card panel-fill">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">部门列表</h3>
+            <p class="card-sub">共 ${items.length} 个部门</p>
+          </div>
         </div>
-        <p class="text-muted" style="margin:0 0 12px">维护部门介绍、成员与关联知识库。用户/知识库上的部门字段与部门编码对应，用于上传与访问隔离。</p>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>名称</th><th>编码</th><th>介绍</th><th>成员</th><th>知识库</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th class="col-name">名称</th><th class="col-code">编码</th><th class="col-desc">介绍</th><th>成员</th><th>知识库</th><th>状态</th><th class="col-actions">操作</th></tr></thead>
           <tbody>
             ${
               items.length
                 ? items
                     .map(
                       (d) => `<tr>
-                        <td><strong>${escapeHtml(d.name)}</strong></td>
-                        <td><code>${escapeHtml(d.code)}</code></td>
-                        <td class="text-muted" style="max-width:240px">${escapeHtml(d.description || "-")}</td>
+                        <td class="col-name"><strong>${escapeHtml(d.name)}</strong></td>
+                        <td class="col-code"><code>${escapeHtml(d.code)}</code></td>
+                        <td class="col-desc" title="${escapeHtml(d.description || "")}"><span class="cell-clamp">${escapeHtml(d.description || "-")}</span></td>
                         <td>${escapeHtml(d.member_count ?? 0)}</td>
                         <td>${escapeHtml(d.kb_count ?? 0)}</td>
                         <td>${d.is_enabled ? `<span class="badge badge-success">启用</span>` : `<span class="badge">停用</span>`}</td>
-                        <td style="white-space:nowrap">
+                        <td class="col-actions" style="white-space:nowrap">
                           <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments/${escapeHtml(d.id)}">管理</button>
                           ${
                             canWrite
-                              ? `<button type="button" class="btn btn-text btn-sm" data-edit="${escapeHtml(d.id)}">编辑</button>
-                                 ${String(d.code).toUpperCase() === "GUEST" ? "" : `<button type="button" class="btn btn-text btn-sm" data-del="${escapeHtml(d.id)}" style="color:var(--color-danger)">删除</button>`}`
+                              ? `<button type="button" class="btn btn-secondary btn-sm" data-edit="${escapeHtml(d.id)}">编辑</button>
+                                 ${String(d.code).toUpperCase() === "GUEST" ? "" : `<button type="button" class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>`}`
                               : ""
                           }
                         </td>
@@ -922,21 +1060,23 @@ async function pageDepartmentDetail(deptId) {
     const members = d.members || [];
     const kbs = d.knowledge_bases || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card" style="margin-bottom:12px">
-        <div class="toolbar">
+      ${pageHead({
+        title: d.name || "部门详情",
+        desc: `${d.is_enabled ? "启用" : "停用"} · 编码 ${d.code} · 成员 ${members.length} · 知识库 ${kbs.length}`,
+        actions: `
           <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments">返回列表</button>
-          <span class="spacer"></span>
           ${canWrite ? `<button type="button" class="btn btn-sm" id="btnEditDept">编辑介绍</button>` : ""}
-        </div>
-        <h3 style="margin:8px 0 4px">${escapeHtml(d.name)} <code style="font-size:13px">${escapeHtml(d.code)}</code></h3>
-        <p class="text-muted" style="margin:0 0 8px">${d.is_enabled ? "启用" : "停用"} · 成员 ${members.length} · 知识库 ${kbs.length}</p>
-        <div style="padding:12px;background:var(--color-bg-tint,#f8f9fa);border-radius:8px;white-space:pre-wrap">${escapeHtml(d.description || "暂无部门介绍")}</div>
+        `,
+      })}
+      <div class="page-grid">
+      <div class="card span-12">
+        <div class="card-header"><div class="card-header-text"><h3 class="card-title">部门介绍</h3></div></div>
+        <div style="padding:14px 16px;background:var(--color-bg);border:1px solid var(--color-border);border-radius:var(--radius);white-space:pre-wrap;line-height:1.6">${escapeHtml(d.description || "暂无部门介绍")}</div>
       </div>
-      <div class="ht-layout">
-        <div class="card">
-          <div class="ht-runs-toolbar">
-            <h3 class="card-title">成员列表</h3>
-            ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnAddMember">添加成员</button>` : ""}
+      <div class="card span-6">
+          <div class="card-header">
+            <div class="card-header-text"><h3 class="card-title">成员列表</h3></div>
+            ${canWrite ? `<div class="card-header-actions"><button type="button" class="btn btn-secondary btn-sm" id="btnAddMember">添加成员</button></div>` : ""}
           </div>
           <div class="table-wrap"><table class="table">
             <thead><tr><th>用户名</th><th>昵称</th><th>状态</th><th></th></tr></thead>
@@ -962,10 +1102,10 @@ async function pageDepartmentDetail(deptId) {
             </tbody>
           </table></div>
         </div>
-        <div class="card">
-          <div class="ht-runs-toolbar">
-            <h3 class="card-title">关联知识库</h3>
-            ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnAddKb">关联知识库</button>` : ""}
+        <div class="card span-6">
+          <div class="card-header">
+            <div class="card-header-text"><h3 class="card-title">关联知识库</h3></div>
+            ${canWrite ? `<div class="card-header-actions"><button type="button" class="btn btn-secondary btn-sm" id="btnAddKb">关联知识库</button></div>` : ""}
           </div>
           <div class="table-wrap"><table class="table">
             <thead><tr><th>名称</th><th>可见性</th><th>状态</th><th></th></tr></thead>
@@ -1300,17 +1440,21 @@ async function pageModels() {
     const data = await api.get("/models?page=1&page_size=50");
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card">
-        <div class="toolbar">
-          <strong>LLM / Embedding / Rerank</strong>
-          <span class="spacer"></span>
-          ${
-            canWrite
-              ? `<button class="btn btn-sm" id="btnNewModel">添加模型</button>`
-              : `<span class="text-muted">仅超级管理员可配置密钥与优先级（需 model:write）</span>`
-          }
+      ${pageHead({
+        title: "大模型管理",
+        desc: "API Key 通过环境变量名引用；同类型按优先级升序选用。",
+        actions: canWrite
+          ? `<button class="btn btn-sm" id="btnNewModel">添加模型</button>`
+          : "",
+      })}
+      <div class="page-grid">
+      <div class="card panel-fill span-12">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">LLM / Embedding / Rerank</h3>
+            <p class="card-sub">${canWrite ? "可编辑密钥引用与优先级" : "仅超级管理员可配置密钥与优先级（需 model:write）"}</p>
+          </div>
         </div>
-        <p class="text-muted" style="margin:0 0 12px">API Key 通过环境变量名引用（写入 .env），不在库中明文存储。同类型按优先级升序选用。</p>
         <div class="table-wrap"><table class="table">
           <thead><tr><th>名称</th><th>类型</th><th>模型</th><th>URL</th><th>Key 环境变量</th><th>优先级</th><th>启用</th><th>默认</th><th>操作</th></tr></thead>
           <tbody>
@@ -1340,24 +1484,29 @@ async function pageModels() {
           </tbody>
         </table></div>
       </div>
-      <div class="card" id="usageCard" style="margin-top:16px">
-        <div class="toolbar">
-          <strong>模型用量监测（Langfuse）</strong>
-          <span class="spacer"></span>
+      <div class="card span-12" id="usageCard">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">模型用量监测</h3>
+            <p class="card-sub">Langfuse 用量汇总</p>
+          </div>
+          <div class="card-header-actions">
           <select class="form-control" id="usageModel" style="width:auto;min-width:180px">
             <option value="">全部模型</option>
             ${Array.from(new Set(items.map((m) => m.model_name).filter(Boolean)))
               .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
               .join("")}
           </select>
-          <select class="form-control" id="usageDays" style="width:auto;margin-left:8px">
+          <select class="form-control" id="usageDays" style="width:auto">
             <option value="7">近 7 天</option>
             <option value="30" selected>近 30 天</option>
             <option value="90">近 90 天</option>
           </select>
-          <button class="btn btn-sm" id="usageRefresh" style="margin-left:8px">刷新</button>
+          <button class="btn btn-sm" id="usageRefresh">刷新</button>
+          </div>
         </div>
         <div id="usageBody"><div class="loading">加载用量…</div></div>
+      </div>
       </div>`;
 
     const usageModelSel = document.getElementById("usageModel");
@@ -1530,10 +1679,13 @@ async function pageKbList() {
     const items = data.items || [];
     const statusLabel = (status) => ({ active: "已同步", ready: "已就绪", processing: "处理中" }[String(status || "").toLowerCase()] || status || "待配置");
     document.getElementById("pageRoot").innerHTML = `
-      <section class="page-hero compact">
-        <div><span class="eyebrow">KNOWLEDGE SPACES</span><h1>我的知识库</h1><p>管理企业知识资产、文档索引与访问范围。</p></div>
-        ${hasPermission("kb:write") ? `<button class="btn hero-action" id="btnCreateKb">+ 新建知识库</button>` : `<span class="role-chip">只读访问</span>`}
-      </section>
+      ${pageHead({
+        title: "知识库管理",
+        desc: "管理企业知识资产、文档索引与访问范围。",
+        actions: hasPermission("kb:write")
+          ? `<button class="btn" id="btnCreateKb">+ 新建知识库</button>`
+          : `<span class="role-chip">只读访问</span>`,
+      })}
       <div class="kb-summary-row"><span>共 <b>${items.length}</b> 个知识库</span><span>仅展示当前账号有权访问的内容</span></div>
       <section class="kb-card-grid">
         ${hasPermission("kb:write") ? `<button type="button" class="kb-create-card" id="btnCreateKbCard"><span>+</span><b>创建新知识库</b><small>配置类型、访问范围和分段策略</small></button>` : ""}
@@ -1546,7 +1698,7 @@ async function pageKbList() {
             <div class="kb-card-access">${accessScopeBadge(k)}</div>
             <div class="kb-card-actions"><button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">查看详情</button><button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}/documents">文档管理</button></div>
           </div>
-        </article>`).join("") || `<div class="card empty-state">暂未创建可访问的知识库</div>`}
+        </article>`).join("") || `<div class="card empty-state span-12">暂未创建可访问的知识库</div>`}
       </section>`;
     document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
     const btnCreate = document.getElementById("btnCreateKb");
@@ -1646,32 +1798,40 @@ async function pageKbDetail(id) {
     try {
       const k = await api.get(`/knowledge-bases/${id}`);
       document.getElementById("pageRoot").innerHTML = `
-        <div class="toolbar">
-          <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases">返回列表</button>
-          <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/documents">文档管理</button>
-          <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/snapshots">快照管理</button>
-          ${canWrite ? `<button class="btn btn-sm" id="btnEditKb">编辑</button>` : ""}
-          ${canWrite ? `<button class="btn btn-danger btn-sm" id="btnDeleteKb">删除</button>` : ""}
-          ${hasPermission("kb:vectorize") ? `<button class="btn btn-secondary btn-sm" id="btnRevec">重新向量化</button>` : ""}
-        </div>
-        <div class="detail-grid">
-          <div class="card">
-            <h3 class="card-title">${escapeHtml(k.name)}</h3>
-            <p>${escapeHtml(k.description || "无简介")}</p>
-            <p class="text-muted">类型：${escapeHtml(k.type)} · 标签：${escapeHtml((k.tags || []).join(", ") || "-")}</p>
-            <p>访问范围：${accessScopeBadge(k)} · 状态：${escapeHtml(k.status)}</p>
-            <p>Embedding：${escapeHtml(k.embedding_model)} · 索引版本：${escapeHtml(k.current_index_version)}</p>
-            <p>分段：size=${escapeHtml(k.chunk_size)} overlap=${escapeHtml(k.chunk_overlap)}</p>
+        ${pageHead({
+          title: k.name || "知识库详情",
+          desc: `${k.type || "通用"} · ${k.status || "-"} · Embedding ${k.embedding_model || "-"}`,
+          actions: `
+            <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases">返回列表</button>
+            <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/documents">文档管理</button>
+            <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/snapshots">快照管理</button>
+            ${canWrite ? `<button class="btn btn-sm" id="btnEditKb">编辑</button>` : ""}
+            ${canWrite ? `<button class="btn btn-danger btn-sm" id="btnDeleteKb">删除</button>` : ""}
+            ${hasPermission("kb:vectorize") ? `<button class="btn btn-secondary btn-sm" id="btnRevec">重新向量化</button>` : ""}
+          `,
+        })}
+        <div class="page-grid">
+          <div class="card span-7">
+            <div class="card-header"><div class="card-header-text"><h3 class="card-title">基本信息</h3></div></div>
+            <div class="meta-list">
+              <div class="meta-row"><span class="meta-label">简介</span><span class="meta-value">${escapeHtml(k.description || "无简介")}</span></div>
+              <div class="meta-row"><span class="meta-label">标签</span><span class="meta-value">${escapeHtml((k.tags || []).join(", ") || "-")}</span></div>
+              <div class="meta-row"><span class="meta-label">访问范围</span><span class="meta-value">${accessScopeBadge(k)}</span></div>
+              <div class="meta-row"><span class="meta-label">索引版本</span><span class="meta-value">${escapeHtml(k.current_index_version)}</span></div>
+              <div class="meta-row"><span class="meta-label">分段</span><span class="meta-value">size=${escapeHtml(k.chunk_size)} · overlap=${escapeHtml(k.chunk_overlap)}</span></div>
+            </div>
           </div>
-          <div class="card">
-            <h3 class="card-title">概览</h3>
-            <div class="stat-grid">
+          <div class="card span-5">
+            <div class="card-header"><div class="card-header-text"><h3 class="card-title">概览</h3></div></div>
+            <div class="stat-grid" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
               <div class="stat-card"><div class="label">文档数</div><div class="value">${k.doc_count ?? 0}</div></div>
               <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
             </div>
-            <p class="text-muted">创建：${formatDateTime(k.created_at)}<br/>更新：${formatDateTime(k.updated_at)}</p>
-            <h4>权限与部门</h4>
-            <p class="text-muted">知识库可绑定部门（A/B）；员工仅能上传本部门或授权库。管理员与超管不受部门隔离。</p>
+            <div class="meta-list">
+              <div class="meta-row"><span class="meta-label">创建</span><span class="meta-value">${formatDateTime(k.created_at)}</span></div>
+              <div class="meta-row"><span class="meta-label">更新</span><span class="meta-value">${formatDateTime(k.updated_at)}</span></div>
+            </div>
+            <p class="page-desc" style="margin-top:12px">知识库可绑定部门；员工仅能上传本部门或授权库。管理员与超管不受部门隔离。</p>
           </div>
         </div>`;
 
@@ -1947,15 +2107,22 @@ async function pageDocuments(kbId) {
     const data = await api.get(`/knowledge-bases/${kbId}/documents?page=1&page_size=50`);
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="toolbar">
-        <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button>
-        <span class="spacer"></span>
-        <input type="file" id="adminFile" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
-        <button class="btn btn-sm" id="btnAdminUpload">上传</button>
-      </div>
-      <p class="text-muted" style="margin:0 0 12px"><strong>支持的文件类型：</strong>PDF、Word（DOC/DOCX）、TXT、Markdown（MD）。</p>
-      <div class="card">
-        <h3 class="card-title">文档列表 · 分段 / 预处理 / 向量化状态</h3>
+      ${pageHead({
+        title: "文档管理",
+        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown（MD）。",
+        actions: `
+          <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button>
+          <input type="file" id="adminFile" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
+          <button class="btn btn-sm" id="btnAdminUpload">上传</button>
+        `,
+      })}
+      <div class="card panel-fill">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">文档列表</h3>
+            <p class="card-sub">分段 / 预处理 / 向量化状态 · 共 ${items.length} 份</p>
+          </div>
+        </div>
         <div class="table-wrap"><table class="table">
           <thead><tr><th>文件名</th><th>大小</th><th>分段</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
           <tbody>
@@ -1973,7 +2140,7 @@ async function pageDocuments(kbId) {
                   </td>
                 </tr>`
               )
-              .join("")}
+              .join("") || `<tr><td colspan="6" class="text-muted">暂无文档</td></tr>`}
           </tbody>
         </table></div>
       </div>`;
@@ -2089,21 +2256,26 @@ async function pageSnapshots(kbId) {
     const data = await api.get(`/knowledge-bases/${kbId}/snapshots?page=1&page_size=50`);
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="toolbar">
-        <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回知识库详情</button>
-        <span class="spacer"></span>
-        ${
-          canWrite
-            ? `<button class="btn btn-sm" id="btnCreateSnap">手动创建快照</button>
-               <button class="btn btn-secondary btn-sm" id="btnCleanupSnap">策略清理</button>`
-            : `<span class="text-muted">只读（创建/删除需 snapshot:write）</span>`
-        }
-      </div>
-      <div class="card">
-        <h3 class="card-title">历史快照与回退</h3>
-        <p class="text-muted" style="margin-top:-4px;margin-bottom:12px">
-          变更前会自动留存快照；回退前将强制生成「回退保护」快照，并新建索引版本（不覆盖历史）。默认最多保留 50 份 / 90 天。
-        </p>
+      ${pageHead({
+        title: "快照管理",
+        desc: "变更前自动留存；回退前强制生成保护快照。默认最多保留 50 份 / 90 天。",
+        actions: `
+          <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button>
+          ${
+            canWrite
+              ? `<button class="btn btn-sm" id="btnCreateSnap">手动创建快照</button>
+                 <button class="btn btn-secondary btn-sm" id="btnCleanupSnap">策略清理</button>`
+              : ""
+          }
+        `,
+      })}
+      <div class="card panel-fill">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">历史快照与回退</h3>
+            <p class="card-sub">共 ${items.length} 份</p>
+          </div>
+        </div>
         ${
           items.length
             ? `<div class="table-wrap"><table class="table">
@@ -2628,17 +2800,23 @@ async function pageHitTest() {
     };
 
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card" style="margin-bottom:12px">
-        <div class="toolbar">
-          <strong>执行命中率测试</strong>
-          <span class="spacer"></span>
-          ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnNewCase">新建用例</button>` : `<span class="text-muted">只读</span>`}
+      ${pageHead({
+        title: "命中率测试",
+        desc: "多选用例按序执行；配置期望文档或分段后可计算真实命中率。",
+        actions: canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnNewCase">新建用例</button>` : "",
+      })}
+      <div class="page-grid">
+      <div class="card span-12">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">执行参数</h3>
+            <p class="card-sub">选择知识库与检索策略后执行；可多选用例按序跑完</p>
+          </div>
         </div>
-        <p class="text-muted" style="margin:0 0 12px">在下方用例列表可<strong>多选</strong>后执行；将按选用顺序逐个跑完。只有配置了期望文档或分段的题目才能计算真实命中率。</p>
-        <div id="htSelectedBanner" class="text-muted" style="margin-bottom:12px;padding:8px 10px;background:var(--color-bg-tint,#f8f9fa);border-radius:8px">
+        <div id="htSelectedBanner" class="text-muted" style="margin-bottom:16px;padding:12px 14px;background:var(--color-bg);border-radius:var(--radius)">
           当前：未选用测试用例
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
           <div>
             <label class="form-label">知识库</label>
             <select class="form-control" id="htKb" ${kbs.length ? "" : "disabled"}>
@@ -2668,27 +2846,28 @@ async function pageHitTest() {
             <input class="form-control" id="htThreshold" type="number" min="0" max="1" step="0.05" value="0.15" />
           </div>
         </div>
-        <div style="margin-top:12px">
+        <div style="margin-top:20px;display:flex;flex-wrap:wrap;gap:8px">
           ${
             canWrite
               ? `<button type="button" class="btn" id="btnRunTest">执行测试</button>
-                 <button type="button" class="btn btn-secondary" id="btnCompare" style="margin-left:8px">多策略对比</button>
-                 <button type="button" class="btn btn-text" id="btnClearCase" style="margin-left:8px">清除已选</button>`
+                 <button type="button" class="btn btn-secondary" id="btnCompare">多策略对比</button>
+                 <button type="button" class="btn btn-secondary" id="btnClearCase">清除已选</button>`
               : `<span class="text-muted">需要 test:write 才能执行</span>`
           }
         </div>
       </div>
 
-      <div class="ht-layout">
-        <div class="card">
-          <div class="ht-runs-toolbar">
-            <h3 class="card-title">测试用例</h3>
+      <div class="card span-6 panel-fill">
+          <div class="card-header">
+            <div class="card-header-text"><h3 class="card-title">测试用例</h3></div>
+            <div class="card-header-actions">
             ${
               cases.length
-                ? `<button type="button" class="btn btn-text btn-sm" id="btnSelectAllCases">全选</button>
-                   <button type="button" class="btn btn-text btn-sm" id="btnInvertCases">反选</button>`
+                ? `<button type="button" class="btn btn-secondary btn-sm" id="btnSelectAllCases">全选</button>
+                   <button type="button" class="btn btn-secondary btn-sm" id="btnInvertCases">反选</button>`
                 : ""
             }
+            </div>
           </div>
           <div class="table-wrap"><table class="table" id="htCaseTable">
             <thead><tr><th style="width:96px">选用</th><th>名称</th><th>题数</th><th>说明</th><th></th></tr></thead>
@@ -2709,8 +2888,8 @@ async function pageHitTest() {
                           <td>${escapeHtml(c.question_count)}</td>
                           <td class="text-muted" style="max-width:180px">${escapeHtml(c.description || "-")}</td>
                           <td style="white-space:nowrap">
-                            <button type="button" class="btn btn-text btn-sm" data-view-case="${escapeHtml(cid)}">查看</button>
-                            ${canWrite ? `<button type="button" class="btn btn-text btn-sm" data-del-case="${escapeHtml(cid)}" style="color:var(--color-danger)">删除</button>` : ""}
+                            <button type="button" class="btn btn-secondary btn-sm" data-view-case="${escapeHtml(cid)}">查看</button>
+                            ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-case="${escapeHtml(cid)}">删除</button>` : ""}
                           </td>
                         </tr>`;
                       })
@@ -2720,14 +2899,16 @@ async function pageHitTest() {
             </tbody>
           </table></div>
         </div>
-        <div class="card">
-          <div class="ht-runs-toolbar">
-            <h3 class="card-title">运行记录</h3>
+        <div class="card span-6 panel-fill">
+          <div class="card-header">
+            <div class="card-header-text"><h3 class="card-title">运行记录</h3></div>
+            <div class="card-header-actions">
             ${
               canWrite && runs.length
-                ? `<button type="button" class="btn btn-text btn-sm" id="btnClearAllRuns" style="color:var(--color-danger)">清除全部</button>`
+                ? `<button type="button" class="btn btn-danger btn-sm" id="btnClearAllRuns">清除全部</button>`
                 : ""
             }
+            </div>
           </div>
           <div class="table-wrap"><table class="table" id="htRunTable">
             <thead><tr><th>用例</th><th>得分（命中率）</th><th>命中</th><th>策略</th><th>时间</th><th></th></tr></thead>
@@ -2744,8 +2925,8 @@ async function pageHitTest() {
                           <td>${escapeHtml(strategyLabel(r.strategy))}</td>
                           <td>${formatDateTime(r.completed_at || r.created_at)}</td>
                           <td style="white-space:nowrap">
-                            <button type="button" class="btn btn-text btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
-                            ${canWrite ? `<button type="button" class="btn btn-text btn-sm" data-del-run="${escapeHtml(String(r.id))}" style="color:var(--color-danger)">清除</button>` : ""}
+                            <button type="button" class="btn btn-secondary btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
+                            ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">清除</button>` : ""}
                           </td>
                         </tr>`;
                       })
@@ -2790,10 +2971,10 @@ async function pageHitTest() {
         const totalQ = picked.reduce((s, c) => s + Number(c.question_count || 0), 0);
         const names = picked.map((c) => escapeHtml(c.name)).join("、");
         banner.innerHTML = `当前已选用 <strong>${picked.length}</strong> 个用例（共 ${totalQ} 题）：${names}。执行测试将按顺序逐个运行。`;
-        banner.style.background = "rgba(52,168,83,0.12)";
+        banner.style.background = "rgba(52, 211, 153, 0.12)";
       } else {
         banner.textContent = "当前：未选用测试用例";
-        banner.style.background = "var(--color-bg-tint,#f8f9fa)";
+        banner.style.background = "rgba(255, 255, 255, 0.03)";
       }
     };
 
@@ -3106,22 +3287,28 @@ async function pageRagas() {
       .join("");
 
     root.innerHTML = `
-      <div class="card" style="margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-          <div style="max-width:720px">
-            <h3 class="card-title">RAGAS 0.4 RAG 质量评估</h3>
-            <p class="text-muted" style="margin-bottom:0">从目标知识库最近带引用的真实问答中抽样，评估忠实度、答案相关性与上下文精确率；只有样本带标准答案时才计算上下文召回率。逐样本分数与原因会完整保存。</p>
+      ${pageHead({
+        title: "RAGAS 评估",
+        desc: "从真实问答抽样评估忠实度、答案相关性与上下文精确率。",
+      })}
+      <div class="page-grid">
+      <div class="card span-12">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">发起评估</h3>
+            <p class="card-sub">缺少标准答案时不计算上下文召回率</p>
           </div>
-          <div style="display:flex;align-items:end;gap:8px;flex-wrap:wrap">
+          <div class="card-header-actions">
             <label><span class="form-label">知识库</span><select class="form-control" id="ragasKb" style="min-width:220px">${kbOptions || `<option value="">暂无知识库</option>`}</select></label>
             <label><span class="form-label">样本数</span><input class="form-control" id="ragasLimit" type="number" min="1" max="50" value="10" style="width:90px" /></label>
             <button type="button" class="btn btn-primary" id="btnRunRagas" ${knowledgeBases.length ? "" : "disabled"}>开始评估</button>
           </div>
         </div>
       </div>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-          <h3 class="card-title">评估记录</h3><span class="badge">共 ${escapeHtml(runData.total ?? runs.length)} 次</span>
+      <div class="card panel-fill span-12">
+        <div class="card-header">
+          <div class="card-header-text"><h3 class="card-title">评估记录</h3></div>
+          <span class="badge">共 ${escapeHtml(runData.total ?? runs.length)} 次</span>
         </div>
         <div class="table-wrap"><table class="table">
           <thead><tr><th>知识库</th><th>状态</th><th>样本</th><th>忠实度</th><th>答案相关性</th><th>上下文精确率</th><th>上下文召回率</th><th>完成时间</th><th></th></tr></thead>
@@ -3147,6 +3334,7 @@ async function pageRagas() {
             }
           </tbody>
         </table></div>
+      </div>
       </div>`;
 
     document.getElementById("btnRunRagas").onclick = async () => {
@@ -3252,13 +3440,18 @@ async function pageQaSessions() {
     const sessions = data.items || [];
     const canWrite = hasPermission("kb:write");
     root.innerHTML = `
-      <div class="card" style="margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-          <div>
+      ${pageHead({
+        title: "会话分析",
+        desc: "Query 预处理策略与会话审计。HyDE 只用于向量召回，不作为回答依据。",
+      })}
+      <div class="page-grid">
+      <div class="card span-12">
+        <div class="card-header">
+          <div class="card-header-text">
             <h3 class="card-title">Query 预处理策略</h3>
-            <p class="text-muted" style="margin:4px 0 14px">默认仅开启 Query 改写。扩展与 HyDE 会增加模型和检索开销，可按业务精度要求开启；缓存命中时始终跳过这些步骤直接返回。</p>
+            <p class="card-sub">默认仅开启 Query 改写；扩展与 HyDE 会增加模型开销</p>
           </div>
-          ${canWrite ? `<button type="button" class="btn btn-primary btn-sm" data-query-config-save>保存策略</button>` : ""}
+          ${canWrite ? `<div class="card-header-actions"><button type="button" class="btn btn-primary btn-sm" data-query-config-save>保存策略</button></div>` : ""}
         </div>
         <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:8px">
@@ -3279,11 +3472,11 @@ async function pageQaSessions() {
           </label>
         </div>
       </div>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-          <div>
+      <div class="card panel-fill span-12">
+        <div class="card-header">
+          <div class="card-header-text">
             <h3 class="card-title">Query 预处理审计</h3>
-            <p class="text-muted" style="margin:4px 0 14px">查看每轮问答的原始 Query、改写结果、扩展 Query 与 HyDE 假设文档。HyDE 只用于向量召回，不作为回答依据。</p>
+            <p class="card-sub">原始 Query、改写、扩展与 HyDE</p>
           </div>
           <span class="badge">共 ${escapeHtml(data.total ?? sessions.length)} 个会话</span>
         </div>
@@ -3308,6 +3501,7 @@ async function pageQaSessions() {
             }
           </tbody>
         </table></div>
+      </div>
       </div>`;
 
     if (canWrite) {
@@ -3356,11 +3550,17 @@ async function pageRoleCaches() {
   try {
     const caches = await api.get("/role-caches");
     root.innerHTML = `
-      <div class="card" style="margin-bottom:12px">
-        <h3 class="card-title">按角色隔离的缓存知识库</h3>
-        <p class="text-muted" style="margin-bottom:0">系统默认每 7 天分析角色可访问文档并生成 20 个缓存问题，同时从用户历史补充缓存中没有的最高频 5 个问题。只有完全相同且来源知识库仍有权限的问题才会直接命中。</p>
-      </div>
-      <div class="card">
+      ${pageHead({
+        title: "角色缓存",
+        desc: "按角色隔离的缓存知识库；默认定时分析文档与历史高频问题。",
+      })}
+      <div class="card panel-fill">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">缓存配置</h3>
+            <p class="card-sub">完全相同且来源库仍有权限的问题才会命中</p>
+          </div>
+        </div>
         <div class="table-wrap"><table class="table">
           <thead><tr><th>缓存知识库</th><th>角色</th><th>缓存数</th><th>检测周期</th><th>文档分析</th><th>历史分析</th><th>状态</th><th></th></tr></thead>
           <tbody>
@@ -3584,10 +3784,17 @@ async function pageAudit() {
     const data = await api.get(`/audit/logs?${qs.toString()}`);
     const items = data.items || [];
     document.getElementById("pageRoot").innerHTML = `
-      <div class="card">
-        <div class="toolbar">
-          <strong>操作审计日志</strong>
-          <span class="spacer"></span>
+      ${pageHead({
+        title: "审计日志",
+        desc: "记录操作者、时间、对象、请求标识与结果。",
+      })}
+      <div class="card panel-fill">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">操作审计</h3>
+            <p class="card-sub">共 ${escapeHtml(data.total ?? items.length)} 条</p>
+          </div>
+          <div class="card-header-actions">
           <select class="form-control" id="auditAction" style="width:160px;height:32px">
             <option value="">全部动作</option>
             <option value="snapshot.">快照相关</option>
@@ -3610,8 +3817,8 @@ async function pageAudit() {
             <option value="failure">失败</option>
           </select>
           <button class="btn btn-secondary btn-sm" id="btnAuditFilter">筛选</button>
+          </div>
         </div>
-        <p class="text-muted" style="margin:0 0 12px">记录操作者、时间、对象、请求标识与结果；回退类操作的 detail 中含前后索引版本。</p>
         <div class="table-wrap"><table class="table">
           <thead><tr>
             <th>操作者</th><th>动作</th><th>资源</th><th>资源 ID</th><th>请求标识</th><th>结果</th><th>时间</th><th></th>
@@ -3639,7 +3846,6 @@ async function pageAudit() {
               : `<tr><td colspan="8" class="text-muted">暂无符合条件的审计记录</td></tr>`
           }</tbody>
         </table></div>
-        <p class="text-muted" style="margin-top:8px">共 ${escapeHtml(data.total ?? items.length)} 条</p>
       </div>`;
 
     const actionEl = document.getElementById("auditAction");
@@ -3749,20 +3955,32 @@ async function pageMonitor() {
       </ul>`
       : `<p class="text-muted">${escapeHtml(stats?.error || "暂无统计")}</p>`;
   document.getElementById("pageRoot").innerHTML = `
-    <div class="card" style="margin-bottom:12px">
-      <h3 class="card-title">健康检查</h3>
-      <p>总体状态：<strong>${escapeHtml(health.status)}</strong>
-        ${health.uptime_seconds != null ? `<span class="text-muted"> · uptime ${health.uptime_seconds}s</span>` : ""}
-      </p>
+    ${pageHead({
+      title: "系统监控",
+      desc: "健康检查、运行统计与 Grafana 面板。",
+    })}
+    <div class="page-grid">
+    <div class="card span-6">
+      <div class="card-header">
+        <div class="card-header-text"><h3 class="card-title">健康检查</h3></div>
+        <span class="badge ${health.status === "ok" || health.status === "healthy" ? "badge-success" : ""}">${escapeHtml(health.status)}</span>
+      </div>
+      <p class="page-desc" style="margin-bottom:12px">${health.uptime_seconds != null ? `Uptime ${health.uptime_seconds}s` : "组件状态一览"}</p>
       <ul class="list-plain">${checksHtml || "<li class='text-muted'>无组件检查数据</li>"}</ul>
     </div>
-    <div class="card" style="margin-bottom:12px">
-      <h3 class="card-title">系统统计</h3>
+    <div class="card span-6">
+      <div class="card-header">
+        <div class="card-header-text"><h3 class="card-title">系统统计</h3></div>
+      </div>
       ${statsHtml}
     </div>
-    <div class="card" style="margin-bottom:12px">
-      <h3 class="card-title">LLM Guard 最近阻拦</h3>
-      <p class="text-muted">仅展示安全分类与原因码，不展示用户完整问题、密钥或令牌。</p>
+    <div class="card span-12">
+      <div class="card-header">
+        <div class="card-header-text">
+          <h3 class="card-title">LLM Guard 最近阻拦</h3>
+          <p class="card-sub">仅展示安全分类与原因码，不展示用户完整问题或密钥。</p>
+        </div>
+      </div>
       <div class="table-wrap"><table class="table">
         <thead><tr><th>时间</th><th>意图</th><th>原因码</th><th>检测层</th><th>置信度</th></tr></thead>
         <tbody>
@@ -3784,23 +4002,28 @@ async function pageMonitor() {
         </tbody>
       </table></div>
     </div>
-    <div class="card">
-      <h3 class="card-title">Grafana 面板</h3>
-      <p class="text-muted" style="margin-bottom:8px">经 Nginx 反代嵌入本地 Grafana（匿名只读）。若下方空白，请用新标签打开：
-        <a href="/grafana/d/rag-overview/overview?orgId=1&kiosk&theme=light" target="_blank" rel="noopener">打开 Overview</a>
-        · <a href="/grafana/" target="_blank" rel="noopener">Grafana 首页</a>
-        · <a href="http://127.0.0.1:3001/" target="_blank" rel="noopener">直连 :3001</a>
-      </p>
-      <div class="embed-frame" style="padding:0;min-height:640px">
+    <div class="card span-12">
+      <div class="card-header">
+        <div class="card-header-text">
+          <h3 class="card-title">Grafana 面板</h3>
+          <p class="card-sub">经 Nginx 反代嵌入本地 Grafana（匿名只读）</p>
+        </div>
+        <div class="card-header-actions">
+          <a class="btn btn-secondary btn-sm" href="/grafana/d/rag-overview/overview?orgId=1&kiosk&theme=dark" target="_blank" rel="noopener">打开 Overview</a>
+          <a class="btn btn-text btn-sm" href="/grafana/" target="_blank" rel="noopener">Grafana</a>
+        </div>
+      </div>
+      <div class="embed-frame" style="padding:0;min-height:520px">
         <iframe
           title="Grafana"
-          src="/grafana/d/rag-overview/overview?orgId=1&kiosk&theme=light"
-          style="width:100%;height:640px;border:0;border-radius:8px;background:#f7f8fa"
+          src="/grafana/d/rag-overview/overview?orgId=1&kiosk&theme=dark"
+          style="width:100%;height:520px;border:0;border-radius:16px;background:#0b0f19"
           loading="lazy"
           referrerpolicy="same-origin"
           allow="fullscreen"
         ></iframe>
       </div>
+    </div>
     </div>`;
 }
 

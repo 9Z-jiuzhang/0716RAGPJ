@@ -247,10 +247,10 @@ export function canAccessAdmin() {
   return isAdminUser();
 }
 
-/** 登录后落地页：管理员进控制台，其余回问答 */
+/** 登录后落地页：管理员进控制台，其余进问答 */
 export function getPostLoginTarget() {
   if (isAdminUser()) return { type: "admin", href: "/admin/" };
-  return { type: "hash", path: "/" };
+  return { type: "hash", path: "/chat" };
 }
 
 export function requireLogin(loginPath = "/login") {

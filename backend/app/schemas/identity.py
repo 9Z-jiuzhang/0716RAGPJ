@@ -44,6 +44,14 @@ class UserResponse(BaseModel):
     last_login_at: datetime | None
 
 
+class LoginResponse(TokenResponse):
+    """统一登录响应：访客/员工/管理员同一入口，附带用户资料与落地分流。"""
+
+    user: UserResponse
+    landing: str = Field(description="落地类型：admin=管理端，app=问答端")
+    landing_href: str = Field(description="前端跳转地址，如 /admin/ 或 /#/chat")
+
+
 class UserUpdateRequest(BaseModel):
     nickname: str | None = Field(default=None, max_length=100)
     email: EmailStr | None = None

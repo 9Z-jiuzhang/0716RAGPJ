@@ -1,56 +1,71 @@
 /* ============================================================
- * 设计令牌：严格对齐产品手册 4.3 前端设计规范
- * 主色 #1A73E8，辅助色 #4A90D9 / #0D47A1，蓝白配色
- * 扩展项仅细化层次，不引入新主色系（见 README-UI美化.md）
+ * TechStart Pro · Dark Glassmorphism 设计令牌
+ * 参考: https://techstartpro.bs.designtocodes.com/
  * ============================================================ */
 
 :root {
-  /* 主色调 */
-  --color-primary: #3467D6;
-  /* 辅助色（偏亮） */
-  --color-primary-light: #6F9BFF;
-  /* 辅助色（偏深）——主按钮悬停、统计数字、品牌字 */
-  --color-primary-dark: #214AAB;
-  /* 页面浅色背景 */
-  --color-bg: #F4F7FC;
-  /* 极淡蓝点缀（上传区、空面板等） */
-  --color-bg-tint: #EEF4FF;
-  /* 行悬停 / 次要选中底 */
-  --color-bg-hover: #E6EEFF;
-  /* 卡片/面板白色 */
-  --color-surface: rgba(255, 255, 255, 0.84);
-  /* 主文字 */
-  --color-text: #1E2A46;
-  /* 次要文字 */
-  --color-text-secondary: #6A7895;
-  /* 边框色 */
-  --color-border: #DDE6F5;
-  /* 成功 */
-  --color-success: #149E8A;
-  /* 警告 */
-  --color-warning: #FBBF24;
-  /* 危险/错误 */
-  --color-danger: #D64A62;
-  /* 输入聚焦环 */
-  --color-focus-ring: rgba(52, 103, 214, 0.20);
-  /* 顶栏高度 */
-  --header-height: 68px;
-  /* 侧栏宽度（已废弃左右布局，保留兼容旧引用） */
-  --sidebar-width: 248px;
-  /* 统一圆角（卡片/输入） */
-  --radius: 12px;
-  /* 气泡圆角 */
-  --radius-bubble: 12px;
-  /* 弹窗圆角 */
-  --radius-modal: 16px;
-  /* 轻阴影（卡片） */
-  --shadow: 0 12px 30px rgba(47, 78, 134, 0.10);
-  /* 弹窗抬升阴影 */
-  --shadow-modal: 0 24px 60px rgba(47, 78, 134, 0.18);
-  /* 主按钮轻阴影 */
-  --shadow-btn: 0 8px 18px rgba(52, 103, 214, 0.22);
-  /* 过渡 */
-  --transition: 150ms ease;
-  /* 字体 */
-  --font-sans: Inter, "SF Pro Display", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --color-primary: #818cf8;
+  --color-primary-light: #a855f7;
+  --color-primary-dark: #6366f1;
+  --color-primary-soft: rgba(99, 102, 241, 0.14);
+  --color-primary-selected: rgba(99, 102, 241, 0.28);
+  --color-focus-ring: rgba(99, 102, 241, 0.4);
+  --color-primary-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  --color-glow: 0 0 24px rgba(168, 85, 247, 0.45);
+
+  --color-bg: #0b0f19;
+  --color-bg-tint: rgba(30, 35, 50, 0.55);
+  --color-bg-hover: rgba(255, 255, 255, 0.05);
+  --color-surface: rgba(255, 255, 255, 0.05);
+  --color-surface-solid: rgba(22, 27, 40, 0.92);
+
+  --color-text: rgba(255, 255, 255, 0.9);
+  --color-text-body: rgba(255, 255, 255, 0.72);
+  --color-text-secondary: rgba(255, 255, 255, 0.5);
+  --color-border: rgba(255, 255, 255, 0.08);
+
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #22d3ee;
+
+  --header-height: 64px;
+  --sidebar-width: 268px;
+
+  --radius: 16px;
+  --radius-card: 24px;
+  --radius-bubble: 16px;
+  --radius-composer: 24px;
+  --radius-modal: 24px;
+  --radius-pill: 999px;
+
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-blur: blur(12px);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+
+  --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  --shadow-hover: 0 12px 40px rgba(99, 102, 241, 0.22);
+  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.45);
+  --shadow-btn: 0 4px 20px rgba(168, 85, 247, 0.35);
+
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --page-gap: 24px;
+  --content-pad-x: 28px;
+  --content-pad-y: 28px;
+  --card-pad: 24px;
+  --table-row-h: 56px;
+
+  --transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  --page-transition: 340ms cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-micro: 180ms;
+  --duration-page: 340ms;
+
+  --font-sans: "Inter", "Space Grotesk", system-ui, -apple-system, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
