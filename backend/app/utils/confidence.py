@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Iterable, Literal
+from collections.abc import Iterable
+from typing import Any, Literal
 
 ConfidenceLevel = Literal["high", "medium", "low"]
 INVALID_SCORE = -1.0
@@ -49,7 +50,9 @@ def level_from_score(score: float) -> ConfidenceLevel:
     return "low"
 
 
-def aggregate_retrieval_confidence(scores: Iterable[Any], *, no_evidence: bool = False) -> tuple[ConfidenceLevel, float]:
+def aggregate_retrieval_confidence(
+    scores: Iterable[Any], *, no_evidence: bool = False
+) -> tuple[ConfidenceLevel, float]:
     """基于检索命中分数汇总答案置信度。
 
     返回 (level, score)；score 为 0~1，无法计算时为 -1。

@@ -391,7 +391,9 @@ class KnowledgeBaseService:
         permissions: list[KBPermissionItem] = []
         if include_permissions:
             rows = (
-                await self.db.scalars(select(KBPermission).where(KBPermission.kb_id == kb.id).order_by(KBPermission.created_at))
+                await self.db.scalars(
+                    select(KBPermission).where(KBPermission.kb_id == kb.id).order_by(KBPermission.created_at)
+                )
             ).all()
             permissions = [
                 KBPermissionItem(

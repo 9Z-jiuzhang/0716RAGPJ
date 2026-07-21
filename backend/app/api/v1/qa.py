@@ -26,12 +26,11 @@ from app.models.knowledge_base import KnowledgeBase
 from app.models.qa import QAMessage, QASession
 from app.schemas.common import BaseResponse
 from app.schemas.qa import AskRequest, FeedbackRequest, RenameSessionRequest
+from app.utils.request_info import extract_client_ip
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
-
-from app.utils.request_info import extract_client_ip
 
 router = APIRouter(prefix="/qa", tags=["智能问答"])
 

@@ -251,22 +251,14 @@ class HitTestService:
             ]
         elif request.questions:
             # 临时问题：无期望标注，仅用于检索冒烟（有召回即计命中），不代表真实命中率。
-            questions = [
-                TestQuestion(question=str(q).strip())
-                for q in request.questions
-                if str(q).strip()
-            ]
+            questions = [TestQuestion(question=str(q).strip()) for q in request.questions if str(q).strip()]
             if not questions:
                 raise ValueError("临时问题列表不能为空")
 
         if not questions:
             raise ValueError("没有可执行的测试问题")
         # 有期望标注的题目仍校验；纯问题用例走检索冒烟，不强制期望文档。
-        labeled = [
-            item
-            for item in questions
-            if item.expected_doc_ids or item.expected_chunk_ids
-        ]
+        labeled = [item for item in questions if item.expected_doc_ids or item.expected_chunk_ids]
         if labeled and len(labeled) != len(questions):
             raise ValueError("同一用例中不能混用「仅问题」与「带期望文档/分段」的题目")
         if labeled:
@@ -770,11 +762,7 @@ class HitTestService:
             score = getattr(run, "_avg_relevance_score", None)
         if score is None:
             result_rows = list(getattr(run, "results", None) or [])
-            relevance_scores = [
-                float(item.score)
-                for item in result_rows
-                if getattr(item, "score", None) is not None
-            ]
+            relevance_scores = [float(item.score) for item in result_rows if getattr(item, "score", None) is not None]
             if relevance_scores:
                 score = sum(relevance_scores) / len(relevance_scores)
             elif run.total_questions:

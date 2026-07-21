@@ -260,11 +260,7 @@ class RagasEvaluationService:
             raise RagasEvaluationError("该知识库没有可用于生成问题的就绪文档分段")
 
         documents = list(
-            (
-                await db.scalars(
-                    select(Document).where(Document.id.in_({chunk.document_id for chunk in chunks}))
-                )
-            ).all()
+            (await db.scalars(select(Document).where(Document.id.in_({chunk.document_id for chunk in chunks})))).all()
         )
         document_map = {document.id: document for document in documents}
         materials: list[dict[str, Any]] = []

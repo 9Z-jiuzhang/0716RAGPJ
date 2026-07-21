@@ -3,8 +3,6 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import selectinload
-
 from app.api.helpers import ok, resolve_request_id
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -29,6 +27,7 @@ from app.utils.identity_helpers import build_login_response, build_token_respons
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/auth", tags=["认证与用户中心"])
 
@@ -82,9 +81,7 @@ async def login(
     await db.commit()
     # commit 后重新加载角色，避免 refresh 丢关系导致落地页错误
     user = await db.scalar(
-        select(User)
-        .options(selectinload(User.roles).selectinload(Role.permissions))
-        .where(User.id == user.id)
+        select(User).options(selectinload(User.roles).selectinload(Role.permissions)).where(User.id == user.id)
     )
     return ok(
         build_login_response(

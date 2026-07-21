@@ -151,9 +151,7 @@ async def list_ragas_samples(
                 for item in previews
             ],
             "total": len(previews),
-            "suggested_limit": min(max(len(previews), 1), settings.RAGAS_DEFAULT_SAMPLE_LIMIT)
-            if previews
-            else 0,
+            "suggested_limit": min(max(len(previews), 1), settings.RAGAS_DEFAULT_SAMPLE_LIMIT) if previews else 0,
         },
         request_id=request_id,
     )

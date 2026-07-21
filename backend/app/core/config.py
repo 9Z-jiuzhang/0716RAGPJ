@@ -236,7 +236,9 @@ class Settings(BaseSettings):
             problems.append("JWT_SECRET_KEY")
         if (self.POSTGRES_PASSWORD or "").strip() in weak_markers:
             problems.append("POSTGRES_PASSWORD")
-        if (self.MINIO_ACCESS_KEY or "").strip() in weak_markers or (self.MINIO_SECRET_KEY or "").strip() in weak_markers:
+        if (self.MINIO_ACCESS_KEY or "").strip() in weak_markers or (
+            self.MINIO_SECRET_KEY or ""
+        ).strip() in weak_markers:
             problems.append("MINIO_ACCESS_KEY/MINIO_SECRET_KEY")
         if (self.SUPER_ADMIN_PASSWORD or "").strip() in {"", "Super123!", "<请填写>"}:
             problems.append("SUPER_ADMIN_PASSWORD")
@@ -245,9 +247,7 @@ class Settings(BaseSettings):
         if not (self.PUBLIC_BASE_URL or "").strip().startswith("https://"):
             problems.append("PUBLIC_BASE_URL 须为 https:// 开头的公网根地址")
         if problems:
-            raise RuntimeError(
-                "云端安全检查未通过，请修改 .env 后重启：" + "；".join(problems)
-            )
+            raise RuntimeError("云端安全检查未通过，请修改 .env 后重启：" + "；".join(problems))
 
     @property
     def chroma_http_url(self) -> str:

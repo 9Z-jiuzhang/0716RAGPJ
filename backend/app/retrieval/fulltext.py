@@ -186,9 +186,7 @@ class FulltextRetriever:
                     raw_score=sim_score,
                     metadata={
                         "channel": "trgm",
-                        "score_source": "pg_trgm_similarity+lexical_coverage"
-                        if contains_cjk
-                        else "pg_trgm_similarity",
+                        "score_source": "pg_trgm_similarity+lexical_coverage" if contains_cjk else "pg_trgm_similarity",
                         "pg_trgm_similarity": round(sim_score, 8),
                         "lexical_coverage": round(lexical_coverage, 8),
                     },

@@ -28,7 +28,6 @@ from app.core.config import settings
 from app.memory.models import ContextMessage
 from app.memory.session_store import SessionAccessError, session_store
 from app.models.identity import User
-from app.utils.confidence import aggregate_retrieval_confidence, clamp_display_score
 from app.models.qa import QAMessage, QASession
 from app.retrieval import hybrid_retriever, resolve_kb_targets
 from app.retrieval.types import RetrievalHit, RetrievalStrategy
@@ -47,6 +46,7 @@ from app.services.query_processing import (
 )
 from app.services.role_cache import role_cache_service
 from app.services.web_search import format_web_results, search_web
+from app.utils.confidence import aggregate_retrieval_confidence, clamp_display_score
 from app.utils.tracing import PerformanceTracker, new_request_id
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
