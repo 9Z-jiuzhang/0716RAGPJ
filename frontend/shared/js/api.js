@@ -3,8 +3,8 @@
  * 经 Nginx 反代访问：http://localhost:8080/api/v1
  */
 
-import { getAccessToken, getRefreshToken, saveAuth, clearAuth, getGuestId, getUser, mergeUserProfiles } from "./auth.js";
-import { toast, uuid } from "./utils.js";
+import { getAccessToken, getRefreshToken, saveAuth, clearAuth, getGuestId, getUser, mergeUserProfiles } from "/assets/js/auth.js?v=fix-role-0721b";
+import { toast, uuid } from "/assets/js/utils.js?v=fix-role-0721b";
 
 /** API 根路径（相对当前站点） */
 const API_BASE = "/api/v1";

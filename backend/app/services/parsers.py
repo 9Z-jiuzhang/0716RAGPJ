@@ -108,13 +108,57 @@ def _extract_docx(content: bytes) -> str:
     return "\n".join(p.text for p in doc.paragraphs if p.text and p.text.strip())
 
 
+def _extract_doc_via_external(content: bytes) -> str | None:
+    """优先用 antiword/catdoc 抽取（对中文 .doc 最稳）。"""
+    import shutil
+    import subprocess
+    import tempfile
+
+    tools = []
+    if shutil.which("antiword"):
+        tools.append(("antiword", ["antiword", "-m", "UTF-8.txt"]))
+    if shutil.which("catdoc"):
+        tools.append(("catdoc", ["catdoc", "-d", "utf-8"]))
+    if not tools:
+        return None
+
+    with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as tmp:
+        tmp.write(content)
+        path = tmp.name
+    try:
+        for name, cmd in tools:
+            try:
+                proc = subprocess.run(
+                    [*cmd, path],
+                    check=False,
+                    capture_output=True,
+                    timeout=30,
+                )
+                raw = proc.stdout or b""
+                if not raw.strip():
+                    continue
+                text = raw.decode("utf-8", errors="ignore")
+                cleaned = _clean_extracted_text(text)
+                if cleaned and len(cleaned.strip()) >= 16 and not _looks_garbled(cleaned):
+                    return cleaned
+            except Exception:
+                logger.warning("%s doc extract failed", name, exc_info=True)
+    finally:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except Exception:
+            pass
+    return None
+
+
 def _extract_doc(content: bytes) -> str:
     """旧版 Word .doc（OLE）抽取。
 
     python-docx 仅支持 .docx；此处按顺序尝试：
     1) 误标为 doc 的 docx
-    2) olefile 抽取 WordDocument 流 + 编码检测
-    3) 原始字节流编码检测（严格校验，避免乱码冒充成功）
+    2) antiword / catdoc（推荐，中文最稳）
+    3) olefile 抽取 WordDocument 流 + 编码检测
+    4) 原始字节流编码检测（严格校验，避免乱码冒充成功）
     """
     if content[:2] == b"PK":
         try:
@@ -122,9 +166,16 @@ def _extract_doc(content: bytes) -> str:
         except Exception:
             logger.warning("doc marked as zip/docx but parse failed")
 
+    external = _extract_doc_via_external(content)
+    if external:
+        return external
+
     ole_text = _extract_doc_via_ole(content)
     if ole_text and not _looks_garbled(ole_text) and len(ole_text.strip()) >= 16:
-        return ole_text
+        # OLE 启发式可能夹杂噪声：若几乎没有汉字且原文像二进制，继续降级
+        cjk = sum(1 for ch in ole_text if "\u4e00" <= ch <= "\u9fff")
+        if cjk >= 8 or len(ole_text.strip()) >= 40:
+            return ole_text
 
     # 非 OLE 或 OLE 失败：禁止把二进制当 latin-1 直接当正文
     try:
@@ -185,26 +236,55 @@ def _mostly_text_bytes(data: bytes) -> bool:
     return good / max(len(sample), 1) > 0.75
 
 
+def _is_useful_utf16_piece(piece: str) -> bool:
+    """判断 OLE 抽出的 UTF-16 片段是否像正文（过滤字体/主题等噪声）。"""
+    text = (piece or "").strip()
+    if len(text) < 2:
+        return False
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    if cjk >= 2:
+        # 汉字占比过低多为二进制误读
+        return cjk / max(len(text), 1) >= 0.25
+    # 纯英文：允许较长句子，排除字体名
+    lower = text.lower()
+    if any(x in lower for x in ("times new roman", "arial", "cambria", "symbol", "theme", ".xml", "xmlns")):
+        return False
+    return len(text) >= 16 and " " in text and text.isascii()
+
+
 def _extract_utf16_pieces(data: bytes) -> str:
-    """从 WordDocument 二进制中提取可读的 UTF-16LE 片段。"""
-    # 连续可打印 UTF-16LE 字符
-    pattern = re.compile(rb"(?:[\x20-\x7e]\x00){4,}")
+    """从 WordDocument 二进制中提取可读的 UTF-16LE 片段（含中文）。"""
+    # UTF-16LE：ASCII 可打印 或 CJK 统一汉字 U+4E00–U+9FFF
+    pattern = re.compile(rb"(?:(?:[\x20-\x7e]\x00)|(?:[\x00-\xff][\x4e-\x9f])){4,}")
     chunks: list[str] = []
-    for match in pattern.finditer(data):
-        try:
-            chunks.append(match.group().decode("utf-16-le", errors="ignore"))
-        except Exception:
-            continue
+
+    def _collect(blob: bytes) -> None:
+        for match in pattern.finditer(blob):
+            try:
+                piece = match.group().decode("utf-16-le", errors="ignore").strip()
+            except Exception:
+                continue
+            if _is_useful_utf16_piece(piece):
+                chunks.append(piece)
+
+    _collect(data)
     # 再尝试 zlib 压缩块（部分 .doc 使用）
     for i in range(len(data) - 2):
         if data[i] == 0x78 and data[i + 1] in (0x01, 0x9C, 0xDA):
             try:
                 inflated = zlib.decompress(data[i : i + 65536])
-                for match in pattern.finditer(inflated):
-                    chunks.append(match.group().decode("utf-16-le", errors="ignore"))
+                _collect(inflated)
             except Exception:
                 continue
-    return _clean_extracted_text("\n".join(chunks))
+    # 去重保序
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for c in chunks:
+        if c in seen:
+            continue
+        seen.add(c)
+        ordered.append(c)
+    return _clean_extracted_text("\n".join(ordered))
 
 
 def _clean_extracted_text(text: str) -> str:

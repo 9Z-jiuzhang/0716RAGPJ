@@ -88,6 +88,7 @@ services:
 
   # ---------- Chroma 向量库 ----------
   chroma:
+    # 需与 API 内 chromadb>=1.0 匹配；0.6 客户端对接新服务端会报 KeyError: '_type'
     image: chromadb/chroma:latest
     ports:
       # 8001 落在本机 Hyper-V 排除段(7940-8039)，改映射 18001；容器内仍为 8000
@@ -108,8 +109,9 @@ services:
   minio:
     image: minio/minio:latest
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # 主机 9000 常被 milvus-minio 占用，改映射避免无法启动
+      - "19000:9000"
+      - "19001:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?请在 .env 中设置 MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?请在 .env 中设置 MINIO_SECRET_KEY}

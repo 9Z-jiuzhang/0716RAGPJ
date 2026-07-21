@@ -33,7 +33,7 @@ from .core.database import (
 from .core.logging import setup_logging
 from .core.metrics import metrics_payload
 from .core.redis import close_redis, init_redis
-from .core.security import hash_password
+from .core.security import hash_password, verify_password
 from .core.seed_data import BUILTIN_PERMISSIONS, BUILTIN_ROLES
 from .middleware.access_log import ObservabilityMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
@@ -98,12 +98,18 @@ async def seed_identity_data() -> None:
                 )
             )
         else:
-            # 确保固定超管账号始终绑定 super_admin；并剥离其他账号上的超管角色
+            # 确保固定超管账号始终绑定 super_admin、状态可用；并剥离其他账号上的超管角色
             fixed_super = await db.scalar(
                 select(User).options(selectinload(User.roles)).where(User.username == "super")
             )
-            if fixed_super and "super_admin" in roles:
-                if not any(r.name == "super_admin" for r in fixed_super.roles):
+            if fixed_super:
+                fixed_super.status = "active"
+                # 开发环境保证默认密码可用（避免历史库密码漂移导致无法登录）
+                if not verify_password("Super123!", fixed_super.hashed_password):
+                    # 仅当仍是占位邮箱时重置，避免覆盖用户已改密码
+                    if (fixed_super.email or "").lower() in {"super@example.com", "super@local"}:
+                        fixed_super.hashed_password = hash_password("Super123!")
+                if "super_admin" in roles and not any(r.name == "super_admin" for r in fixed_super.roles):
                     fixed_super.roles = list(fixed_super.roles) + [roles["super_admin"]]
             if "super_admin" in roles:
                 extras = (

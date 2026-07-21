@@ -4,7 +4,7 @@
  * 角色细化：访客 / 注册用户 / A·B 部门员工 / 普通管理员 / 超级管理员
  */
 
-import { toast } from "./utils.js";
+import { toast } from "/assets/js/utils.js?v=fix-role-0721b";
 
 const KEY_ACCESS = "rag_access_token";
 const KEY_REFRESH = "rag_refresh_token";
@@ -44,16 +44,22 @@ export function normalizeUser(user) {
   const uniq = [...new Set(roles)];
   // 唯一超管仅绑定固定账号 super；不以可分配角色判定
   const isFixedSuper = String(user.username || "") === "super";
-  if (isFixedSuper) role = "super_admin";
-  else if (uniq.includes("admin") && role === "user") role = "admin";
-  else if (uniq.includes("super_admin") && !isFixedSuper) {
+  let role = user.role ? String(user.role) : uniq[0] || "user";
+  if (isFixedSuper) {
+    role = "super_admin";
+  } else if (uniq.includes("admin")) {
+    role = "admin";
+  } else if (uniq.includes("super_admin")) {
     // 历史脏数据：非 super 账号即使带有 super_admin 也不再视为超管
-    role = uniq.includes("admin") ? "admin" : role === "super_admin" ? "admin" : role;
+    role = role === "super_admin" ? "user" : role;
   }
+  const normalizedRoles = isFixedSuper
+    ? ["super_admin", ...uniq.filter((r) => r !== "super_admin")]
+    : uniq.filter((r) => r !== "super_admin");
   return {
     ...user,
     role,
-    roles: uniq.length ? uniq : [role],
+    roles: normalizedRoles.length ? normalizedRoles : [role],
     role_labels: user.role_labels || [],
     permissions: user.permissions || user.permission_codes || [],
     department: user.department || user.dept || "",

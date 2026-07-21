@@ -19,14 +19,19 @@ def normalize_score(value: Any, *, default: float = INVALID_SCORE) -> float:
         return default
     if not math.isfinite(num):
         return default
-    # 若误把百分比 0-100 传入，缩放到 0-1
-    if num > 1.0 and num <= 100.0:
-        num = num / 100.0
     if num < 0.0:
         return default
-    if num > 1.0:
-        return default
-    return num
+    # 已经是概率/相似度
+    if num <= 1.0:
+        return num
+    # 1~1.5：多为浮点上溢或未截断的近满分，禁止当成「百分制」除以 100
+    # （否则 1.05 会变成 1.05%，界面上全是「1 点几」）
+    if num <= 1.5:
+        return 1.0
+    # 明确的百分制分数（如 85、72.5）
+    if num <= 100.0:
+        return num / 100.0
+    return default
 
 
 def clamp_display_score(value: Any) -> float:

@@ -164,10 +164,15 @@ class FulltextRetriever:
         hits: list[RetrievalHit] = []
         for row in rows:
             sim_score = float(row.sim_score or 0.0)
-            # pg_trgm 已返回真实 similarity，必须直接使用它；不得为了通过阈值而
-            # 伪造固定最低分，否则多个低相似度片段会全部显示成同一个 55%。
-            score = max(0.0, min(1.0, sim_score))
             lexical_coverage = self._lexical_coverage_score(query, row.content or "")
+            # 中文短查询对长文的 pg_trgm similarity 常只有 0.01 量级，直接当「相关度%」会严重偏低。
+            # 字面 n-gram 覆盖率更能反映「问句关键词是否出现在片段中」。
+            contains_cjk = bool(re.search(r"[\u4e00-\u9fff]", query or ""))
+            if contains_cjk:
+                score = max(sim_score, lexical_coverage)
+            else:
+                score = sim_score
+            score = max(0.0, min(1.0, score))
             hits.append(
                 RetrievalHit(
                     chunk_id=str(row.id),
@@ -181,8 +186,10 @@ class FulltextRetriever:
                     raw_score=sim_score,
                     metadata={
                         "channel": "trgm",
-                        "score_source": "pg_trgm_similarity",
-                        # 仅记录查询字面覆盖率供排障，不覆盖数据库返回的真实 similarity。
+                        "score_source": "pg_trgm_similarity+lexical_coverage"
+                        if contains_cjk
+                        else "pg_trgm_similarity",
+                        "pg_trgm_similarity": round(sim_score, 8),
                         "lexical_coverage": round(lexical_coverage, 8),
                     },
                 )

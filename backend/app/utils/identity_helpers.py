@@ -45,6 +45,11 @@ def is_super_admin_user(user: User) -> bool:
 
 def is_platform_admin_user(user: User) -> bool:
     """超级管理员或普通管理员：平台级知识库/管理能力。"""
+    from app.core.super_admin_policy import is_fixed_super_account
+
+    # 唯一固定超管账号始终具备平台管理能力（不依赖角色懒加载是否成功）
+    if is_fixed_super_account(user):
+        return True
     names = {r.name for r in user.roles if r.is_enabled}
     if "super_admin" in names or "admin" in names:
         return True

@@ -7,8 +7,8 @@
  * - 管理员：统一登录后进入管理端
  */
 
-import { route, startRouter, navigate, currentPath } from "/assets/js/router.js";
-import { api, askStream, clearDemoFlags } from "/assets/js/api.js";
+import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=fix-score-0721c";
+import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=fix-score-0721c";
 import {
   isLoggedIn,
   getUser,
@@ -23,10 +23,10 @@ import {
   getPostLoginTarget,
   canAccessKb,
   getDepartment,
-} from "/assets/js/auth.js";
-import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
-import { initMotion } from "/assets/js/motion.js";
-import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js";
+} from "/assets/js/auth.js?v=fix-score-0721c";
+import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js?v=fix-score-0721c";
+import { initMotion } from "/assets/js/motion.js?v=fix-score-0721c";
+import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=fix-score-0721c";
 
 clearDemoFlags();
 initTheme();
@@ -101,8 +101,18 @@ function formatRetrievalRelevance(value) {
   // 引用分数来自 cosine、全文相似度、RRF 或 Rerank；非法值显示 --
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return "--";
-  // 后端约定 0~1；若误传百分比则归一
-  const bounded = numeric > 1 && numeric <= 100 ? numeric / 100 : Math.max(0, Math.min(1, numeric));
+  let bounded;
+  if (numeric <= 1) {
+    bounded = numeric;
+  } else if (numeric <= 1.5) {
+    // 近满分上溢，不要 /100 变成「1.x%」
+    bounded = 1;
+  } else if (numeric <= 100) {
+    bounded = numeric / 100;
+  } else {
+    return "--";
+  }
+  bounded = Math.max(0, Math.min(1, bounded));
   if (!Number.isFinite(bounded)) return "--";
   return `${(bounded * 100).toFixed(1)}%`;
 }
@@ -132,6 +142,11 @@ function formatConfidenceTip(data) {
 
 /** 登录成功后按角色跳转（优先使用后端 landing_href） */
 function redirectAfterLogin(landingHref) {
+  // 固定超管 / 管理员一律进管理端，避免后端落地字段异常时被送去访客问答
+  if (canAccessAdmin()) {
+    location.href = "/admin/";
+    return;
+  }
   if (landingHref && typeof landingHref === "string") {
     if (landingHref.startsWith("/admin")) {
       location.href = landingHref;

@@ -3,6 +3,8 @@
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy.orm import selectinload
+
 from app.api.helpers import ok, resolve_request_id
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -60,14 +62,24 @@ async def login(
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
     """统一登录：访客/员工/管理员同一接口，响应含用户资料与落地分流。"""
-    user = await db.scalar(select(User).where(User.username == data.username))
+    username = (data.username or "").strip()
+    user = await db.scalar(
+        select(User)
+        .options(selectinload(User.roles).selectinload(Role.permissions))
+        .where((User.username == username) | (User.email == username))
+    )
     if not user or not verify_password(data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="账号或密码错误")
     if user.status != "active":
         raise HTTPException(status_code=403, detail="账号已禁用或待验证")
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(user)
+    # commit 后重新加载角色，避免 refresh 丢关系导致落地页错误
+    user = await db.scalar(
+        select(User)
+        .options(selectinload(User.roles).selectinload(Role.permissions))
+        .where(User.id == user.id)
+    )
     return ok(
         build_login_response(
             user,

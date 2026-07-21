@@ -5,12 +5,12 @@
  * 顶栏提供「智能对话」与「退出」（手册 4.3）
  */
 
-import { route, startRouter, navigate, currentPath } from "/assets/js/router.js";
-import { api, clearDemoFlags } from "/assets/js/api.js";
-import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js";
-import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
-import { initMotion, runCountUps } from "/assets/js/motion.js";
-import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js";
+import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=fix-role-0721b";
+import { api, clearDemoFlags } from "/assets/js/api.js?v=fix-role-0721b";
+import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js?v=fix-role-0721b";
+import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js?v=fix-role-0721b";
+import { initMotion, runCountUps } from "/assets/js/motion.js?v=fix-role-0721b";
+import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=fix-role-0721b";
 
 clearDemoFlags();
 initTheme();
@@ -20,7 +20,12 @@ initMotion();
 function formatPercentCell(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return "--";
-  const bounded = n > 1 && n <= 100 ? n / 100 : Math.max(0, Math.min(1, n));
+  let bounded;
+  if (n <= 1) bounded = n;
+  else if (n <= 1.5) bounded = 1;
+  else if (n <= 100) bounded = n / 100;
+  else return "--";
+  bounded = Math.max(0, Math.min(1, bounded));
   return `${Math.round(bounded * 100)}%`;
 }
 
@@ -2679,7 +2684,7 @@ async function pageHitTest() {
         exportBtn.addEventListener("click", async (e) => {
           e.preventDefault();
           try {
-            const { getAccessToken } = await import("/assets/js/auth.js");
+            const { getAccessToken } = await import("/assets/js/auth.js?v=fix-role-0721b");
             const res = await fetch(`/api/v1/hit-tests/runs/${runId}/export`, {
               headers: { Authorization: `Bearer ${getAccessToken()}` },
             });
