@@ -26,8 +26,10 @@ import {
 } from "/assets/js/auth.js";
 import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
 import { initMotion } from "/assets/js/motion.js";
+import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js";
 
 clearDemoFlags();
+initTheme();
 initMotion();
 
 /** 当前问答会话 ID（多轮上下文） */
@@ -154,7 +156,7 @@ function renderShell(activeTitle, { wide = false } = {}) {
     : "访客 · 仅公开知识库问答";
 
   document.getElementById("app").innerHTML = `
-    <div class="ambient-orbs" aria-hidden="true"><i></i><i></i></div>
+    <div class="ambient-orbs" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="app-shell">
       <header class="topnav">
         <div class="topnav-brand" data-go="/chat" title="回到问答">
@@ -164,6 +166,10 @@ function renderShell(activeTitle, { wide = false } = {}) {
         <nav class="topnav-links" aria-label="主导航">${buildNavItems(path, role)}</nav>
         <div class="topnav-actions">
           <span class="text-muted">${roleText}</span>
+          <button type="button" class="theme-toggle" data-theme-toggle aria-label="切换主题" title="切换主题">
+            <span class="icon-sun" aria-hidden="true">☀</span>
+            <span class="icon-moon" aria-hidden="true">☾</span>
+          </button>
           ${canAccessAdmin() ? `<a class="btn btn-secondary btn-sm" href="/admin/">管理端</a>` : ""}
           ${
             logged
@@ -191,6 +197,7 @@ function renderShell(activeTitle, { wide = false } = {}) {
       dispatchRender();
     });
   }
+  applyTheme(getTheme());
 }
 
 /** 路由分发 */
@@ -574,36 +581,71 @@ function pageMaterioAuth(mode = "login") {
 
   document.getElementById("app").innerHTML = `
     <div class="auth-materio">
-      <div class="ambient-orbs" aria-hidden="true"><i></i><i></i></div>
-      <div class="auth-materio-glow" aria-hidden="true"></div>
-      <div class="auth-materio-stage">
-        <header class="auth-materio-brand">
-          <i class="landing-logo"></i>
-          <strong>AI 知识库</strong>
-        </header>
-        <div class="auth-materio-hero">
-          <p class="auth-materio-kicker">Enterprise Knowledge OS</p>
-          <h1>企业知识，<span>即问即答</span></h1>
-          <p class="auth-materio-lead">统一入口连接问答、知识库与管理控制台。<br/>安全、可审计、可扩展。</p>
-          <ul class="auth-materio-points">
-            <li>混合检索 · 流式问答</li>
-            <li>RBAC · 部门隔离</li>
-            <li>命中评测 · 全链路观测</li>
-          </ul>
-        </div>
-        <section class="auth-materio-card glass-panel">
-          <div class="auth-materio-head">
-            <h2 id="authTitle">欢迎回来</h2>
-            <p id="authLead">登录账号后开始使用知识平台</p>
+      <div class="auth-materio-canvas" aria-hidden="true">
+        <span class="auth-blob auth-blob-a"></span>
+        <span class="auth-blob auth-blob-b"></span>
+        <span class="auth-blob auth-blob-c"></span>
+        <span class="auth-blob auth-blob-d"></span>
+        <div class="auth-materio-mesh"></div>
+        <div class="auth-stars"></div>
+      </div>
+      <div class="auth-materio-shell">
+        <aside class="auth-materio-visual">
+          <header class="auth-materio-brand">
+            <i class="landing-logo"></i>
+            <strong>AI 知识库</strong>
+          </header>
+          <div class="auth-materio-hero">
+            <p class="auth-materio-kicker">Enterprise Knowledge OS</p>
+            <h1>企业知识，<span>即问即答</span></h1>
+            <p class="auth-materio-lead">统一入口连接问答、知识库与管理控制台。<br/>安全、可审计、可扩展。</p>
+            <ul class="auth-materio-points">
+              <li>混合检索 · 流式问答</li>
+              <li>RBAC · 部门隔离</li>
+              <li>命中评测 · 全链路观测</li>
+            </ul>
           </div>
-          <div class="auth-tabs" role="tablist">
-            <button type="button" class="auth-tab ${mode !== "register" ? "active" : ""}" data-tab="login">登录</button>
-            <button type="button" class="auth-tab ${mode === "register" ? "active" : ""}" data-tab="register">注册</button>
+          <div class="auth-materio-stage-art" aria-hidden="true">
+            <div class="auth-figure">
+              <span class="auth-figure-ring auth-figure-ring-a"></span>
+              <span class="auth-figure-ring auth-figure-ring-b"></span>
+              <span class="auth-figure-core"><em></em></span>
+              <span class="auth-figure-orbit">
+                <i></i><i></i><i></i><i></i>
+              </span>
+              <span class="auth-figure-beam"></span>
+            </div>
+            <div class="auth-materio-geo">
+              <span class="auth-geo auth-geo-a"></span>
+              <span class="auth-geo auth-geo-b"></span>
+              <span class="auth-geo auth-geo-c"></span>
+              <span class="auth-geo auth-geo-d"></span>
+              <span class="auth-geo auth-geo-e"></span>
+              <span class="auth-geo auth-geo-f"></span>
+              <span class="auth-geo auth-geo-g"></span>
+              <span class="auth-geo auth-geo-h"></span>
+              <span class="auth-geo auth-geo-i"></span>
+              <span class="auth-geo auth-geo-j"></span>
+              <span class="auth-geo auth-geo-k"></span>
+              <span class="auth-geo auth-geo-l"></span>
+            </div>
           </div>
-          <div id="authPanel"></div>
-          <p class="auth-materio-guest">
-            无需账号？<button type="button" class="btn-text" id="btnGuestEnter">以访客进入问答</button>
-          </p>
+        </aside>
+        <section class="auth-materio-panel">
+          <div class="auth-materio-card">
+            <div class="auth-materio-head">
+              <h2 id="authTitle">欢迎回来</h2>
+              <p id="authLead">登录账号后开始使用知识平台</p>
+            </div>
+            <div class="auth-tabs" role="tablist">
+              <button type="button" class="auth-tab ${mode !== "register" ? "active" : ""}" data-tab="login">登录</button>
+              <button type="button" class="auth-tab ${mode === "register" ? "active" : ""}" data-tab="register">注册</button>
+            </div>
+            <div id="authPanel"></div>
+            <p class="auth-materio-guest">
+              无需账号？<button type="button" class="btn-text" id="btnGuestEnter">以访客进入问答</button>
+            </p>
+          </div>
         </section>
       </div>
     </div>

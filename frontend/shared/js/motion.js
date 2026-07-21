@@ -59,8 +59,15 @@ export function initBackgroundEffects() {
     }
   };
 
+  const cssColor = (name, fallback) => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  };
+
   const tick = () => {
     ctx.clearRect(0, 0, w, h);
+    const fill = cssColor("--color-primary", "#818cf8");
+    const linkBase = cssColor("--color-focus-ring", "rgba(129, 140, 248, 0.35)");
     for (const p of particles) {
       p.x += p.vx;
       p.y += p.vy;
@@ -68,8 +75,10 @@ export function initBackgroundEffects() {
       if (p.y < 0 || p.y > h) p.vy *= -1;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(167, 139, 250, 0.35)";
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = fill;
       ctx.fill();
+      ctx.globalAlpha = 1;
     }
     for (let i = 0; i < particles.length; i += 1) {
       for (let j = i + 1; j < particles.length; j += 1) {
@@ -79,13 +88,15 @@ export function initBackgroundEffects() {
         const dy = a.y - b.y;
         const dist = Math.hypot(dx, dy);
         if (dist > LINK) continue;
-        const alpha = (1 - dist / LINK) * 0.12;
+        const alpha = (1 - dist / LINK) * 0.35;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = `rgba(99, 102, 241, ${alpha})`;
+        ctx.strokeStyle = linkBase;
+        ctx.globalAlpha = alpha;
         ctx.lineWidth = 1;
         ctx.stroke();
+        ctx.globalAlpha = 1;
       }
     }
     raf = requestAnimationFrame(tick);

@@ -24,7 +24,8 @@
 
 .btn:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 28px rgba(168, 85, 247, 0.55), 0 0 18px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--color-primary) 55%, transparent),
+    0 0 18px color-mix(in srgb, var(--color-primary) 35%, transparent);
   filter: brightness(1.06);
 }
 
@@ -60,7 +61,7 @@
   border-image: none;
   color: #fff;
   filter: none;
-  box-shadow: 0 0 0 1px #a855f7, 0 0 16px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 0 0 1px var(--color-primary), 0 0 16px color-mix(in srgb, var(--color-primary) 40%, transparent);
   transform: translateY(-2px);
 }
 
@@ -138,15 +139,11 @@
 }
 
 .ht-pick.is-on {
-  border-color: rgba(168, 85, 247, 0.55);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
   background: var(--color-primary-selected);
-  color: #e9d5ff;
+  color: var(--color-primary-light);
   font-weight: 600;
-  box-shadow: 0 0 12px rgba(168, 85, 247, 0.25);
-}
-
-.ht-case-row.is-selected td {
-  background: rgba(99, 102, 241, 0.12);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 .ht-runs-toolbar {
@@ -175,8 +172,9 @@
   font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.03em;
-  color: #fff;
+  color: var(--color-text);
   line-height: 1.2;
+  text-shadow: 0 0 28px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 .page-head .page-desc,
@@ -251,24 +249,25 @@
   }
 }
 
-/* ---------- 玻璃卡片 / glass-panel ---------- */
+/* ---------- 玻璃卡片 / glass-panel（通透水晶） ---------- */
 .glass-panel,
 .card {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border: var(--glass-border);
+  border-top-color: color-mix(in srgb, var(--color-primary) 48%, transparent);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), inset 0 1px 0 color-mix(in srgb, var(--color-primary) 35%, transparent);
   padding: var(--card-pad);
-  transition: var(--transition);
+  transition: var(--transition), var(--theme-transition);
   min-width: 0;
 }
 
 .card:hover,
 .glass-panel:hover {
-  border-color: rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.07);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  background: var(--glass-bg-soft);
   box-shadow: var(--shadow-hover);
 }
 
@@ -276,8 +275,9 @@
   margin: 0 0 12px;
   font-size: 16px;
   font-weight: 600;
-  color: #fff;
+  color: var(--color-text);
   line-height: 1.35;
+  text-shadow: 0 0 24px color-mix(in srgb, var(--color-primary) 28%, transparent);
 }
 
 .card-header {
@@ -405,7 +405,7 @@
 }
 
 .meta-row .meta-value {
-  color: #fff;
+  color: var(--color-text);
   font-weight: 500;
   text-align: right;
   word-break: break-word;
@@ -449,9 +449,9 @@
 }
 
 .form-control:focus {
-  border-bottom-color: #a855f7;
+  border-bottom-color: var(--color-primary);
   border-bottom-width: 2px;
-  box-shadow: 0 0 15px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 0 0 3px var(--color-primary-soft), 0 0 16px color-mix(in srgb, var(--color-primary) 40%, transparent);
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -469,9 +469,9 @@
 
 .toolbar .form-control:focus,
 .search-glass:focus {
-  border-color: rgba(99, 102, 241, 0.55);
+  border-color: var(--color-primary);
   border-image: none;
-  box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 0 3px var(--color-primary-soft), 0 0 16px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 textarea.form-control {
@@ -502,7 +502,7 @@ select.form-control option {
   color: var(--color-danger);
 }
 
-/* ---------- 表格 ---------- */
+/* ---------- 表格（悬浮水晶） ---------- */
 .table-wrap {
   overflow-x: auto;
   overflow-y: hidden;
@@ -510,16 +510,21 @@ select.form-control option {
   max-width: 100%;
   border: var(--glass-border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.04);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: var(--glass-inset);
   height: auto;
   flex: 0 1 auto;
 }
 
 .card > .table-wrap {
   margin: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  backdrop-filter: none;
 }
 
 .table {
@@ -534,8 +539,8 @@ select.form-control option {
 .table td {
   min-height: 52px;
   height: auto;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--table-divider);
   border-right: none;
   text-align: left;
   vertical-align: middle;
@@ -545,15 +550,15 @@ select.form-control option {
 }
 
 .table th {
-  height: 44px;
-  background: rgba(255, 255, 255, 0.02);
+  height: 46px;
+  background: var(--table-head-bg);
   color: var(--color-text-secondary);
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--table-divider);
 }
 
 .table thead {
@@ -561,11 +566,18 @@ select.form-control option {
 }
 
 .table tbody tr {
-  transition: background 0.2s ease;
+  transition: background 0.18s var(--ease-standard), filter 0.18s var(--ease-standard);
 }
 
 .table tr:hover td {
-  background: rgba(99, 102, 241, 0.1);
+  background: var(--table-row-hover);
+  filter: brightness(1.02);
+}
+
+.table tr.is-selected td,
+.table tr.selected td,
+.ht-case-row.is-selected td {
+  background: var(--color-primary-selected);
 }
 
 .table tr:last-child td {
@@ -677,10 +689,10 @@ select.form-control option {
 
 .table td .btn:hover,
 .table-actions .btn:hover {
-  background: rgba(99, 102, 241, 0.18) !important;
-  border-color: #a855f7;
+  background: var(--color-primary-soft) !important;
+  border-color: var(--color-primary);
   color: #fff;
-  box-shadow: 0 0 14px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--color-primary) 40%, transparent);
   filter: none;
   transform: translateY(-1px);
 }
@@ -713,10 +725,10 @@ select.form-control option {
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
-  background: rgba(99, 102, 241, 0.1);
-  color: #818cf8;
-  border: 1px solid rgba(99, 102, 241, 0.25);
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.35);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-light);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-primary) 40%, transparent);
   white-space: nowrap;
 }
 
@@ -775,9 +787,10 @@ input[type="checkbox"].switch:checked,
 .switch-input:checked,
 .switch.is-on,
 .toggle-wrap.is-on {
-  background: var(--color-primary-gradient);
+  background: var(--color-primary);
+  background-image: var(--color-primary-gradient);
   border-color: transparent;
-  box-shadow: 0 0 14px rgba(99, 102, 241, 0.45);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 input[type="checkbox"].switch:checked::after,
@@ -862,12 +875,12 @@ select.form-control option:checked {
 
 .modal {
   width: min(480px, calc(100vw - 32px));
-  background: rgba(22, 27, 40, 0.88);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border: var(--glass-border);
   border-radius: var(--radius-modal);
-  box-shadow: var(--shadow-modal), 0 0 40px rgba(99, 102, 241, 0.15);
+  box-shadow: var(--shadow-modal), 0 0 40px color-mix(in srgb, var(--color-primary) 40%, transparent);
   padding: 24px;
   animation: rise-in 0.2s ease;
   max-height: calc(100vh - 48px);
@@ -947,7 +960,7 @@ select.form-control option:checked {
 .loading {
   padding: 28px 20px;
   text-align: center;
-  color: #c4b5fd;
+  color: var(--color-primary-light);
   font-weight: 500;
 }
 
@@ -957,11 +970,11 @@ select.form-control option:checked {
   width: 40px;
   height: 40px;
   margin: 0 auto 12px;
-  border: 3px solid rgba(168, 85, 247, 0.2);
-  border-top-color: #a855f7;
+  border: 3px solid var(--color-primary-soft);
+  border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-  box-shadow: 0 0 16px rgba(168, 85, 247, 0.4);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 @keyframes spin {
@@ -986,7 +999,7 @@ select.form-control option:checked {
   background: rgba(22, 27, 40, 0.92);
   backdrop-filter: blur(12px);
   border: var(--glass-border);
-  border-left: 3px solid #a855f7;
+  border-left: 3px solid var(--color-primary);
   box-shadow: var(--shadow-modal);
   color: var(--color-text-body);
   animation: rise-in 0.2s ease;

@@ -10,8 +10,10 @@ import { api, clearDemoFlags } from "/assets/js/api.js";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js";
 import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js";
 import { initMotion, runCountUps } from "/assets/js/motion.js";
+import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js";
 
 clearDemoFlags();
+initTheme();
 initMotion();
 
 /** 管理端菜单（分组展示；按权限码裁剪；前端隐藏不能替代后端鉴权） */
@@ -85,7 +87,7 @@ function renderShell(title) {
   const roleText = `${displayName} · ${getRoleLabel()}`;
 
   document.getElementById("app").innerHTML = `
-    <div class="ambient-orbs" aria-hidden="true"><i></i><i></i></div>
+    <div class="ambient-orbs" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="app-shell app-shell-admin">
       <aside class="sidebar" aria-label="管理导航">
         <div class="sidebar-brand" data-go="/admin" title="管理首页">
@@ -118,6 +120,10 @@ function renderShell(title) {
           <div class="page-bar-title">${escapeHtml(title)}</div>
           <div class="topnav-actions">
             <span class="role-chip">${roleText}</span>
+            <button type="button" class="theme-toggle" data-theme-toggle aria-label="切换主题" title="切换主题">
+              <span class="icon-sun" aria-hidden="true">☀</span>
+              <span class="icon-moon" aria-hidden="true">☾</span>
+            </button>
             <a class="btn btn-secondary btn-sm" href="/#/chat">智能对话</a>
             <button type="button" class="btn btn-text" id="btnLogout">退出</button>
           </div>
@@ -135,6 +141,7 @@ function renderShell(title) {
     clearAuth();
     location.href = "/#/";
   };
+  applyTheme(getTheme());
   return true;
 }
 

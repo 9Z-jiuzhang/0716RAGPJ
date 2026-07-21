@@ -26,7 +26,8 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  opacity: 0.55;
+  opacity: var(--fx-particle-alpha, 0.55);
+  transition: opacity 300ms ease-in-out;
 }
 
 .ambient-orbs i:nth-child(1) {
@@ -34,7 +35,11 @@
 }
 
 .ambient-orbs i:nth-child(2) {
-  animation: orb-drift-b 28s var(--ease-standard) infinite alternate;
+  animation: orb-drift-b 26s var(--ease-standard) infinite alternate;
+}
+
+.ambient-orbs i:nth-child(3) {
+  animation: orb-drift-a 30s var(--ease-standard) infinite alternate-reverse;
 }
 
 @keyframes orb-drift-a {
@@ -62,11 +67,11 @@
 @keyframes glow-pulse {
   0%,
   100% {
-    box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
+    box-shadow: 0 0 12px var(--color-primary-soft);
     opacity: 0.85;
   }
   50% {
-    box-shadow: 0 0 28px rgba(168, 85, 247, 0.45);
+    box-shadow: 0 0 28px color-mix(in srgb, var(--color-primary) 40%, transparent);
     opacity: 1;
   }
 }
@@ -120,8 +125,8 @@
 .btn:hover {
   transform: translateY(-2px);
   box-shadow:
-    0 8px 28px rgba(168, 85, 247, 0.45),
-    0 0 12px rgba(99, 102, 241, 0.4);
+    0 8px 28px color-mix(in srgb, var(--color-primary) 40%, transparent),
+    0 0 12px var(--color-primary-soft);
 }
 
 .btn .btn-ripple {
@@ -145,7 +150,7 @@
 
 .form-control:focus {
   transform: scale(1.005);
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.55), 0 0 15px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 0 1px var(--color-primary), 0 0 15px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 .qa-composer {
@@ -155,7 +160,7 @@
 }
 
 .qa-composer:focus-within {
-  box-shadow: 0 0 15px rgba(99, 102, 241, 0.4), 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--color-primary) 40%, transparent), 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 /* ---------- 玻璃卡片：鼠标追踪高光（.fx-spot 由 JS 注入，避免与伪元素冲突） ---------- */
@@ -206,7 +211,7 @@
 
 .bar-chart .bar:hover {
   filter: brightness(1.15);
-  box-shadow: 0 0 18px rgba(168, 85, 247, 0.65);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 /* ---------- 导航微交互 ---------- */
@@ -229,9 +234,9 @@
 
 .sidebar .nav-item:hover i {
   transform: scale(1.15);
-  background: #a855f7;
+  background: var(--color-primary);
   opacity: 1;
-  box-shadow: 0 0 10px rgba(168, 85, 247, 0.6);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 .sidebar .nav-item.active {
@@ -260,7 +265,7 @@
   transform-origin: center;
   transition: transform var(--duration-micro) var(--ease-standard);
   opacity: 0.9;
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
 .topnav-links .nav-item:hover::after,

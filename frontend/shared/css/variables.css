@@ -1,28 +1,30 @@
 /* ============================================================
- * TechStart Pro · Dark Glassmorphism 设计令牌
- * 参考: https://techstartpro.bs.designtocodes.com/
+ * TechStart Pro · 双主题令牌（dark 默认 / light 日间青绿）
+ * 通过 html[data-theme="light|dark"] 切换
  * ============================================================ */
 
-:root {
+:root,
+[data-theme="dark"] {
   --color-primary: #818cf8;
-  --color-primary-light: #a855f7;
+  --color-primary-light: #a5b4fc;
   --color-primary-dark: #6366f1;
-  --color-primary-soft: rgba(99, 102, 241, 0.14);
-  --color-primary-selected: rgba(99, 102, 241, 0.28);
-  --color-focus-ring: rgba(99, 102, 241, 0.4);
-  --color-primary-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-  --color-glow: 0 0 24px rgba(168, 85, 247, 0.45);
+  --color-primary-soft: rgba(129, 140, 248, 0.14);
+  --color-primary-selected: rgba(129, 140, 248, 0.3);
+  --color-focus-ring: rgba(129, 140, 248, 0.35);
+  --color-primary-gradient: linear-gradient(135deg, #a5b4fc 0%, #818cf8 100%);
+  --color-glow: 0 0 28px rgba(129, 140, 248, 0.4);
 
-  --color-bg: #0b0f19;
-  --color-bg-tint: rgba(30, 35, 50, 0.55);
+  --color-bg: #0f172a;
+  --color-bg-deep: #020617;
+  --color-bg-tint: rgba(15, 23, 42, 0.55);
   --color-bg-hover: rgba(255, 255, 255, 0.05);
-  --color-surface: rgba(255, 255, 255, 0.05);
-  --color-surface-solid: rgba(22, 27, 40, 0.92);
+  --color-surface: rgba(255, 255, 255, 0.06);
+  --color-surface-solid: rgba(15, 23, 42, 0.78);
 
-  --color-text: rgba(255, 255, 255, 0.9);
-  --color-text-body: rgba(255, 255, 255, 0.72);
-  --color-text-secondary: rgba(255, 255, 255, 0.5);
-  --color-border: rgba(255, 255, 255, 0.08);
+  --color-text: #f8fafc;
+  --color-text-body: #cbd5e1;
+  --color-text-secondary: #94a3b8;
+  --color-border: rgba(255, 255, 255, 0.1);
 
   --color-success: #34d399;
   --color-warning: #fbbf24;
@@ -39,14 +41,24 @@
   --radius-modal: 24px;
   --radius-pill: 999px;
 
-  --glass-bg: rgba(255, 255, 255, 0.05);
-  --glass-blur: blur(12px);
-  --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+  --glass-bg: rgba(15, 23, 42, 0.55);
+  --glass-bg-soft: rgba(255, 255, 255, 0.06);
+  --glass-blur: blur(24px);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 
-  --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-  --shadow-hover: 0 12px 40px rgba(99, 102, 241, 0.22);
-  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.45);
-  --shadow-btn: 0 4px 20px rgba(168, 85, 247, 0.35);
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.28), var(--glass-inset);
+  --shadow-hover: 0 12px 40px rgba(129, 140, 248, 0.28), var(--glass-inset);
+  --shadow-modal: 0 20px 56px rgba(0, 0, 0, 0.45), var(--glass-inset);
+  --shadow-btn: 0 4px 22px rgba(129, 140, 248, 0.4);
+
+  --table-head-bg: rgba(30, 41, 59, 0.55);
+  --table-row-hover: rgba(129, 140, 248, 0.14);
+  --table-divider: rgba(255, 255, 255, 0.05);
+  --nav-glass: rgba(15, 23, 42, 0.55);
+  --sidebar-glass: rgba(15, 23, 42, 0.5);
+  --orb-opacity: 0.65;
+  --fx-particle-alpha: 0.55;
 
   --space-xs: 8px;
   --space-sm: 12px;
@@ -64,8 +76,58 @@
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --duration-micro: 180ms;
   --duration-page: 340ms;
+  --theme-transition: background-color 300ms ease-in-out, color 300ms ease-in-out,
+    border-color 300ms ease-in-out, box-shadow 300ms ease-in-out;
 
   --font-sans: "Inter", "Space Grotesk", system-ui, -apple-system, "Segoe UI",
     "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* ---------- 日间：透亮底色 + 青绿主色 ---------- */
+[data-theme="light"] {
+  --color-primary: #14b8a6;
+  --color-primary-light: #2dd4bf;
+  --color-primary-dark: #0d9488;
+  --color-primary-soft: rgba(20, 184, 166, 0.08);
+  --color-primary-selected: rgba(20, 184, 166, 0.22);
+  --color-focus-ring: rgba(20, 184, 166, 0.35);
+  --color-primary-gradient: linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%);
+  --color-glow: 0 0 24px rgba(20, 184, 166, 0.4);
+
+  --color-bg: #f0fdfa;
+  --color-bg-deep: #ecfeff;
+  --color-bg-tint: rgba(240, 253, 250, 0.7);
+  --color-bg-hover: rgba(20, 184, 166, 0.08);
+  --color-surface: rgba(255, 255, 255, 0.65);
+  --color-surface-solid: rgba(255, 255, 255, 0.88);
+
+  --color-text: #134e4a;
+  --color-text-body: #334155;
+  --color-text-secondary: #64748b;
+  --color-border: rgba(255, 255, 255, 0.75);
+
+  --color-success: #059669;
+  --color-warning: #d97706;
+  --color-danger: #e11d48;
+  --color-info: #0891b2;
+
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-bg-soft: rgba(255, 255, 255, 0.5);
+  --glass-blur: blur(24px);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.75);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+  --shadow: 0 10px 30px -10px rgba(20, 184, 166, 0.18), var(--glass-inset);
+  --shadow-hover: 0 14px 36px -8px rgba(20, 184, 166, 0.28), var(--glass-inset);
+  --shadow-modal: 0 20px 50px -12px rgba(20, 184, 166, 0.28), var(--glass-inset);
+  --shadow-btn: 0 6px 22px rgba(20, 184, 166, 0.4);
+
+  --table-head-bg: rgba(240, 253, 250, 0.72);
+  --table-row-hover: rgba(20, 184, 166, 0.08);
+  --table-divider: rgba(153, 246, 228, 0.55);
+  --nav-glass: rgba(255, 255, 255, 0.55);
+  --sidebar-glass: rgba(255, 255, 255, 0.58);
+  --orb-opacity: 0.45;
+  --fx-particle-alpha: 0.28;
 }
