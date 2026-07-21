@@ -11,4 +11,5 @@ if [ -f "alembic.ini" ]; then
 fi
 
 echo "[entrypoint] 启动 FastAPI..."
+# 透传 compose command（如 --workers 2）；无参数时单进程启动
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000 "$@"

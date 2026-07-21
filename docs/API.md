@@ -22,8 +22,11 @@
 12. [快照管理 `/knowledge-bases/{kb_id}/snapshots`](#12-快照管理-knowledge-baseskb_idsnapshots)
 13. [审计日志 `/audit`](#13-审计日志-audit)
 14. [系统监控 `/monitor`](#14-系统监控-monitor)
-15. [联调检查清单](#15-联调检查清单)
-16. [变更记录](#16-变更记录)
+15. [Query 预处理 `/query-processing`](#15-query-预处理-query-processing)
+16. [角色缓存 `/role-caches`](#16-角色缓存-role-caches)
+17. [RAGAS 评估 `/ragas`](#17-ragas-评估-ragas)
+18. [联调检查清单](#18-联调检查清单)
+19. [变更记录](#19-变更记录)
 
 ---
 
@@ -33,9 +36,11 @@
 
 | 环境 | Base URL |
 |------|----------|
-| 本地 / Docker 统一入口 | `http://localhost:8080/api/v1` |
+| 本地 Docker 统一入口（本仓库默认映射） | `http://localhost:18080/api/v1` |
+| 云端 HTTPS 域名 | `https://<你的域名>/api/v1` |
+| 直连 API（仅调试） | `http://localhost:18000/api/v1` |
 
-下文所有路径均相对该 Base URL，例如登录完整地址为 `POST http://localhost:8080/api/v1/auth/login`。
+下文路径均相对 Base URL。云端部署步骤见 [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md)。
 
 ### 1.2 认证方式
 
@@ -107,9 +112,9 @@ Authorization: Bearer <access_token>
 | 端 | 典型接口 | 说明 |
 |----|----------|------|
 | 访客端 | `/auth/*`、`/qa/ask` | 未登录仅可检索 `department=GUEST`（访客专用）的知识库 |
-| 管理端 | `/users`、`/roles`、`/departments`、`/knowledge-bases`、`/hit-tests`、`/audit`、`/monitor/stats` 等 | 需对应权限标识 |
+| 管理端 | `/users`、`/roles`、`/departments`、`/knowledge-bases`、`/hit-tests`、`/ragas`、`/role-caches`、`/query-processing`、`/audit`、`/monitor/*` 等 | 需对应权限标识 |
 
-机器可读契约见 [`openapi.json`](./openapi.json)。
+机器可读契约见 [`openapi.json`](./openapi.json)；第三方接入见 [`API_INTEGRATION_GUIDE.md`](./API_INTEGRATION_GUIDE.md)；云端部署见 [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md)。
 
 ---
 
@@ -171,7 +176,7 @@ Authorization: Bearer <access_token>
 | email | EmailStr | 是 | 唯一 |
 | nickname | string | 否 | ≤100 |
 
-响应 `data`：用户对象（见 [3.4](#34-当前用户信息)）。默认绑定 **`guest`** 角色。用户名/邮箱冲突 → `409`。
+响应 `data`：用户对象（见 [3.4](#34-当前用户信息)）。默认绑定 **`guest`** 角色。用户名/邮箱冲突 → `409`。云端可设 `AUTH_REGISTER_ENABLED=false` 关闭本接口（返回 `403`）。
 
 ### 3.2 用户登录
 
@@ -205,6 +210,23 @@ Authorization: Bearer <access_token>
 ### 3.5 修改本人资料
 
 - `PUT /auth/me` — 需登录 — 请求（`UserUpdateRequest`）：`nickname?`(≤100)、`email?`、`department?`(≤50) — 返回更新后的用户。
+
+### 3.6 修改本人密码
+
+- `POST /auth/change-password` — 需登录
+
+| 字段 | 类型 | 必填 | 约束 |
+|------|------|------|------|
+| old_password | string | 是 | 1–128 |
+| new_password | string | 是 | 8–128 |
+| confirm_password | string | 是 | 须与 `new_password` 一致 |
+
+成功 `data`：`{ "changed": true }`。
+
+约束：
+
+- 固定超管账号（`super`）→ `403`（仅允许通过 `.env` 的 `SUPER_ADMIN_PASSWORD` 维护）；
+- 原密码错误 / 新旧相同 / 两次确认不一致 → `400`。
 
 ---
 
@@ -401,12 +423,18 @@ Authorization: Bearer <access_token>
 
 | event | 说明 |
 |-------|------|
+| `intent` | Guard 放行后的意图识别结果 |
+| `guard_blocked` | 被安全策略拒绝；含 `message`、`intent`、`reason_code`；流结束 |
+| `query_processing` | Query 改写 / 扩展 / HyDE 等预处理元信息（可关） |
+| `cache_hit` | 命中角色缓存问题，可直接返回答案 |
 | `chunk` | 增量文本，字段 `content` |
 | `citations` | 引用来源列表（`items` 与 `citations` 双键） |
 | `done` | 结束，含 `session_id`、`message_id`、`request_id`、`performance`、`confidence`(high/medium/low) |
 | `error` | 错误信息 |
 
-**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`。
+典型顺序：`intent` →（可选 `query_processing` / `cache_hit`）→ `chunk*` → `citations` → `done`；被拦截时为 `guard_blocked`。
+
+**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`（向量相关度一般为 `1 - cosine_distance`）。
 
 **范围规则**：
 
@@ -459,7 +487,7 @@ Authorization: Bearer <access_token>
 
 **对比请求**（`CompareTestRequest`）：`case_id`、`kb_ids[]`、`doc_ids?[]`、`strategies[]`(默认三种,≥2)、`top_k`、`similarity_threshold`。
 
-**运行响应**（`TestRunResponse`）：`id`、`case_id?`、`kb_ids`、`strategy`、`top_k`、`status`(running\|completed\|failed)、`total_questions`、`hit_count`、`hit_rate?`、`recall_at_k?`、`mrr?`、`avg_elapsed_ms?`、`created_at?`、`completed_at?`。
+**运行响应**（`TestRunResponse`）：`id`、`case_id?`、`kb_ids`、`strategy`、`top_k`、`status`(running\|completed\|failed)、`total_questions`、`hit_count`、`hit_rate?`（命中题数/总题数）、**`score?`（综合得分 = 各题命中片段相关度的算术平均，0–1；全未命中为 0）**、`recall_at_k?`、`mrr?`、`avg_elapsed_ms?`、`created_at?`、`completed_at?`。
 
 ---
 
@@ -500,31 +528,85 @@ Authorization: Bearer <access_token>
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
 | GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`uptime_seconds`；`checks` 含 postgres/redis/chroma/langfuse 连通性 |
-| GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d`、`hit_rate_trend_7d` |
-| GET | `/metrics`（应用根，非 `/api/v1`） | 内部 | Prometheus 文本指标，**不走统一包装** |
+| GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d`、`hit_rate_trend_7d`、`guard_blocked_24h`、`guard_blocked_7d`、`guard_recent_events` |
+| GET | `/monitor/guard-events` | `system:read` | 分页 Guard 拦截明细；默认 `page_size=50` |
+| GET | `/metrics`（应用根，非 `/api/v1`） | 内部 | Prometheus 文本指标，**不走统一包装**；云端可借 `METRICS_PUBLIC=false` 限制暴露 |
 
 > `/api/v1/monitor/metrics` 为 `307` 重定向到 `/metrics`（隐藏于 schema）。
 
+**Guard 事件项**（`GuardBlockedEventItem`）：`id`、`created_at`、`intent`、`reason_code`、`detector`、`confidence`、`actor_label`（用户名或「访客」）、`client_ip?`、`user_id?`、`is_registered`、`question_preview?`（脱敏短摘要，不含完整原文）。
+
 ---
 
-## 15. 联调检查清单
+## 15. Query 预处理 `/query-processing`
 
-1. 前端仅以 [`openapi.json`](./openapi.json) + 本文档字段名为准。
+全局问答 Query 改写 / 扩展 / HyDE 开关（写入后对未命中缓存的下一次问答生效）。
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/query-processing` | `system:read` | 当前配置 |
+| PUT | `/query-processing` | `kb:write` | 完整替换：`rewrite_enabled`、`expansion_enabled`、`expansion_count`(0–5)、`hyde_enabled` |
+
+响应另含 `updated_at`。
+
+> 本模块路径已在运行时 API 提供；完整字段以路由实现为准（当前未全部写入 `openapi.json`）。
+
+---
+
+## 16. 角色缓存 `/role-caches`
+
+按角色预生成高频问答缓存，命中时可走 `cache_hit` SSE 快捷路径。
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/role-caches` | `system:read` | 各角色缓存配置与问题数量 |
+| PATCH | `/role-caches/{role_id}` | `kb:write` | 更新 `enabled` / `interval_days` |
+| GET | `/role-caches/{role_id}/questions` | `system:read` | 缓存问题明细 |
+| POST | `/role-caches/{role_id}/analyze-documents` | `kb:write` | 手动从文档生成缓存问题 |
+| POST | `/role-caches/{role_id}/analyze-history` | `kb:write` | 手动从历史高频问题生成 |
+
+列表项含：`enabled`、`interval_days`、`document_question_limit`、`history_question_limit`、`question_count`、最近分析时间等。
+
+> 同上，契约 JSON 可能尚未收录全部路径；联调以运行时与本文表为准。
+
+---
+
+## 17. RAGAS 评估 `/ragas`
+
+基于知识库与样本的回答质量评估（Faithfulness / Answer Relevancy 等，具体指标见运行响应 `metric_scores`）。
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/ragas/runs` | `system:read` | 评估运行列表；Query：`kb_id?` |
+| GET | `/ragas/samples` | `system:read` | 可评估历史样本预览 |
+| POST | `/ragas/generate-questions` | `system:read` | 从文档自动生成评估问题草稿；Body：`kb_id`、`count`(1–20) |
+| POST | `/ragas/runs` | `system:read` | 执行评估；Body：`kb_id`、`sample_limit`、`samples?[]` |
+| GET | `/ragas/runs/{run_id}` | `system:read` | 运行详情与逐样本指标 |
+
+> 同上，完整 OpenAPI 条目可按需补入生成脚本。
+
+---
+
+## 18. 联调检查清单
+
+1. 前端仅以 [`openapi.json`](./openapi.json) + 本文档字段名为准；扩展模块以本文 + 运行时为准。
 2. 需鉴权接口先测 `401`，再测无权限 `403`。
 3. 知识库列表不得返回未授权库；访客仅见 GUEST 部门库。
-4. `/qa/ask` 覆盖：未登录仅 GUEST 库、登录后授权范围、非法 `kb_ids`。
+4. `/qa/ask` 覆盖：未登录仅 GUEST 库、登录后授权范围、非法 `kb_ids`、`guard_blocked`。
 5. 上传超大文件 → `413`；不支持格式 → `400` 且 message 明确。
-6. SSE 至少覆盖 `chunk → citations → done` 顺序。
+6. SSE 至少覆盖 `intent → chunk → citations → done`；拦截场景覆盖 `guard_blocked`。
 7. 回退：`confirm=false` 必拒；`true` 后可查向量化进度。
 8. 部门：GUEST 部门不可删除/改 code；员工访问 GUEST 库不应被拒。
 9. 用户：管理员不可删除/禁用同级或更高级用户；不可将他人设为 admin/超管；角色权限配置仅超管可调。
+10. 改密：普通用户成功；`super` 返回 `403`。
 
 ---
 
-## 16. 变更记录
+## 19. 变更记录
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.0 | 2026-07-21 | 对齐本机入口 `18080`；补充改密、Guard 事件、SSE Guard/预处理事件、命中率 `score`、Query/角色缓存/RAGAS 索引；重生成 openapi（61 paths） |
 | 2.1.0 | 2026-07-19 | 补充会话闲置过期（active→expired）、访客不自动复用会话、`active_sessions` 定义；对齐 Langfuse 云端配置说明 |
 | 2.1.0 | 2026-07-17 | 契约迁入 `docs/`；补充用户删除、角色等级与分配规则；`admin` 不含 `role:write`；默认角色改为 `guest`；废弃 `user` 角色 |
 | 2.1.0 | 2026-07-17 | 全面对齐当前实现：新增部门管理与部门驱动访问控制、模型用量监测（Langfuse）、文档内容预览/分段预览/失败重试、命中率多策略对比与运行删除、快照清理与选择性回退；刷新全部字段与约束 |

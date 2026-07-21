@@ -4,19 +4,55 @@
  * 角色细化：访客 / 注册用户 / A·B 部门员工 / 普通管理员 / 超级管理员
  */
 
-import { toast } from "/assets/js/utils.js?v=fix-role-0721b";
+import { toast } from "/assets/js/utils.js?v=gap-opt-0721h";
 
 const KEY_ACCESS = "rag_access_token";
 const KEY_REFRESH = "rag_refresh_token";
 const KEY_USER = "rag_user";
 const KEY_GUEST = "rag_guest_id";
+const KEY_REMEMBER = "rag_remember_me";
+
+/** 记住我：true → localStorage；false → sessionStorage（关标签即失效） */
+export function getRememberMe() {
+  try {
+    const v = localStorage.getItem(KEY_REMEMBER);
+    if (v === null || v === undefined || v === "") return true;
+    return v !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setRememberMe(remember) {
+  try {
+    localStorage.setItem(KEY_REMEMBER, remember ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+function authStore() {
+  return getRememberMe() ? localStorage : sessionStorage;
+}
+
+function clearAuthStores() {
+  for (const store of [localStorage, sessionStorage]) {
+    try {
+      store.removeItem(KEY_ACCESS);
+      store.removeItem(KEY_REFRESH);
+      store.removeItem(KEY_USER);
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 export function getAccessToken() {
-  return localStorage.getItem(KEY_ACCESS) || "";
+  return authStore().getItem(KEY_ACCESS) || localStorage.getItem(KEY_ACCESS) || sessionStorage.getItem(KEY_ACCESS) || "";
 }
 
 export function getRefreshToken() {
-  return localStorage.getItem(KEY_REFRESH) || "";
+  return authStore().getItem(KEY_REFRESH) || localStorage.getItem(KEY_REFRESH) || sessionStorage.getItem(KEY_REFRESH) || "";
 }
 
 export function isLoggedIn() {
@@ -25,16 +61,28 @@ export function isLoggedIn() {
 
 export function getUser() {
   try {
-    return JSON.parse(localStorage.getItem(KEY_USER) || "null");
+    const raw = authStore().getItem(KEY_USER) || localStorage.getItem(KEY_USER) || sessionStorage.getItem(KEY_USER) || "null";
+    return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 
-export function saveAuth({ access_token, refresh_token, user }) {
-  if (access_token) localStorage.setItem(KEY_ACCESS, access_token);
-  if (refresh_token) localStorage.setItem(KEY_REFRESH, refresh_token);
-  if (user) localStorage.setItem(KEY_USER, JSON.stringify(normalizeUser(user)));
+export function saveAuth({ access_token, refresh_token, user } = {}) {
+  // 先读出当前值：允许只更新 user 或只更新 token，避免把另一半清掉导致「假退出」
+  const prevAccess = getAccessToken();
+  const prevRefresh = getRefreshToken();
+  const prevUser = getUser();
+
+  const nextAccess = access_token !== undefined ? access_token : prevAccess;
+  const nextRefresh = refresh_token !== undefined ? refresh_token : prevRefresh;
+  const nextUser = user !== undefined ? (user ? normalizeUser(user) : null) : prevUser;
+
+  const store = authStore();
+  clearAuthStores();
+  if (nextAccess) store.setItem(KEY_ACCESS, nextAccess);
+  if (nextRefresh) store.setItem(KEY_REFRESH, nextRefresh);
+  if (nextUser) store.setItem(KEY_USER, JSON.stringify(nextUser));
 }
 
 /** 规范化用户对象，保证 role / roles / permissions 一致 */
@@ -110,9 +158,7 @@ export function replaceAuthSession({ access_token, refresh_token, user }) {
 }
 
 export function clearAuth() {
-  localStorage.removeItem(KEY_ACCESS);
-  localStorage.removeItem(KEY_REFRESH);
-  localStorage.removeItem(KEY_USER);
+  clearAuthStores();
 }
 
 export function getGuestId() {

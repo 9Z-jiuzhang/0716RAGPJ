@@ -194,11 +194,16 @@ class MonitorService:
             )
             recent_events = [
                 {
+                    "id": str(row.id),
                     "intent": row.intent,
                     "reason_code": row.reason_code,
                     "detector": row.detector,
                     "confidence": round(row.confidence, 4),
                     "created_at": row.created_at.isoformat(),
+                    "actor_label": getattr(row, "actor_label", None) or ("访客" if row.user_id is None else "-"),
+                    "client_ip": getattr(row, "client_ip", None),
+                    "user_id": str(row.user_id) if row.user_id else None,
+                    "is_registered": row.user_id is not None,
                 }
                 for row in rows
             ]
@@ -210,6 +215,80 @@ class MonitorService:
         except Exception:
             logger.warning("guard stats query failed", exc_info=True)
             return {"blocked_24h": 0, "blocked_7d": 0, "recent_events": []}
+
+    async def list_guard_events(self, *, page: int = 1, page_size: int = 50) -> dict[str, object]:
+        """分页列出 Guard 阻拦事件（含账号与 IP，不含完整问题原文）。"""
+        from datetime import timedelta
+
+        from app.models.base import utcnow
+        from app.models.guard import GuardBlockedEvent
+
+        page = max(1, int(page or 1))
+        page_size = max(1, min(100, int(page_size or 50)))
+        now = utcnow()
+        try:
+            total = int(await self.db.scalar(select(func.count()).select_from(GuardBlockedEvent)) or 0)
+            blocked_24h = int(
+                await self.db.scalar(
+                    select(func.count())
+                    .select_from(GuardBlockedEvent)
+                    .where(GuardBlockedEvent.created_at >= now - timedelta(hours=24))
+                )
+                or 0
+            )
+            blocked_7d = int(
+                await self.db.scalar(
+                    select(func.count())
+                    .select_from(GuardBlockedEvent)
+                    .where(GuardBlockedEvent.created_at >= now - timedelta(days=7))
+                )
+                or 0
+            )
+            rows = list(
+                (
+                    await self.db.scalars(
+                        select(GuardBlockedEvent)
+                        .order_by(GuardBlockedEvent.created_at.desc())
+                        .offset((page - 1) * page_size)
+                        .limit(page_size)
+                    )
+                ).all()
+            )
+            items = [
+                {
+                    "id": str(row.id),
+                    "created_at": row.created_at.isoformat(),
+                    "intent": row.intent,
+                    "reason_code": row.reason_code,
+                    "detector": row.detector,
+                    "confidence": round(float(row.confidence or 0), 4),
+                    "actor_label": (getattr(row, "actor_label", None) or "").strip()
+                    or ("访客" if row.user_id is None else "-"),
+                    "client_ip": getattr(row, "client_ip", None),
+                    "user_id": str(row.user_id) if row.user_id else None,
+                    "is_registered": row.user_id is not None,
+                    "question_preview": row.question_preview,
+                }
+                for row in rows
+            ]
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "blocked_24h": blocked_24h,
+                "blocked_7d": blocked_7d,
+            }
+        except Exception:
+            logger.warning("guard events list failed", exc_info=True)
+            return {
+                "items": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "blocked_24h": 0,
+                "blocked_7d": 0,
+            }
 
     async def _qa_trend_7d(self) -> list[int]:
         """近 7 天每日用户提问数（含今天，按日升序）。"""

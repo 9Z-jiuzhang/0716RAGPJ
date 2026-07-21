@@ -1,0 +1,77 @@
+# 云端 / 生产覆盖配置
+# 用法：
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d --build
+#
+# 要求 .env 中至少设置：
+#   DEPLOYMENT_MODE=cloud
+#   PUBLIC_BASE_URL=https://你的域名
+#   CORS_ORIGINS=https://你的域名
+#   强随机 SECRET_KEY / JWT_SECRET_KEY / SUPER_ADMIN_PASSWORD / 数据库与 MinIO 密钥
+
+services:
+  api:
+    restart: unless-stopped
+    # 使用镜像 entrypoint 跑迁移，再以多 worker 启动（无热重载、无源码挂载）
+    entrypoint: ["/app/docker-entrypoint.sh"]
+    command: ["--workers", "2"]
+    volumes: []
+    ports: []
+    environment:
+      DEPLOYMENT_MODE: cloud
+      SEED_DEMO_USERS: "false"
+      SUPER_ADMIN_SYNC_PASSWORD: "false"
+      AUTH_REGISTER_ENABLED: "false"
+      METRICS_PUBLIC: "false"
+      CORS_ALLOW_CREDENTIALS: "false"
+
+  web:
+    restart: unless-stopped
+    # 仅内网供边缘 nginx 反代，不直接暴露宿主机
+    ports: []
+
+  postgres:
+    restart: unless-stopped
+    ports: []
+
+  redis:
+    restart: unless-stopped
+    ports: []
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?请在 .env 设置 REDIS_PASSWORD}
+
+  chroma:
+    restart: unless-stopped
+    ports: []
+
+  minio:
+    restart: unless-stopped
+    ports: []
+
+  prometheus:
+    restart: unless-stopped
+    ports: []
+
+  grafana:
+    restart: unless-stopped
+    ports: []
+    environment:
+      GF_SERVER_ROOT_URL: ${PUBLIC_BASE_URL:?请在 .env 设置 PUBLIC_BASE_URL}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?请填写}
+      GF_USERS_DEFAULT_THEME: light
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_SECURITY_COOKIE_SAMESITE: lax
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+
+  nginx:
+    restart: unless-stopped
+    ports:
+      # 云主机安全组仅放行 80/443；TLS 建议在云负载均衡终止，或自行挂证书到本容器
+      - "80:8080"
+    volumes:
+      - ./docker/nginx/reverse-proxy.conf:/etc/nginx/conf.d/default.conf:ro

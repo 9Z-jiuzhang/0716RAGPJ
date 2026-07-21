@@ -26,10 +26,12 @@ from app.models.knowledge_base import KnowledgeBase
 from app.models.qa import QAMessage, QASession
 from app.schemas.common import BaseResponse
 from app.schemas.qa import AskRequest, FeedbackRequest, RenameSessionRequest
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
+
+from app.utils.request_info import extract_client_ip
 
 router = APIRouter(prefix="/qa", tags=["智能问答"])
 
@@ -128,12 +130,14 @@ def _normalize_sse_payload(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 )
 async def ask_question(
     body: AskRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_current_user),
     guest_id: str | None = Depends(_guest_id),
     request_id: str = Depends(_request_id),
 ) -> StreamingResponse:
     """执行问答流水线并以 SSE 推送结果。"""
+    client_ip = extract_client_ip(request)
 
     async def event_stream() -> AsyncIterator[str]:
         async for raw in qa_pipeline.run(
@@ -142,6 +146,7 @@ async def ask_question(
             user=user,
             guest_id=guest_id,
             request_id=request_id,
+            client_ip=client_ip,
         ):
             event_type, payload = _normalize_sse_payload(raw)
             yield _format_sse(event_type, payload)

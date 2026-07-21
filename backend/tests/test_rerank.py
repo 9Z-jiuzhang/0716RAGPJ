@@ -152,7 +152,7 @@ async def test_seed_adds_rerank_to_existing_llm_database(monkeypatch: pytest.Mon
     assert db.add.call_count == 1
     added = db.add.call_args.args[0]
     assert added.model_type == "rerank"
-    assert added.provider == "cohere"
-    assert added.model_name == "rerank-v4.0-pro"
+    assert added.provider == "dashscope"
+    assert added.model_name == "qwen3-vl-rerank"
     assert added.api_key_env == "RERANK_API_KEY"
     db.commit.assert_awaited_once()

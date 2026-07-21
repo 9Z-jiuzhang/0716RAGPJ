@@ -1,0 +1,64 @@
+%PDF-1.4
+1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj
+2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj
+3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj
+4 0 obj<< /Length 920 >>stream
+BT
+/F1 11 Tf
+50 780 Td
+14 TL
+(IT Account & Security Policy \(PDF Test Document\)) Tj
+T*
+() Tj
+T*
+(File type: PDF \(.pdf\)) Tj
+T*
+(Purpose: validate PDF text extraction, chunking and embedding.) Tj
+T*
+() Tj
+T*
+(1. Account Provisioning) Tj
+T*
+(- New hires receive Email, OA, VPN and repo access from IT.) Tj
+T*
+(- Contractor accounts expire in 90 days by default.) Tj
+T*
+() Tj
+T*
+(2. Access Control) Tj
+T*
+(- Production DB read-only access needs manager + DBA dual approval.) Tj
+T*
+(- Sharing personal accounts is forbidden and triggers audit freeze.) Tj
+T*
+(- All access must be revoked on the employee's last working day.) Tj
+T*
+() Tj
+T*
+(3. Password Policy) Tj
+T*
+(- Minimum 12 characters with upper/lower/digit/special.) Tj
+T*
+(- Force rotation every 90 days.) Tj
+T*
+() Tj
+T*
+(Keywords: VPN, OA, dual-approval, password-policy, security-audit) Tj
+T*
+(Related Chinese docs: ??????????? \(DOCX\) / ??????? \(TXT\)) Tj
+ET
+endstream
+endobj
+5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000056 00000 n 
+0000000111 00000 n 
+0000000235 00000 n 
+0000001204 00000 n 
+trailer<< /Size 6 /Root 1 0 R >>
+startxref
+1272
+%%EOF

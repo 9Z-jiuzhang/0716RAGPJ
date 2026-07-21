@@ -49,6 +49,10 @@ class KnowledgeBaseResponse(BaseModel):
     creator_id: UUID4 = Field(..., description="创建者")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="最后更新时间")
+    permissions: list["KBPermissionItem"] = Field(
+        default_factory=list,
+        description="知识库级 ACL（仅详情接口填充；列表接口为空）",
+    )
 
 
 class KBPermissionItem(BaseModel):

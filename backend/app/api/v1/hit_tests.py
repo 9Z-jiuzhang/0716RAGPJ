@@ -81,7 +81,12 @@ async def update_test_case(
 
     需要 test:write 权限。更新用例名称、描述或问题列表。
     """
-    if not request.name and not request.description and request.questions is None:
+    if (
+        not request.name
+        and not request.description
+        and request.questions is None
+        and request.examples is None
+    ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="至少需要提供一个更新字段",

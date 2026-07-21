@@ -125,6 +125,7 @@ class QAPipeline:
         user: User | None = None,
         guest_id: str | None = None,
         request_id: str | None = None,
+        client_ip: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         执行完整问答流程，按 SSE 契约 yield 事件字典。
@@ -150,6 +151,7 @@ class QAPipeline:
                     question=question,
                     user=user,
                     guest_id=guest_id,
+                    client_ip=client_ip,
                 )
             if not guard_decision.allowed:
                 yield self._event(

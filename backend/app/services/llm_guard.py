@@ -138,6 +138,7 @@ class LLMGuardService:
         question: str,
         user: User | None,
         guest_id: str | None,
+        client_ip: str | None = None,
     ) -> GuardDecision:
         """执行双层 Guard；阻拦时立即写入独立事件表。"""
         if not settings.LLM_GUARD_ENABLED:
@@ -146,7 +147,7 @@ class LLMGuardService:
         local = self._evaluate_local(question)
         if local is not None:
             if not local.allowed:
-                await self._record_block(db, question, user, guest_id, local)
+                await self._record_block(db, question, user, guest_id, local, client_ip=client_ip)
             return local
 
         if not settings.LLM_GUARD_CLASSIFIER_ENABLED:
@@ -170,7 +171,7 @@ class LLMGuardService:
                 return GuardDecision(True, "unknown", 0.0, "classifier_unavailable", "llm")
 
         if not decision.allowed:
-            await self._record_block(db, question, user, guest_id, decision)
+            await self._record_block(db, question, user, guest_id, decision, client_ip=client_ip)
         return decision
 
     @staticmethod
@@ -256,12 +257,19 @@ class LLMGuardService:
         user: User | None,
         guest_id: str | None,
         decision: GuardDecision,
+        *,
+        client_ip: str | None = None,
     ) -> None:
         """写入脱敏阻拦事件并提交，使恶意请求后续失败也不会丢失审计。"""
         fingerprint = hashlib.sha256((question or "").encode("utf-8")).hexdigest()
+        actor_label = "访客"
+        if user is not None:
+            actor_label = (getattr(user, "username", None) or "").strip() or "访客"
         event = GuardBlockedEvent(
             user_id=user.id if user is not None else None,
             guest_id=(guest_id or "")[:64] or None,
+            actor_label=actor_label[:100],
+            client_ip=(str(client_ip)[:64] if client_ip else None),
             intent=decision.intent,
             reason_code=decision.reason_code,
             detector=decision.detector,

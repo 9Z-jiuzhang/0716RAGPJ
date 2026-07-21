@@ -1,9 +1,9 @@
-"""检索候选重排服务：默认调用 Cohere Rerank v2 API。
+"""检索候选重排服务：支持 Cohere 与阿里云 DashScope（千问）Rerank。
 
 设计原则：
 - 管理端模型表优先，`.env` 作为可靠兜底；
 - 密钥只从环境配置读取，绝不写入数据库、日志或 API 响应；
-- Cohere 暂时不可用时保留原检索顺序，问答链路继续工作；
+- 厂商暂时不可用时保留原检索顺序，问答链路继续工作；
 - 对外展示的相关度使用模型返回的真实 ``relevance_score``，不再伪造固定分数。
 """
 
@@ -23,6 +23,9 @@ from app.models.model_config import ModelConfig
 from app.retrieval.types import RetrievalHit
 
 logger = logging.getLogger(__name__)
+
+_DASHSCOPE_PROVIDERS = {"dashscope", "qwen", "aliyun", "bailian"}
+_COHERE_PROVIDERS = {"cohere", "cohere-compatible", "custom"}
 
 
 @dataclass
@@ -48,7 +51,7 @@ class RerankOutcome:
 
 
 class RerankService:
-    """Cohere Rerank 客户端门面。"""
+    """Rerank 客户端门面（Cohere / DashScope）。"""
 
     async def rerank(
         self,
@@ -60,7 +63,7 @@ class RerankService:
     ) -> RerankOutcome:
         """按真实语义相关度重排候选，并安全降级。
 
-        Cohere 返回的是原候选数组下标，因此先保留候选列表，再按返回下标恢复完整
+        厂商返回的是原候选数组下标，因此先保留候选列表，再按返回下标恢复完整
         ``RetrievalHit``。异常或配置不完整时不丢弃任何已召回候选。
         """
         fallback = list(hits[: max(1, top_k)])
@@ -70,7 +73,7 @@ class RerankService:
         config = await self._resolve_config(db)
         if config is None:
             return RerankOutcome(hits=fallback, error="rerank_not_configured")
-        if config.provider not in {"cohere", "cohere-compatible", "custom"}:
+        if config.provider not in _COHERE_PROVIDERS | _DASHSCOPE_PROVIDERS:
             return RerankOutcome(
                 hits=fallback,
                 provider=config.provider,
@@ -78,27 +81,43 @@ class RerankService:
                 error="unsupported_rerank_provider",
             )
 
-        endpoint = self._endpoint(config.base_url)
-        payload = {
-            "model": config.model,
-            "query": query.strip(),
-            "documents": [hit.content for hit in hits],
-            "top_n": min(max(1, top_k), len(hits)),
-        }
+        top_n = min(max(1, top_k), len(hits))
         headers = {
             "Authorization": f"Bearer {config.api_key}",
             "Content-Type": "application/json",
             "X-Client-Name": settings.APP_NAME,
         }
+        if config.provider in _DASHSCOPE_PROVIDERS:
+            endpoint = self._dashscope_endpoint(config.base_url)
+            # qwen3-vl-rerank 等模型要求 query/documents 为多模态对象；纯文本场景用 {text: ...}
+            payload = {
+                "model": config.model,
+                "input": {
+                    "query": {"text": query.strip()},
+                    "documents": [{"text": hit.content} for hit in hits],
+                },
+                "parameters": {"top_n": top_n, "return_documents": False},
+            }
+            result_key = "dashscope"
+        else:
+            endpoint = self._cohere_endpoint(config.base_url)
+            payload = {
+                "model": config.model,
+                "query": query.strip(),
+                "documents": [hit.content for hit in hits],
+                "top_n": top_n,
+            }
+            result_key = "cohere"
 
         try:
             async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
                 response = await client.post(endpoint, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
-            ranked = self._apply_results(hits, data.get("results") or [])
+            raw_results = self._extract_results(data, style=result_key)
+            ranked = self._apply_results(hits, raw_results)
             if not ranked:
-                raise ValueError("Cohere 响应未包含有效重排结果")
+                raise ValueError("Rerank 响应未包含有效重排结果")
             return RerankOutcome(
                 hits=ranked[: max(1, top_k)],
                 applied=True,
@@ -107,9 +126,9 @@ class RerankService:
             )
         except httpx.HTTPStatusError as exc:
             # 仅记录状态码，不记录响应正文，防止厂商错误体带回敏感请求内容。
-            error = f"cohere_http_{exc.response.status_code}"
+            error = f"{result_key}_http_{exc.response.status_code}"
             logger.warning("Rerank 调用失败，保留原检索排序：%s", error)
-        except (httpx.HTTPError, ValueError, TypeError) as exc:
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
             error = type(exc).__name__
             logger.warning("Rerank 调用异常，保留原检索排序：%s", error)
 
@@ -163,7 +182,7 @@ class RerankService:
         return str(configured or "").strip()
 
     @staticmethod
-    def _endpoint(base_url: str) -> str:
+    def _cohere_endpoint(base_url: str) -> str:
         """把根地址或完整地址规范化为 Cohere v2 Rerank 端点。"""
         cleaned = base_url.rstrip("/")
         if cleaned.endswith("/v2/rerank"):
@@ -171,27 +190,54 @@ class RerankService:
         return f"{cleaned}/v2/rerank"
 
     @staticmethod
+    def _dashscope_endpoint(base_url: str) -> str:
+        """规范化 DashScope / 百炼业务空间 Rerank 端点。"""
+        cleaned = base_url.rstrip("/")
+        suffix = "/services/rerank/text-rerank/text-rerank"
+        if cleaned.endswith(suffix):
+            return cleaned
+        if cleaned.endswith("/api/v1"):
+            return f"{cleaned}{suffix}"
+        if "/compatible-mode/" in cleaned:
+            # 兼容误填 OpenAI 兼容地址：回退到同主机 /api/v1
+            root = cleaned.split("/compatible-mode/", 1)[0]
+            return f"{root}/api/v1{suffix}"
+        return f"{cleaned}/api/v1{suffix}"
+
+    @staticmethod
+    def _extract_results(data: dict[str, Any], *, style: str) -> list[dict[str, Any]]:
+        """从不同厂商响应中提取 [{index, relevance_score}, ...]。"""
+        if style == "dashscope":
+            output = data.get("output") if isinstance(data.get("output"), dict) else {}
+            results = output.get("results") if isinstance(output, dict) else None
+            if results is None:
+                results = data.get("results")
+            return list(results or [])
+        return list(data.get("results") or [])
+
+    @staticmethod
     def _apply_results(hits: list[RetrievalHit], results: list[dict[str, Any]]) -> list[RetrievalHit]:
-        """把 Cohere 的下标与真实分数安全映射回候选对象。"""
+        """把厂商返回的下标与真实分数安全映射回候选对象。"""
         ranked: list[RetrievalHit] = []
         seen: set[int] = set()
         for item in results:
             try:
                 index = int(item["index"])
-                score = float(item["relevance_score"])
+                score = float(item.get("relevance_score", item.get("score")))
             except (KeyError, TypeError, ValueError):
                 continue
             if index < 0 or index >= len(hits) or index in seen:
                 continue
             seen.add(index)
             hit = hits[index]
+            clamped = max(0.0, min(1.0, score))
             hit.metadata = {
                 **(hit.metadata or {}),
                 "pre_rerank_score": round(float(hit.score), 8),
-                "rerank_score": round(max(0.0, min(1.0, score)), 8),
+                "rerank_score": round(clamped, 8),
                 "score_source": "rerank_relevance",
             }
-            hit.score = max(0.0, min(1.0, score))
+            hit.score = clamped
             ranked.append(hit)
         return ranked
 

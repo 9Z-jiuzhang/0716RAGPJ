@@ -105,9 +105,8 @@ class HitTestService:
         返回:
             创建后的测试用例响应
         """
-        # 合并 questions 与 examples；命中率仍按期望文档/分段计算
+        # 合并 questions 与 examples；无期望标注的用例按检索冒烟使用
         questions = self._merge_questions_and_examples(request.questions, request.examples)
-        self._validate_ground_truth(questions)
 
         # 创建测试用例数据库记录
         case = TestCases(
@@ -171,7 +170,6 @@ class HitTestService:
         # 更新问题列表（如果提供 questions 或 examples）
         if request.questions is not None or request.examples is not None:
             questions = self._merge_questions_and_examples(request.questions or [], request.examples)
-            self._validate_ground_truth(questions)
             # 删除现有问题记录
             await self.db.execute(TestQuestions.__table__.delete().where(TestQuestions.case_id == case_id))
 
@@ -252,13 +250,27 @@ class HitTestService:
                 for q in db_questions
             ]
         elif request.questions:
-            # 临时问题没有期望文档/分段，无法计算命中率。旧逻辑把任意召回都算命中，
-            # 导致结果大概率为 100%，因此明确拒绝并引导创建带标注的测试用例。
-            raise ValueError("临时问题没有期望文档或分段，不能用于命中率测试；请先创建带标注的测试用例")
+            # 临时问题：无期望标注，仅用于检索冒烟（有召回即计命中），不代表真实命中率。
+            questions = [
+                TestQuestion(question=str(q).strip())
+                for q in request.questions
+                if str(q).strip()
+            ]
+            if not questions:
+                raise ValueError("临时问题列表不能为空")
 
         if not questions:
             raise ValueError("没有可执行的测试问题")
-        self._validate_ground_truth(questions)
+        # 有期望标注的题目仍校验；纯问题用例走检索冒烟，不强制期望文档。
+        labeled = [
+            item
+            for item in questions
+            if item.expected_doc_ids or item.expected_chunk_ids
+        ]
+        if labeled and len(labeled) != len(questions):
+            raise ValueError("同一用例中不能混用「仅问题」与「带期望文档/分段」的题目")
+        if labeled:
+            self._validate_ground_truth(questions)
 
         # 创建测试运行记录
         run = TestRuns(
@@ -279,6 +291,7 @@ class HitTestService:
         # 执行每个问题的检索测试
         hit_count = 0
         total_elapsed_ms = 0.0
+        relevance_scores: list[float] = []
 
         for question in questions:
             # 记录单个问题开始时间
@@ -310,8 +323,13 @@ class HitTestService:
 
             # 记录单题测试结果（实际块数据以 JSON 字符串列表存储）
             actual_chunks_json = [json.dumps(r) for r in results]
-            # 单题的“检索相关度”取实际命中的期望片段得分，而不是无条件取第一条候选。
-            matched_score = results[hit_rank - 1]["score"] if is_hit and hit_rank else None
+            # 单题得分 = 命中片段相关度；未命中不计分。
+            matched_score = None
+            if is_hit and hit_rank and 1 <= hit_rank <= len(results):
+                raw = results[hit_rank - 1].get("score")
+                if raw is not None:
+                    matched_score = float(raw)
+                    relevance_scores.append(matched_score)
             test_result = TestResults(
                 id=uuid.uuid4(),
                 run_id=run.id,
@@ -328,6 +346,10 @@ class HitTestService:
         # 计算评估指标
         recall_at_k = hit_count / len(questions) if questions else None
         avg_elapsed_ms = total_elapsed_ms / len(questions) if questions else None
+        # 综合得分 = 各题命中片段相关度的算术平均；全未命中时为 0。
+        avg_relevance = (
+            (sum(relevance_scores) / len(relevance_scores)) if relevance_scores else (0.0 if questions else None)
+        )
 
         # 更新测试运行状态和统计
         run.status = "completed"
@@ -336,13 +358,15 @@ class HitTestService:
         run.mrr = await self._calculate_mrr(run.id)
         run.avg_elapsed_ms = avg_elapsed_ms
         run.completed_at = datetime.now()
+        # 暂存到实例属性供响应序列化（表无独立 score 列时由结果回算，此处作兜底）
+        run._avg_relevance_score = avg_relevance  # type: ignore[attr-defined]
 
         # 提交事务
         await self.db.commit()
         await self.db.refresh(run)
 
         # 转换为响应格式
-        return self._convert_run_to_response(run)
+        return self._convert_run_to_response(run, avg_relevance=avg_relevance)
 
     async def list_test_runs(self, page: int, page_size: int) -> TestRunListResponse:
         """
@@ -592,13 +616,13 @@ class HitTestService:
         判断是否命中期望结果。
 
         - 配置了 expected_doc_ids / expected_chunk_ids：Top-K 内命中任一期望即算命中
-        - 未配置期望：不可评估，防御性返回未命中；入口会提前拒绝此类用例
+        - 未配置期望（临时问题冒烟）：Top-K 有任意召回即算命中
         """
         if not results:
             return False, None
 
         if not expected_doc_ids and not expected_chunk_ids:
-            return False, None
+            return True, 1
 
         expected_docs = {str(x) for x in (expected_doc_ids or [])}
         expected_chunks = {str(x) for x in (expected_chunk_ids or [])}
@@ -724,17 +748,39 @@ class HitTestService:
             created_at=case.created_at,
         )
 
-    def _convert_run_to_response(self, run: Any) -> TestRunResponse:
+    def _convert_run_to_response(
+        self,
+        run: Any,
+        *,
+        avg_relevance: float | None = None,
+    ) -> TestRunResponse:
         """
         将数据库模型转换为测试运行响应
 
         参数:
             run: 测试运行数据库记录
+            avg_relevance: 可选，执行时已算好的平均相关度；缺省则从明细回算
 
         返回:
             测试运行响应
         """
         hit_rate = (run.hit_count / run.total_questions) if run.total_questions else None
+        score = avg_relevance
+        if score is None:
+            score = getattr(run, "_avg_relevance_score", None)
+        if score is None:
+            result_rows = list(getattr(run, "results", None) or [])
+            relevance_scores = [
+                float(item.score)
+                for item in result_rows
+                if getattr(item, "score", None) is not None
+            ]
+            if relevance_scores:
+                score = sum(relevance_scores) / len(relevance_scores)
+            elif run.total_questions:
+                score = 0.0
+        if score is not None:
+            score = round(float(score), 6)
         return TestRunResponse(
             id=run.id,
             case_id=run.case_id,
@@ -745,8 +791,8 @@ class HitTestService:
             total_questions=run.total_questions,
             hit_count=run.hit_count,
             hit_rate=hit_rate,
-            # 产品页面中的“测试得分”必须与展示的命中率完全一致，避免混用检索相似度。
-            score=hit_rate,
+            # 综合得分 = 命中片段相关度均值；命中率见 hit_rate / 命中列。
+            score=score,
             recall_at_k=run.recall_at_k,
             mrr=run.mrr,
             avg_elapsed_ms=run.avg_elapsed_ms,

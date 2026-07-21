@@ -1,9 +1,11 @@
-"""RAGAS 0.4 评估服务：采集真实问答样本、调用 collections 指标并持久化明细。"""
+"""RAGAS 0.4 评估服务：采集/生成样本、调用 collections 指标并持久化明细。"""
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,9 +16,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.base import utcnow
-from app.models.document import Document
+from app.models.document import Document, DocumentChunk
+from app.models.knowledge_base import KnowledgeBase
 from app.models.qa import QAMessage
 from app.models.ragas_evaluation import RagasEvaluationItem, RagasEvaluationRun
+from app.retrieval.hybrid import hybrid_retriever
+from app.retrieval.types import KBTarget
+from app.services.llm import LLMServiceError, llm_service
+from app.services.query_processing import _strip_model_reasoning
+
+_GENERATE_QUESTIONS_PROMPT = """你是企业知识库评估题生成器。根据输入的文档片段生成适合 RAG 评估的问题。
+只输出 JSON 对象，格式：{"items":[{"question":"...","reference":"...","refs":[1,2]}]}。
+要求：
+1. 生成指定数量、互不重复、可脱离上下文独立理解的问题；
+2. reference 是依据片段写出的标准答案，只能使用片段中的信息；
+3. refs 必须是实际支持该问题的片段编号，至少一个，最多三个；
+4. 问题应覆盖事实查询、流程说明或制度要点，避免空泛闲聊；
+5. 不要输出 Markdown、解释、推理过程或 JSON 之外的文本。"""
+
+_MATERIALIZE_SYSTEM_PROMPT = """你是企业知识库智能问答助手。请严格依据「检索证据」回答用户问题。
+规则：
+1. 只能使用检索证据中的信息作答，不得编造；
+2. 若证据不足，请明确说明「依据不足」；
+3. 必须使用简体中文简洁回答。"""
 
 
 class RagasEvaluationError(Exception):
@@ -25,13 +47,43 @@ class RagasEvaluationError(Exception):
 
 @dataclass
 class RagasSample:
-    """从生产问答记录抽取的单轮 RAGAS 输入。"""
+    """单轮 RAGAS 输入（可来自历史问答或现问现答）。"""
 
-    qa_message_id: uuid.UUID
+    qa_message_id: uuid.UUID | None
     user_input: str
     response: str
     retrieved_contexts: list[str]
     reference: str | None = None
+
+
+@dataclass
+class RagasSampleSpec:
+    """前端提交的评估样本规格：可选绑定历史消息，或仅给出问题。"""
+
+    question: str
+    reference: str | None = None
+    qa_message_id: uuid.UUID | None = None
+
+
+@dataclass
+class RagasSamplePreview:
+    """供管理端勾选/编辑的历史样本预览。"""
+
+    qa_message_id: uuid.UUID
+    user_input: str
+    response_preview: str
+    context_count: int
+    reference: str | None
+    created_at: str | None
+
+
+@dataclass
+class RagasGeneratedQuestion:
+    """自动生成、待用户确认后评估的问题草稿。"""
+
+    question: str
+    reference: str | None
+    source_chunk_count: int
 
 
 @dataclass
@@ -44,7 +96,7 @@ class RagasSampleResult:
 
 
 class RagasEvaluationService:
-    """管理 RAGAS 指标实例、真实样本抽取与评估运行生命周期。"""
+    """管理 RAGAS 指标实例、样本解析与评估运行生命周期。"""
 
     async def run(
         self,
@@ -53,6 +105,7 @@ class RagasEvaluationService:
         kb_id: uuid.UUID,
         created_by: uuid.UUID,
         sample_limit: int,
+        sample_specs: list[RagasSampleSpec] | None = None,
     ) -> RagasEvaluationRun:
         """创建并同步执行一次评估；失败状态也会落库供管理端排查。"""
         if not settings.RAGAS_ENABLED:
@@ -73,9 +126,14 @@ class RagasEvaluationService:
         # 因此分别维护客户端，并在评估结束后统一释放连接池。
         clients: list[AsyncOpenAI] = []
         try:
-            samples = await self.collect_samples(db, kb_id=kb_id, limit=effective_limit)
+            samples = await self.resolve_samples(
+                db,
+                kb_id=kb_id,
+                sample_limit=effective_limit,
+                sample_specs=sample_specs,
+            )
             if not samples:
-                raise RagasEvaluationError("该知识库暂无带引用的问答记录，无法执行 RAGAS 评估")
+                raise RagasEvaluationError("没有可用于评估的样本，请先加载历史问答或生成/填写问题")
 
             metrics, clients = await self._build_metrics()
             totals: dict[str, float] = {}
@@ -146,6 +204,142 @@ class RagasEvaluationService:
             for client in clients:
                 await client.close()
 
+    async def list_sample_previews(
+        self,
+        db: AsyncSession,
+        *,
+        kb_id: uuid.UUID,
+        limit: int,
+    ) -> list[RagasSamplePreview]:
+        """列出可供勾选的历史问答样本预览。"""
+        samples = await self.collect_samples(db, kb_id=kb_id, limit=limit)
+        previews: list[RagasSamplePreview] = []
+        for sample in samples:
+            if sample.qa_message_id is None:
+                continue
+            message = await db.get(QAMessage, sample.qa_message_id)
+            created_at = message.created_at.isoformat() if message and message.created_at else None
+            response = sample.response.strip()
+            previews.append(
+                RagasSamplePreview(
+                    qa_message_id=sample.qa_message_id,
+                    user_input=sample.user_input,
+                    response_preview=(response[:240] + ("…" if len(response) > 240 else "")),
+                    context_count=len(sample.retrieved_contexts),
+                    reference=sample.reference,
+                    created_at=created_at,
+                )
+            )
+        return previews
+
+    async def generate_questions(
+        self,
+        db: AsyncSession,
+        *,
+        kb_id: uuid.UUID,
+        count: int,
+    ) -> list[RagasGeneratedQuestion]:
+        """从知识库就绪分段自动生成评估问题与标准答案草稿。"""
+        effective_count = max(1, min(count, settings.RAGAS_MAX_SAMPLE_LIMIT, 20))
+        chunks = list(
+            (
+                await db.scalars(
+                    select(DocumentChunk)
+                    .join(Document, Document.id == DocumentChunk.document_id)
+                    .where(
+                        DocumentChunk.kb_id == kb_id,
+                        DocumentChunk.is_enabled.is_(True),
+                        Document.status == "ready",
+                    )
+                    .order_by(Document.updated_at.desc(), DocumentChunk.chunk_index.asc())
+                    .limit(settings.ROLE_CACHE_DOCUMENT_CHUNK_LIMIT)
+                )
+            ).all()
+        )
+        if not chunks:
+            raise RagasEvaluationError("该知识库没有可用于生成问题的就绪文档分段")
+
+        documents = list(
+            (
+                await db.scalars(
+                    select(Document).where(Document.id.in_({chunk.document_id for chunk in chunks}))
+                )
+            ).all()
+        )
+        document_map = {document.id: document for document in documents}
+        materials: list[dict[str, Any]] = []
+        for index, chunk in enumerate(chunks, start=1):
+            document = document_map.get(chunk.document_id)
+            materials.append(
+                {
+                    "ref": index,
+                    "doc_name": document.filename if document else "",
+                    "content": chunk.content[: settings.ROLE_CACHE_DOCUMENT_CHARS_PER_CHUNK],
+                }
+            )
+
+        try:
+            raw = await llm_service.chat(
+                [
+                    {"role": "system", "content": _GENERATE_QUESTIONS_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {"count": effective_count, "materials": materials},
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+                temperature=0.2,
+                max_tokens=settings.ROLE_CACHE_LLM_MAX_TOKENS,
+            )
+        except LLMServiceError as exc:
+            raise RagasEvaluationError("自动生成问题失败，请检查模型配置") from exc
+
+        generated = self._parse_generated_questions(raw, materials, limit=effective_count)
+        if not generated:
+            raise RagasEvaluationError("模型未返回可用的评估问题，请重试或改为手动填写")
+        return generated
+
+    async def resolve_samples(
+        self,
+        db: AsyncSession,
+        *,
+        kb_id: uuid.UUID,
+        sample_limit: int,
+        sample_specs: list[RagasSampleSpec] | None,
+    ) -> list[RagasSample]:
+        """按前端规格解析样本；未提供规格时回退为自动抽取历史问答。"""
+        if not sample_specs:
+            return await self.collect_samples(db, kb_id=kb_id, limit=sample_limit)
+
+        capped = sample_specs[: settings.RAGAS_MAX_SAMPLE_LIMIT]
+        samples: list[RagasSample] = []
+        for spec in capped:
+            question = (spec.question or "").strip()
+            if not question:
+                continue
+            reference = (spec.reference or "").strip() or None
+            if spec.qa_message_id is not None:
+                historical = await self._load_historical_sample(
+                    db,
+                    kb_id=kb_id,
+                    message_id=spec.qa_message_id,
+                )
+                if historical is not None and historical.user_input.strip() == question:
+                    historical.reference = reference or historical.reference
+                    samples.append(historical)
+                    continue
+            samples.append(
+                await self.materialize_question(
+                    db,
+                    kb_id=kb_id,
+                    question=question,
+                    reference=reference,
+                )
+            )
+        return samples
+
     async def collect_samples(
         self,
         db: AsyncSession,
@@ -173,50 +367,214 @@ class RagasEvaluationService:
 
         samples: list[RagasSample] = []
         for assistant in candidates:
-            contexts: list[str] = []
-            for citation in assistant.citations or []:
-                try:
-                    doc_id = uuid.UUID(str(citation.get("doc_id")))
-                except (AttributeError, TypeError, ValueError):
-                    continue
-                if doc_id not in document_ids:
-                    continue
-                content = str(citation.get("content") or "").strip()
-                if content:
-                    contexts.append(content[: settings.RAGAS_CONTEXT_MAX_CHARS])
-                if len(contexts) >= settings.RAGAS_MAX_CONTEXTS_PER_SAMPLE:
-                    break
-            if not contexts:
+            sample = self._sample_from_assistant(assistant, document_ids)
+            if sample is None:
                 continue
-
-            meta = assistant.retrieval_meta or {}
-            question = str(meta.get("original_query") or "").strip()
-            if not question and assistant.request_id:
-                user_message = await db.scalar(
-                    select(QAMessage)
-                    .where(
-                        QAMessage.request_id == assistant.request_id,
-                        QAMessage.role == "user",
+            if not sample.user_input:
+                if assistant.request_id:
+                    user_message = await db.scalar(
+                        select(QAMessage)
+                        .where(
+                            QAMessage.request_id == assistant.request_id,
+                            QAMessage.role == "user",
+                        )
+                        .order_by(QAMessage.created_at.desc())
+                        .limit(1)
                     )
-                    .order_by(QAMessage.created_at.desc())
-                    .limit(1)
-                )
-                question = user_message.content.strip() if user_message else ""
-            if not question or not assistant.content.strip():
+                    sample.user_input = user_message.content.strip() if user_message else ""
+            if not sample.user_input or not sample.response:
                 continue
-            reference = str(meta.get("reference_answer") or "").strip() or None
-            samples.append(
-                RagasSample(
-                    qa_message_id=assistant.id,
-                    user_input=question,
-                    response=assistant.content.strip(),
-                    retrieved_contexts=contexts,
-                    reference=reference,
-                )
-            )
+            samples.append(sample)
             if len(samples) >= limit:
                 break
         return samples
+
+    async def materialize_question(
+        self,
+        db: AsyncSession,
+        *,
+        kb_id: uuid.UUID,
+        question: str,
+        reference: str | None = None,
+    ) -> RagasSample:
+        """对自定义/生成问题执行检索与回答，构造 RAGAS 输入。"""
+        kb = await db.scalar(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == kb_id,
+                KnowledgeBase.status != "deleted",
+                KnowledgeBase.deleted_at.is_(None),
+            )
+        )
+        if kb is None:
+            raise RagasEvaluationError("知识库不存在")
+        index_version = (kb.current_index_version or "").strip()
+        if not index_version:
+            raise RagasEvaluationError("知识库尚未完成向量化，无法基于问题生成评估样本")
+
+        targets = [KBTarget(kb_id=kb.id, name=kb.name, index_version=index_version)]
+        retrieval = await hybrid_retriever.retrieve(
+            db,
+            question,
+            targets,
+            strategy="hybrid",
+            top_k=settings.QA_DEFAULT_TOP_K,
+        )
+        contexts: list[str] = []
+        for hit in retrieval.hits:
+            content = (hit.content or "").strip()
+            if not content:
+                continue
+            contexts.append(content[: settings.RAGAS_CONTEXT_MAX_CHARS])
+            if len(contexts) >= settings.RAGAS_MAX_CONTEXTS_PER_SAMPLE:
+                break
+        if not contexts:
+            raise RagasEvaluationError(f"问题未能检索到上下文：{question[:80]}")
+
+        evidence = "\n\n".join(f"[{index}] {text}" for index, text in enumerate(contexts, start=1))
+        try:
+            raw_answer = await llm_service.chat(
+                [
+                    {"role": "system", "content": _MATERIALIZE_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": f"【检索证据】\n{evidence}\n\n【用户问题】\n{question}",
+                    },
+                ],
+                temperature=0.2,
+                max_tokens=1024,
+            )
+        except LLMServiceError as exc:
+            raise RagasEvaluationError(f"生成回答失败：{question[:80]}") from exc
+
+        answer = _strip_model_reasoning(raw_answer).strip()
+        if not answer:
+            raise RagasEvaluationError(f"模型未返回可用回答：{question[:80]}")
+        return RagasSample(
+            qa_message_id=None,
+            user_input=question,
+            response=answer,
+            retrieved_contexts=contexts,
+            reference=(reference or "").strip() or None,
+        )
+
+    async def _load_historical_sample(
+        self,
+        db: AsyncSession,
+        *,
+        kb_id: uuid.UUID,
+        message_id: uuid.UUID,
+    ) -> RagasSample | None:
+        """按消息 ID 加载并校验属于目标知识库的历史样本。"""
+        document_ids = set((await db.scalars(select(Document.id).where(Document.kb_id == kb_id))).all())
+        if not document_ids:
+            return None
+        assistant = await db.get(QAMessage, message_id)
+        if assistant is None or assistant.role != "assistant":
+            return None
+        sample = self._sample_from_assistant(assistant, document_ids)
+        if sample is None:
+            return None
+        if not sample.user_input and assistant.request_id:
+            user_message = await db.scalar(
+                select(QAMessage)
+                .where(
+                    QAMessage.request_id == assistant.request_id,
+                    QAMessage.role == "user",
+                )
+                .order_by(QAMessage.created_at.desc())
+                .limit(1)
+            )
+            sample.user_input = user_message.content.strip() if user_message else ""
+        if not sample.user_input or not sample.response:
+            return None
+        return sample
+
+    def _sample_from_assistant(
+        self,
+        assistant: QAMessage,
+        document_ids: set[uuid.UUID],
+    ) -> RagasSample | None:
+        """从助手消息提取上下文；无目标库引用时返回 None。"""
+        contexts: list[str] = []
+        for citation in assistant.citations or []:
+            try:
+                doc_id = uuid.UUID(str(citation.get("doc_id")))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if doc_id not in document_ids:
+                continue
+            content = str(citation.get("content") or "").strip()
+            if content:
+                contexts.append(content[: settings.RAGAS_CONTEXT_MAX_CHARS])
+            if len(contexts) >= settings.RAGAS_MAX_CONTEXTS_PER_SAMPLE:
+                break
+        if not contexts:
+            return None
+        meta = assistant.retrieval_meta or {}
+        question = str(meta.get("original_query") or "").strip()
+        reference = str(meta.get("reference_answer") or "").strip() or None
+        return RagasSample(
+            qa_message_id=assistant.id,
+            user_input=question,
+            response=assistant.content.strip(),
+            retrieved_contexts=contexts,
+            reference=reference,
+        )
+
+    @staticmethod
+    def _parse_generated_questions(
+        raw: str,
+        materials: list[dict[str, Any]],
+        *,
+        limit: int,
+    ) -> list[RagasGeneratedQuestion]:
+        """解析生成题 JSON，并校验 refs 指向真实片段。"""
+        cleaned = _strip_model_reasoning(raw or "").strip()
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            start, end = cleaned.find("{"), cleaned.rfind("}")
+            if start < 0 or end <= start:
+                return []
+            try:
+                payload = json.loads(cleaned[start : end + 1])
+            except json.JSONDecodeError:
+                return []
+
+        raw_items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(raw_items, list):
+            return []
+
+        material_refs = {item["ref"] for item in materials}
+        generated: list[RagasGeneratedQuestion] = []
+        seen: set[str] = set()
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                continue
+            question = str(raw_item.get("question") or "").strip()[:2000]
+            reference = str(raw_item.get("reference") or "").strip()[:8000] or None
+            refs = raw_item.get("refs")
+            if not question or not isinstance(refs, list):
+                continue
+            valid_refs = [ref for ref in refs[:3] if isinstance(ref, int) and ref in material_refs]
+            if not valid_refs:
+                continue
+            key = question.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            generated.append(
+                RagasGeneratedQuestion(
+                    question=question,
+                    reference=reference,
+                    source_chunk_count=len(valid_refs),
+                )
+            )
+            if len(generated) >= limit:
+                break
+        return generated
 
     @staticmethod
     async def _build_metrics() -> tuple[dict[str, Any], list[AsyncOpenAI]]:

@@ -78,7 +78,7 @@ class TestRunRequest(BaseModel):
     similarity_threshold: float = Field(0.5, description="相似度阈值", ge=0, le=1)
     questions: list[str] | None = Field(
         None,
-        description="已废弃：无期望文档/分段的临时问题无法计算真实命中率，请创建带标注的测试用例",
+        description="临时问题列表（无 case_id 时使用）；无期望标注，仅作检索冒烟，有召回即计命中",
     )
 
 
@@ -94,7 +94,10 @@ class TestRunResponse(BaseModel):
     total_questions: int = Field(description="总问题数")
     hit_count: int = Field(description="命中数")
     hit_rate: float | None = Field(None, description="命中率 = hit_count / total_questions")
-    score: float | None = Field(None, description="测试得分，与命中率使用同一 0-1 数值")
+    score: float | None = Field(
+        None,
+        description="综合得分：各题命中片段相关度的算术平均（0-1）；无命中时为 0",
+    )
     recall_at_k: float | None = Field(None, description="Recall@K")
     mrr: float | None = Field(None, description="Mean Reciprocal Rank")
     avg_elapsed_ms: float | None = Field(None, description="平均耗时（毫秒）")

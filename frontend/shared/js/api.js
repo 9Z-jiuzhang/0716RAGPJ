@@ -1,10 +1,10 @@
 /**
  * API 客户端：统一请求包装、Token、刷新（仅真实后端）
- * 经 Nginx 反代访问：http://localhost:8080/api/v1
+ * 经统一入口 Nginx 同源反代访问：/api/v1
  */
 
-import { getAccessToken, getRefreshToken, saveAuth, clearAuth, getGuestId, getUser, mergeUserProfiles } from "/assets/js/auth.js?v=fix-role-0721b";
-import { toast, uuid } from "/assets/js/utils.js?v=fix-role-0721b";
+import { getAccessToken, getRefreshToken, saveAuth, clearAuth, getGuestId, getUser, mergeUserProfiles } from "/assets/js/auth.js?v=gap-opt-0721h";
+import { toast, uuid } from "/assets/js/utils.js?v=gap-opt-0721h";
 
 /** API 根路径（相对当前站点） */
 const API_BASE = "/api/v1";
@@ -81,7 +81,7 @@ export async function apiRequest(path, options = {}) {
   try {
     res = await fetch(`${API_BASE}${path}`, init);
   } catch {
-    throw new Error("无法连接后端，请确认服务已启动（推荐访问 http://127.0.0.1:8080）");
+    throw new Error("无法连接后端，请确认统一入口（Nginx）与 API 服务已启动");
   }
 
   if (res.status === 401 && !options._retried) {
@@ -98,7 +98,7 @@ export async function apiRequest(path, options = {}) {
 
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
-    throw new Error("后端返回了非 JSON 响应，请确认经 8080 反代访问");
+    throw new Error("后端返回了非 JSON 响应，请确认经统一入口反代访问 /api/v1");
   }
 
   const payload = await res.json();

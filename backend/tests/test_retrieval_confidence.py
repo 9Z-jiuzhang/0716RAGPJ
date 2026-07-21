@@ -98,9 +98,12 @@ async def test_trigram_uses_database_similarity_without_fixed_floor() -> None:
         top_k=2,
     )
 
-    assert [hit.score for hit in hits] == [0.42, 0.18]
+    # 中文查询：展示分 = max(pg_trgm, 字面覆盖率)，不得再固定抬到 0.55
+    assert hits[0].score == pytest.approx(1.0)
+    assert hits[1].score == pytest.approx(2 / 7)
     assert all(hit.score != 0.55 for hit in hits)
-    assert all(hit.metadata["score_source"] == "pg_trgm_similarity" for hit in hits)
+    assert all(hit.metadata["score_source"] == "pg_trgm_similarity+lexical_coverage" for hit in hits)
+    assert [hit.metadata["pg_trgm_similarity"] for hit in hits] == [0.42, 0.18]
 
 
 @pytest.mark.asyncio

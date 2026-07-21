@@ -7,8 +7,8 @@
  * - 管理员：统一登录后进入管理端
  */
 
-import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=fix-score-0721c";
-import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=fix-score-0721c";
+import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=gap-opt-0721i";
+import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=gap-opt-0721i";
 import {
   isLoggedIn,
   getUser,
@@ -23,10 +23,13 @@ import {
   getPostLoginTarget,
   canAccessKb,
   getDepartment,
-} from "/assets/js/auth.js?v=fix-score-0721c";
-import { escapeHtml, formatDateTime, toast, confirmDialog } from "/assets/js/utils.js?v=fix-score-0721c";
-import { initMotion } from "/assets/js/motion.js?v=fix-score-0721c";
-import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=fix-score-0721c";
+  setRememberMe,
+  getRememberMe,
+  isSuperAdmin,
+} from "/assets/js/auth.js?v=gap-opt-0721i";
+import { escapeHtml, formatDateTime, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=gap-opt-0721i";
+import { initMotion } from "/assets/js/motion.js?v=gap-opt-0721i";
+import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721i";
 
 clearDemoFlags();
 initTheme();
@@ -82,14 +85,15 @@ function splitModelReasoning(raw) {
   return { reasoning: reasoning.trim(), answer, reasoningOpen: false };
 }
 
-/** 渲染助手气泡：推理默认折叠，最终回答单独展示。 */
-function renderAssistantBubbleHtml(rawText, extrasHtml = "") {
+/** 渲染助手气泡：思考生成中展开，思考结束后折叠；最终回答单独展示。 */
+function renderAssistantBubbleHtml(rawText, extrasHtml = "", { forceCollapseReasoning = false } = {}) {
   const { reasoning, answer, reasoningOpen } = splitModelReasoning(rawText);
-  const answerHtml = escapeHtml((answer || "").trim() || (reasoningOpen ? "（正在生成最终回答…）" : ""));
+  const answerHtml = escapeHtml((answer || "").trim() || (reasoningOpen && !forceCollapseReasoning ? "（正在生成最终回答…）" : ""));
   let reasoningHtml = "";
   if (reasoning) {
-    const label = reasoningOpen ? "推理过程（生成中）" : "推理过程";
-    reasoningHtml = `<details class="model-reasoning"${reasoningOpen ? " open" : ""}>
+    const expanded = reasoningOpen && !forceCollapseReasoning;
+    const label = expanded ? "推理过程（生成中）" : "推理过程";
+    reasoningHtml = `<details class="model-reasoning"${expanded ? " open" : ""}>
       <summary>${label}</summary>
       <pre class="model-reasoning-body">${escapeHtml(reasoning)}</pre>
     </details>`;
@@ -573,7 +577,29 @@ async function sendQuestion() {
             bubble.classList.remove("streaming-cursor");
             currentSessionId = data.session_id || currentSessionId;
             confidenceTip = formatConfidenceTip(data);
-            bubble.innerHTML = renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}`);
+            const mid = data.message_id || "";
+            let feedbackHtml = "";
+            if (isLoggedIn() && mid) {
+              feedbackHtml = `<div class="msg-feedback" style="margin-top:8px;display:flex;gap:8px;align-items:center">
+                <span class="text-muted" style="font-size:12px">此回答</span>
+                <button type="button" class="btn btn-secondary btn-sm" data-fb="useful" data-mid="${escapeHtml(mid)}">有用</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-fb="useless" data-mid="${escapeHtml(mid)}">无用</button>
+              </div>`;
+            }
+            bubble.innerHTML = renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}${feedbackHtml}`, {
+              forceCollapseReasoning: true,
+            });
+            bubble.querySelectorAll("[data-fb]").forEach((b) => {
+              b.onclick = async () => {
+                try {
+                  await api.post("/qa/feedback", { message_id: b.getAttribute("data-mid"), rating: b.getAttribute("data-fb") });
+                  toast("感谢反馈", "success");
+                  bubble.querySelector(".msg-feedback")?.remove();
+                } catch (err) {
+                  toast(err.message || "反馈失败", "error");
+                }
+              };
+            });
           }
           // 错误
           if (event === "error") {
@@ -728,11 +754,13 @@ function renderLoginForm(panel) {
       <input class="form-control auth-input" id="loginPass" type="password" autocomplete="current-password" placeholder="请输入密码" />
     </div>
     <div class="auth-materio-row">
-      <label class="auth-check"><input type="checkbox" id="loginRemember" /> 记住我</label>
+      <label class="auth-check"><input type="checkbox" id="loginRemember" /> 记住我（勾选则跨浏览器会话保留登录）</label>
       <span class="text-muted auth-hint-inline">统一登录 · 按角色跳转</span>
     </div>
     <button class="btn auth-materio-submit" id="btnDoLogin">登录</button>
   `;
+  const rem = document.getElementById("loginRemember");
+  if (rem) rem.checked = getRememberMe();
   document.getElementById("btnDoLogin").addEventListener("click", doLogin);
   document.getElementById("loginPass").addEventListener("keydown", (e) => {
     if (e.key === "Enter") doLogin();
@@ -754,11 +782,13 @@ function renderRegisterForm(panel) {
 async function doLogin() {
   const username = document.getElementById("loginUser").value.trim();
   const password = document.getElementById("loginPass").value;
+  const remember = Boolean(document.getElementById("loginRemember")?.checked);
   if (!username || !password) return toast("请填写用户名和密码", "error");
   try {
     const data = await api.post("/auth/login", { username, password });
     if (!data?.access_token) throw new Error("登录失败：未返回令牌");
     const user = data.user || { username };
+    setRememberMe(remember);
     replaceAuthSession({
       access_token: data.access_token,
       refresh_token: data.refresh_token,
@@ -834,19 +864,61 @@ async function pageHistory() {
           ${items
             .map(
               (s) => `<div class="history-item" data-id="${escapeHtml(s.id)}">
-                <div><strong>${escapeHtml(s.title || "未命名会话")}</strong><div class="text-muted">${formatDateTime(s.updated_at)} · ${escapeHtml(s.message_count || 0)} 条消息</div></div>
-                <button class="btn btn-secondary btn-sm" data-open="${escapeHtml(s.id)}">打开</button>
+                <div class="history-item-main">
+                  <strong class="history-title" data-title-for="${escapeHtml(s.id)}">${escapeHtml(s.title || "未命名会话")}</strong>
+                  <div class="text-muted">${formatDateTime(s.updated_at)} · ${escapeHtml(s.message_count || 0)} 条消息</div>
+                </div>
+                <div class="history-item-actions" style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-secondary btn-sm" data-open="${escapeHtml(s.id)}">打开</button>
+                  <button class="btn btn-secondary btn-sm" data-rename="${escapeHtml(s.id)}">重命名</button>
+                  <button class="btn btn-danger btn-sm" data-del-session="${escapeHtml(s.id)}">删除</button>
+                </div>
               </div>`
             )
             .join("")}
         </div>
       </div>`;
-    // 打开会话：写入 sessionId 并跳转问答页
     document.querySelectorAll("[data-open]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        // 记录待打开会话，跳转问答页后由 pageChat 统一加载消息
         pendingOpenSessionId = btn.getAttribute("data-open");
         navigate("/chat");
+      });
+    });
+    document.querySelectorAll("[data-rename]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const sid = btn.getAttribute("data-rename");
+        const titleEl = document.querySelector(`[data-title-for="${sid}"]`);
+        const cur = titleEl?.textContent || "未命名会话";
+        const next = window.prompt("新会话标题", cur);
+        if (next == null) return;
+        const title = String(next).trim();
+        if (!title) return toast("标题不能为空", "error");
+        if (title.length > 100) return toast("标题最多 100 字", "error");
+        try {
+          await api.put(`/qa/sessions/${sid}`, { title });
+          if (titleEl) titleEl.textContent = title;
+          toast("已重命名", "success");
+        } catch (e) {
+          toast(e.message || "重命名失败", "error");
+        }
+      });
+    });
+    document.querySelectorAll("[data-del-session]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const sid = btn.getAttribute("data-del-session");
+        const ok = await confirmDialog({ title: "删除会话", message: "删除后可从服务端软删除，确定？", confirmText: "删除" });
+        if (!ok) return;
+        try {
+          await api.delete(`/qa/sessions/${sid}`);
+          if (currentSessionId && String(currentSessionId) === String(sid)) {
+            currentSessionId = null;
+            resetLocalChatContext?.();
+          }
+          toast("会话已删除", "success");
+          pageHistory();
+        } catch (e) {
+          toast(e.message || "删除失败", "error");
+        }
       });
     });
   } catch (e) {
@@ -881,12 +953,24 @@ async function pageProfile() {
       </header>
       <div class="page-grid">
         <div class="card span-6">
-          <div class="card-header"><div class="card-header-text"><h3 class="card-title">个人资料</h3></div></div>
+          <div class="card-header">
+            <div class="card-header-text"><h3 class="card-title">个人资料</h3></div>
+            ${
+              isSuperAdmin()
+                ? ""
+                : `<div class="card-header-actions"><button type="button" class="btn btn-secondary btn-sm" id="btnChangePassword">修改密码</button></div>`
+            }
+          </div>
           <div class="form-group"><label>用户名</label><input class="form-control" id="pfUser" value="${escapeHtml(me.username || "")}" disabled /></div>
           <div class="form-group"><label>昵称</label><input class="form-control" id="pfNick" value="${escapeHtml(me.nickname || "")}" /></div>
           <div class="form-group"><label>邮箱</label><input class="form-control" id="pfEmail" value="${escapeHtml(me.email || "")}" /></div>
           <div class="form-group"><label>角色</label><div>${escapeHtml((me.roles || [me.role]).filter(Boolean).join(", ") || "-")}</div></div>
           <div class="form-group"><label>最近登录</label><div class="text-muted">${formatDateTime(me.last_login_at)}</div></div>
+          ${
+            isSuperAdmin()
+              ? `<p class="text-muted" style="font-size:12px;margin:0 0 12px">超级管理员密码仅可通过服务器 <code>.env</code> 中的 <code>SUPER_ADMIN_PASSWORD</code> 配置，修改后需重启 API。</p>`
+              : ""
+          }
           <button class="btn" id="btnSaveProfile">保存资料</button>
         </div>
         <div class="card span-6">
@@ -915,6 +999,17 @@ async function pageProfile() {
         toast(e.message || "保存失败", "error");
       }
     };
+    const btnChangePassword = document.getElementById("btnChangePassword");
+    if (btnChangePassword) {
+      btnChangePassword.onclick = async () => {
+        const changed = await openChangePasswordModal({
+          submit: async (payload) => {
+            await api.post("/auth/change-password", payload);
+          },
+        });
+        if (changed) toast("密码已更新", "success");
+      };
+    }
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
@@ -1002,24 +1097,56 @@ async function pageUpload() {
   };
 }
 
-/** 执行上传并模拟/展示进度 */
+/** 执行上传并轮询文档管道状态（诚实进度） */
 async function handleUpload(file) {
   const kbId = document.getElementById("kbSelect").value;
   if (!kbId) return toast("请选择知识库", "error");
   const prog = document.getElementById("uploadProgress");
   const bar = document.getElementById("uploadBar");
   prog.textContent = `正在上传 ${file.name}…`;
-  bar.style.width = "20%";
+  bar.style.width = "15%";
 
   const fd = new FormData();
   fd.append("file", file);
 
+  const busy = new Set(["parsing", "normalizing", "segmenting", "vectorizing", "pending_segment", "uploaded", "pending"]);
   try {
-    // 契约路径：POST /knowledge-bases/{id}/documents/upload
-    await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
-    bar.style.width = "100%";
-    prog.innerHTML = `<span class="text-success">上传成功，已进入预处理/向量化队列</span>`;
-    toast("上传成功", "success");
+    const doc = await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
+    const docId = doc?.id;
+    toast("上传成功，正在处理…", "success");
+    if (!docId) {
+      bar.style.width = "100%";
+      prog.innerHTML = `<span class="text-success">上传成功，已进入预处理/向量化队列</span>`;
+      return;
+    }
+    bar.style.width = "35%";
+    prog.textContent = `已入库，管道处理中（${doc.status || "…"}）…`;
+    try {
+      const finalDoc = await pollUntil(
+        async () => {
+          const d = await api.get(`/knowledge-bases/${kbId}/documents/${docId}`);
+          const st = String(d.status || "");
+          const pct = st === "ready" ? 100 : st === "error" ? 100 : busy.has(st) ? 55 : 70;
+          bar.style.width = `${pct}%`;
+          prog.textContent = `处理状态：${st}`;
+          return d;
+        },
+        {
+          intervalMs: 2500,
+          timeoutMs: 180000,
+          shouldStop: (d) => ["ready", "error"].includes(String(d?.status || "")),
+        }
+      );
+      if (finalDoc.status === "ready") {
+        bar.style.width = "100%";
+        prog.innerHTML = `<span class="text-success">处理完成（ready）· 分段 ${escapeHtml(finalDoc.chunk_count ?? 0)}</span>`;
+      } else {
+        bar.style.width = "100%";
+        prog.innerHTML = `<span class="text-danger">处理失败：${escapeHtml(finalDoc.error_message || finalDoc.status || "error")}</span>`;
+      }
+    } catch (pollErr) {
+      prog.innerHTML = `<span class="text-muted">已上传；状态轮询结束：${escapeHtml(pollErr.message || "")}。请稍后在知识库文档列表查看。</span>`;
+    }
   } catch (e) {
     bar.style.width = "0%";
     prog.innerHTML = `<span class="text-danger">上传失败：${escapeHtml(e.message || "未知错误")}</span>`;

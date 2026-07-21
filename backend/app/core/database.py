@@ -94,6 +94,9 @@ async def ensure_schema_patches() -> None:
         "UPDATE vectorize_tasks SET updated_at = COALESCE(updated_at, created_at, NOW()) WHERE updated_at IS NULL",
         "ALTER TABLE test_questions ADD COLUMN IF NOT EXISTS expected_answer TEXT NULL",
         "ALTER TABLE test_questions ADD COLUMN IF NOT EXISTS context TEXT NULL",
+        "ALTER TABLE guard_blocked_events ADD COLUMN IF NOT EXISTS actor_label VARCHAR(100) NOT NULL DEFAULT '访客'",
+        "ALTER TABLE guard_blocked_events ADD COLUMN IF NOT EXISTS client_ip VARCHAR(64) NULL",
+        "CREATE INDEX IF NOT EXISTS ix_guard_blocked_events_client_ip ON guard_blocked_events (client_ip)",
         """
         DO $$ BEGIN
           ALTER TABLE vectorize_tasks

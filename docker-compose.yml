@@ -7,7 +7,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    # 覆盖旧镜像残留的 entrypoint（当前 Dockerfile 已改为直接 uvicorn）
+    restart: unless-stopped
+    # 本地开发：热重载 + 源码挂载（云端请用 docker-compose.prod.yml 覆盖）
     entrypoint: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     command: ["--reload"]
     ports:
@@ -143,7 +144,7 @@ services:
     ports:
       - "3001:3000"
     environment:
-      GF_SERVER_ROOT_URL: http://localhost:8080/grafana/
+      GF_SERVER_ROOT_URL: ${PUBLIC_BASE_URL:-http://localhost:18080}/grafana/
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?请填写}
       GF_USERS_DEFAULT_THEME: light

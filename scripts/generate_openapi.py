@@ -6,9 +6,11 @@
     python scripts/generate_openapi.py
 
 契约与中文说明统一放在 docs/ 目录：
-    docs/openapi.json  — 机器可读契约
-    docs/API.md        — 中文接口文档
-    docs/CONTRACT.md   — 契约使用与变更说明
+    docs/openapi.json            — 机器可读契约
+    docs/API.md                  — 中文接口文档
+    docs/API_INTEGRATION_GUIDE.md — 第三方接入指南
+    docs/CLOUD_DEPLOY.md         — 云端部署指南
+    docs/CONTRACT.md             — 契约使用与变更说明
 """
 from __future__ import annotations
 
@@ -225,6 +227,15 @@ schemas["UserUpdateRequest"] = {
         "department": prop("string", "所属部门编码，如 A / B", maxLength=50, nullable=True),
     },
 }
+schemas["ChangePasswordRequest"] = {
+    "type": "object",
+    "required": ["old_password", "new_password", "confirm_password"],
+    "properties": {
+        "old_password": prop("string", "原密码", minLength=1, maxLength=128),
+        "new_password": prop("string", "新密码", minLength=8, maxLength=128),
+        "confirm_password": prop("string", "确认新密码", minLength=8, maxLength=128),
+    },
+}
 schemas["UserResponse"] = {
     "type": "object",
     "description": "用户完整信息（不含密码）",
@@ -390,7 +401,7 @@ schemas["CreateModelConfigRequest"] = {
         "name": prop("string", minLength=1, maxLength=100),
         "model_type": prop("string", enum=_MODEL_TYPES),
         "provider": prop("string", minLength=1, maxLength=50, example="openai"),
-        "model_name": prop("string", minLength=1, maxLength=200, example="gpt-4o"),
+        "model_name": prop("string", minLength=1, maxLength=200, example="qwen3.7-plus"),
         "base_url": prop("string", maxLength=500, nullable=True),
         "config": prop("object", "如 temperature / max_tokens", default={}),
         "timeout_seconds": prop("integer", minimum=5, maximum=600, default=60),
@@ -772,7 +783,19 @@ schemas["AskEventResponse"] = {
     "type": "object",
     "description": "SSE 单条事件 data 结构（event 名在 SSE 帧的 event: 行）",
     "properties": {
-        "event": prop("string", enum=["chunk", "citations", "done", "error"]),
+        "event": prop(
+            "string",
+            enum=[
+                "intent",
+                "guard_blocked",
+                "query_processing",
+                "cache_hit",
+                "chunk",
+                "citations",
+                "done",
+                "error",
+            ],
+        ),
         "content": prop("string", "chunk 事件的增量文本", nullable=True),
         "items": {"type": "array", "items": ref("CitationResponse"), "nullable": True},
         "citations": {"type": "array", "items": ref("CitationResponse"), "nullable": True},
@@ -913,7 +936,12 @@ schemas["TestRunResponse"] = {
         "status": prop("string", enum=["running", "completed", "failed"]),
         "total_questions": prop("integer"),
         "hit_count": prop("integer"),
-        "hit_rate": prop("number", nullable=True),
+        "hit_rate": prop("number", "命中率 = hit_count / total_questions", nullable=True),
+        "score": prop(
+            "number",
+            "综合得分：各题命中片段相关度的算术平均（0–1）；无命中时为 0",
+            nullable=True,
+        ),
         "recall_at_k": prop("number", nullable=True),
         "mrr": prop("number", nullable=True),
         "avg_elapsed_ms": prop("number", nullable=True),
@@ -1116,6 +1144,40 @@ schemas["SystemStatsResponse"] = {
             "maxItems": 7,
             "description": "近 7 天每日命中率 0–1（含今天，升序）",
         },
+        "guard_blocked_24h": prop("integer", "最近 24 小时 Guard 阻拦次数", default=0),
+        "guard_blocked_7d": prop("integer", "最近 7 天 Guard 阻拦次数", default=0),
+        "guard_recent_events": {
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": True},
+            "description": "最近阻拦摘要；完整列表见 /monitor/guard-events",
+        },
+    },
+}
+schemas["GuardBlockedEventItem"] = {
+    "type": "object",
+    "properties": {
+        "id": prop("string"),
+        "created_at": prop("string", format="date-time"),
+        "intent": prop("string"),
+        "reason_code": prop("string"),
+        "detector": prop("string"),
+        "confidence": prop("number"),
+        "actor_label": prop("string", "注册用户名或「访客」"),
+        "client_ip": prop("string", nullable=True),
+        "user_id": uuid_prop(nullable=True),
+        "is_registered": prop("boolean"),
+        "question_preview": prop("string", "脱敏短摘要", nullable=True),
+    },
+}
+schemas["GuardBlockedEventListResponse"] = {
+    "type": "object",
+    "properties": {
+        "items": {"type": "array", "items": ref("GuardBlockedEventItem")},
+        "total": prop("integer"),
+        "page": prop("integer"),
+        "page_size": prop("integer"),
+        "blocked_24h": prop("integer"),
+        "blocked_7d": prop("integer"),
     },
 }
 
@@ -1169,6 +1231,15 @@ paths["/auth/me"] = {
         ["认证"],
         request_body=json_body("UserUpdateRequest"),
         responses={**resp("成功", ref("UserResponse")), **err_resps(401, 422, 500)},
+    ),
+}
+paths["/auth/change-password"] = {
+    "post": op(
+        "修改本人密码",
+        "需提供原密码，并两次确认新密码。固定超管账号 super 禁止调用，仅可通过 .env 的 SUPER_ADMIN_PASSWORD 维护。",
+        ["认证"],
+        request_body=json_body("ChangePasswordRequest"),
+        responses={**resp("成功"), **err_resps(400, 401, 403, 422, 500)},
     ),
 }
 
@@ -1935,9 +2006,21 @@ paths["/monitor/health"] = {
 paths["/monitor/stats"] = {
     "get": op(
         "系统统计概览",
-        "用户/知识库/文档/会话/队列规模及趋势。需要 system:read。",
+        "用户/知识库/文档/会话/队列规模、趋势与 Guard 阻拦计数。需要 system:read。",
         ["系统监控"],
         responses={**resp("成功", ref("SystemStatsResponse")), **err_resps(401, 403, 500)},
+    )
+}
+paths["/monitor/guard-events"] = {
+    "get": op(
+        "LLM Guard 阻拦事件列表",
+        "分页返回阻拦审计（账号、IP、意图、原因码）；不含完整问题原文。需要 system:read。",
+        ["系统监控"],
+        parameters=page_params(default_size=50),
+        responses={
+            **resp("成功", ref("GuardBlockedEventListResponse")),
+            **err_resps(401, 403, 500),
+        },
     )
 }
 
@@ -1964,20 +2047,30 @@ doc = {
         ),
         "license": {"name": "MIT"},
     },
-    "servers": [{"url": "http://localhost:8080/api/v1", "description": "本地 / Docker 统一入口"}],
+    "servers": [
+        {
+            "url": "http://localhost:18080/api/v1",
+            "description": "本机 Docker 统一入口（宿主机 18080→容器 8080）",
+        },
+        {
+            "url": "https://{host}/api/v1",
+            "description": "云端 HTTPS 域名（见 CLOUD_DEPLOY.md）",
+            "variables": {"host": {"default": "kb.example.com"}},
+        },
+    ],
     "tags": [
-        {"name": "认证", "description": "注册登录与当前用户"},
+        {"name": "认证", "description": "注册登录、资料与改密"},
         {"name": "用户管理", "description": "用户 CRUD 与角色绑定"},
         {"name": "角色管理", "description": "角色与功能权限"},
         {"name": "部门管理", "description": "部门与部门驱动的知识库可见性"},
         {"name": "大模型管理", "description": "LLM/Embedding/Rerank 配置与 Langfuse 用量"},
         {"name": "知识库管理", "description": "知识库元信息、向量化与授权"},
         {"name": "文档管理", "description": "上传、分段、规范化、重试"},
-        {"name": "智能问答", "description": "SSE 问答与会话"},
+        {"name": "智能问答", "description": "SSE 问答（含 Guard）与会话"},
         {"name": "命中率测试", "description": "检索质量评测与多策略对比"},
         {"name": "快照管理", "description": "快照与回退"},
         {"name": "审计日志", "description": "操作审计"},
-        {"name": "系统监控", "description": "健康检查与统计"},
+        {"name": "系统监控", "description": "健康检查、统计与 Guard 事件"},
     ],
     "paths": paths,
     "components": {

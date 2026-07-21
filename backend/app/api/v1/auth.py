@@ -15,9 +15,11 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
+from app.core.super_admin_policy import is_fixed_super_account
 from app.models import Role, User
 from app.schemas.common import BaseResponse
 from app.schemas.identity import (
+    ChangePasswordRequest,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
@@ -37,6 +39,10 @@ async def register(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
+    from app.core.config import settings
+
+    if not settings.AUTH_REGISTER_ENABLED:
+        raise HTTPException(status_code=403, detail="当前环境已关闭公开注册，请联系管理员创建账号")
     if await db.scalar(select(User).where((User.username == data.username) | (User.email == data.email))):
         raise HTTPException(status_code=409, detail="用户名或邮箱已存在")
     role = await db.scalar(select(Role).where(Role.name == "guest"))
@@ -131,3 +137,27 @@ async def update_me(
     await db.commit()
     await db.refresh(user)
     return ok(present_user(user), request_id=request_id)
+
+
+@router.post("/change-password", response_model=BaseResponse)
+async def change_password(
+    data: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    request_id: str = Depends(resolve_request_id),
+) -> BaseResponse:
+    """普通用户修改自身密码；固定超管仅允许通过 .env 的 SUPER_ADMIN_PASSWORD 维护。"""
+    if is_fixed_super_account(user):
+        raise HTTPException(
+            status_code=403,
+            detail="超级管理员密码仅可通过 .env 中 SUPER_ADMIN_PASSWORD 配置，不能在页面修改",
+        )
+    if data.new_password != data.confirm_password:
+        raise HTTPException(status_code=400, detail="两次输入的新密码不一致")
+    if data.new_password == data.old_password:
+        raise HTTPException(status_code=400, detail="新密码不能与原密码相同")
+    if not verify_password(data.old_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="原密码不正确")
+    user.hashed_password = hash_password(data.new_password)
+    await db.commit()
+    return ok({"changed": True}, request_id=request_id, message="密码已更新")

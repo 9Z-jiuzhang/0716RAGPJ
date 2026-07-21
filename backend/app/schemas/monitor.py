@@ -27,5 +27,28 @@ class SystemStatsResponse(BaseModel):
     guard_blocked_7d: int = Field(default=0, description="最近 7 天被 Guard 阻拦次数")
     guard_recent_events: list[dict[str, object]] = Field(
         default_factory=list,
-        description="最近阻拦事件的意图、原因码和时间，不包含用户完整问题",
+        description="最近阻拦事件摘要（兼容首页）；完整列表见 /monitor/guard-events",
     )
+
+
+class GuardBlockedEventItem(BaseModel):
+    id: str
+    created_at: str
+    intent: str
+    reason_code: str
+    detector: str
+    confidence: float
+    actor_label: str = Field(description="攻击账号：注册用户名或「访客」")
+    client_ip: str | None = None
+    user_id: str | None = Field(default=None, description="注册用户 ID；访客为空")
+    is_registered: bool = Field(description="是否为已注册用户")
+    question_preview: str | None = Field(default=None, description="脱敏短摘要")
+
+
+class GuardBlockedEventListResponse(BaseModel):
+    items: list[GuardBlockedEventItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    blocked_24h: int = 0
+    blocked_7d: int = 0

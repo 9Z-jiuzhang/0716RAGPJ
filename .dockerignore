@@ -1,0 +1,22 @@
+# 减小构建上下文，避免把本地数据/密钥打入镜像守护进程缓存
+.git
+.github
+.cursor
+.env
+.env.*
+!.env.example
+data/
+testdoc/
+docs/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.mypy_cache/
+**/node_modules/
+*.md
+!requirements.txt
+frontend/
+scripts/
+_recovery/
+_recover_*.py
+agent-transcripts/

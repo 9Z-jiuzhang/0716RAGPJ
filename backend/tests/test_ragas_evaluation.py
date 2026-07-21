@@ -9,7 +9,11 @@ from uuid import uuid4
 
 import pytest
 from app.core.config import settings
-from app.services.ragas_evaluation import RagasEvaluationService, RagasSample
+from app.services.ragas_evaluation import (
+    RagasEvaluationService,
+    RagasSample,
+    RagasSampleSpec,
+)
 
 
 class FakeMetric:
@@ -174,6 +178,57 @@ async def test_collect_samples_requires_cited_documents() -> None:
 
     assert samples == []
     assert db.scalars.await_count == 1
+
+
+def test_parse_generated_questions_keeps_only_grounded_items() -> None:
+    """自动生成题必须引用真实片段编号，并去重。"""
+    materials = [
+        {"ref": 1, "doc_name": "手册", "content": "年假 5 天"},
+        {"ref": 2, "doc_name": "手册", "content": "试用期 3 个月"},
+    ]
+    raw = """{
+      "items": [
+        {"question": "年假几天？", "reference": "5 天", "refs": [1]},
+        {"question": "年假几天？", "reference": "重复", "refs": [1]},
+        {"question": "无来源？", "reference": "x", "refs": [9]},
+        {"question": "试用期多久？", "reference": "3 个月", "refs": [2]}
+      ]
+    }"""
+
+    items = RagasEvaluationService._parse_generated_questions(raw, materials, limit=5)
+
+    assert [item.question for item in items] == ["年假几天？", "试用期多久？"]
+    assert items[0].reference == "5 天"
+    assert items[0].source_chunk_count == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_samples_uses_specs_when_provided(monkeypatch: pytest.MonkeyPatch) -> None:
+    """提交样本规格时，应优先按规格解析，而不是自动抽历史。"""
+    service = RagasEvaluationService()
+    target = RagasSample(
+        qa_message_id=None,
+        user_input="自定义问题",
+        response="自定义回答",
+        retrieved_contexts=["证据"],
+        reference="标准答案",
+    )
+
+    async def fake_materialize(*_args, **_kwargs):
+        return target
+
+    monkeypatch.setattr(service, "materialize_question", fake_materialize)
+    monkeypatch.setattr(service, "collect_samples", AsyncMock(return_value=[]))
+
+    samples = await service.resolve_samples(
+        AsyncMock(),
+        kb_id=uuid4(),
+        sample_limit=10,
+        sample_specs=[RagasSampleSpec(question="自定义问题", reference="标准答案")],
+    )
+
+    assert samples == [target]
+    service.collect_samples.assert_not_awaited()
 
 
 @pytest.mark.asyncio

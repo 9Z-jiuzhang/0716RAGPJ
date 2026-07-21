@@ -116,6 +116,16 @@ class LLMService:
             payload.update(extra)
         return payload
 
+    def _thinking_extra(self) -> dict[str, Any]:
+        """主回答流式：按配置附带 enable_thinking（Guard/改写客户端勿调用）。"""
+        if not settings.LLM_ENABLE_THINKING:
+            return {}
+        extra: dict[str, Any] = {"enable_thinking": True}
+        budget = int(settings.LLM_THINKING_BUDGET or 0)
+        if budget > 0:
+            extra["thinking_budget"] = budget
+        return extra
+
     async def chat(
         self,
         messages: list[dict[str, str]],
@@ -167,20 +177,30 @@ class LLMService:
         max_tokens: int | None = None,
         extra: dict[str, Any] | None = None,
         usage_sink: dict[str, Any] | None = None,
+        enable_thinking: bool | None = None,
     ) -> AsyncIterator[str]:
         """
-        流式对话：逐段 yield 增量文本（delta.content）。
+        流式对话：逐段 yield 增量文本。
 
-        调用方应组装为 SSE event: chunk 推送给前端。
+        开启思考时，上游常把推理放在 ``delta.reasoning_content``、答案在 ``delta.content``。
+        本方法会把推理包装为 ``<think>...</think>``，便于前端气泡拆分展示；
+        思考进行中前端展开，闭合标签后自动折叠。
 
         传入 ``usage_sink`` 字典时，会请求上游返回 token 用量
         （OpenAI 兼容的 ``stream_options.include_usage``），并在收到
         usage 块后写入 ``usage_sink``（prompt_tokens/completion_tokens/total_tokens），
         供 Langfuse 用量追踪使用。
+
+        ``enable_thinking``：默认跟随 ``settings.LLM_ENABLE_THINKING``；传 False 可对本调用关闭。
         """
         client = await self._get_client()
         url = f"{self.api_base}/chat/completions"
         stream_extra = dict(extra or {})
+        if enable_thinking is None:
+            enable_thinking = bool(settings.LLM_ENABLE_THINKING)
+        if enable_thinking:
+            for key, value in self._thinking_extra().items():
+                stream_extra.setdefault(key, value)
         if usage_sink is not None:
             stream_extra.setdefault("stream_options", {"include_usage": True})
         payload = self._build_payload(
@@ -191,6 +211,7 @@ class LLMService:
             extra=stream_extra,
         )
 
+        thinking_open = False
         try:
             async with client.stream("POST", url, json=payload) as response:
                 if response.status_code >= 400:
@@ -200,12 +221,10 @@ class LLMService:
                         status_code=response.status_code,
                         detail=body.decode("utf-8", errors="replace"),
                     )
-                # OpenAI 兼容 SSE：每行形如 `data: {...}`，结束标记为 `data: [DONE]`
                 async for line in response.aiter_lines():
                     if not line:
                         continue
                     if line.startswith(":"):
-                        # 注释行 / keepalive，忽略
                         continue
                     if not line.startswith("data:"):
                         continue
@@ -223,10 +242,20 @@ class LLMService:
                         usage = chunk.get("usage")
                         if isinstance(usage, dict) and usage:
                             usage_sink.update(usage)
-                    delta = self._extract_delta_content(chunk)
-                    if delta:
-                        # 保留模型附带的推理标签，由前端与最终回答分开展示，便于用户查看过程。
-                        yield delta
+                    reasoning, content = self._extract_delta_parts(chunk)
+                    if reasoning:
+                        if not thinking_open:
+                            yield "<think>"
+                            thinking_open = True
+                        yield reasoning
+                    if content:
+                        if thinking_open:
+                            yield "</think>"
+                            thinking_open = False
+                        # 若上游已用 <think> 标签写在 content 里，原样透传
+                        yield content
+                if thinking_open:
+                    yield "</think>"
         except LLMServiceError:
             raise
         except httpx.TimeoutException as exc:
@@ -235,20 +264,31 @@ class LLMService:
             raise LLMServiceError(f"LLM 流式网络错误: {exc}") from exc
 
     @staticmethod
-    def _extract_delta_content(chunk: dict[str, Any]) -> str:
-        """从流式 chunk 中提取文本增量，兼容部分厂商字段差异。"""
+    def _extract_delta_parts(chunk: dict[str, Any]) -> tuple[str, str]:
+        """提取流式增量：``(reasoning_content, content)``。"""
         try:
-            delta = chunk["choices"][0].get("delta") or {}
-            content = delta.get("content")
-            if content:
-                return str(content)
-            # 少数兼容实现把文本放在 message.content
-            message = chunk["choices"][0].get("message") or {}
-            if message.get("content"):
-                return str(message["content"])
+            choice0 = chunk["choices"][0]
+            delta = choice0.get("delta") or {}
+            reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
+            content = delta.get("content") or ""
+            if not content:
+                message = choice0.get("message") or {}
+                content = message.get("content") or ""
+                if not reasoning:
+                    reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+            return (str(reasoning) if reasoning else "", str(content) if content else "")
         except (KeyError, IndexError, TypeError):
-            return ""
-        return ""
+            return ("", "")
+
+    @staticmethod
+    def _extract_delta_content(chunk: dict[str, Any]) -> str:
+        """兼容旧调用：合并 reasoning + content（一般请用 _extract_delta_parts）。"""
+        reasoning, content = LLMService._extract_delta_parts(chunk)
+        if reasoning and content:
+            return f"<think>{reasoning}</think>{content}"
+        if reasoning:
+            return reasoning
+        return content
 
     @staticmethod
     def _safe_error_body(response: httpx.Response) -> Any:

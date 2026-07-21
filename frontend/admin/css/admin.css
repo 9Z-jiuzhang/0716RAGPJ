@@ -506,17 +506,72 @@
 }
 
 .sidebar-caption {
-  padding: 16px 14px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 12px 12px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
   color: var(--color-text-secondary);
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   font-weight: 700;
   line-height: 1.2;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.sidebar-caption:hover {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  color: var(--color-text);
+}
+
+.sidebar-caption:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.sidebar-caption-chevron {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.75;
+  transition: transform 0.2s ease;
+}
+
+.sidebar-group.is-collapsed .sidebar-caption-chevron {
+  transform: rotate(-45deg);
 }
 
 .sidebar-group:first-child .sidebar-caption {
   padding-top: 4px;
+}
+
+.sidebar-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  max-height: 640px;
+  opacity: 1;
+  transition: max-height 0.22s ease, opacity 0.18s ease, margin 0.18s ease;
+}
+
+.sidebar-group.is-collapsed .sidebar-links {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
 }
 
 .sidebar-nav {
@@ -546,11 +601,6 @@
 
 .sidebar-nav::-webkit-scrollbar-thumb:hover {
   background: var(--color-primary);
-}
-
-.sidebar-links {
-  display: grid;
-  gap: 4px;
 }
 
 .sidebar .nav-item {
@@ -1334,8 +1384,10 @@ html[data-theme="light"] .dashboard-hero::after {
     display: none;
   }
 
-  .sidebar-links {
-    grid-template-columns: repeat(3, 1fr);
+  .sidebar-group.is-collapsed .sidebar-links {
+    max-height: none;
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .sidebar .nav-item {
@@ -1464,24 +1516,89 @@ html[data-theme="light"] .dashboard-hero::after {
   font-weight: 700;
 }
 
-/* ---------- FastAPI / Swagger 嵌入页 ---------- */
+/* ---------- API 接入指南文档页 ---------- */
 .fastapi-docs-card {
   min-height: calc(100vh - 180px);
 }
 
-.fastapi-docs-frame {
-  padding: 0 !important;
-  min-height: calc(100vh - 260px);
-  overflow: hidden;
-  border-radius: 16px;
+.md-doc-body {
+  padding: 8px 4px 24px;
+  max-height: calc(100vh - 240px);
+  overflow: auto;
 }
 
-.fastapi-docs-iframe {
-  display: block;
-  width: 100%;
-  height: calc(100vh - 260px);
-  min-height: 640px;
+.md-doc h1 {
+  font-size: 1.55rem;
+  margin: 0.2em 0 0.6em;
+}
+
+.md-doc h2 {
+  font-size: 1.25rem;
+  margin: 1.4em 0 0.55em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border, #334) 70%, transparent);
+}
+
+.md-doc h3 {
+  font-size: 1.05rem;
+  margin: 1.1em 0 0.4em;
+}
+
+.md-doc h4 {
+  font-size: 0.98rem;
+  margin: 0.9em 0 0.35em;
+}
+
+.md-doc p,
+.md-doc li {
+  line-height: 1.65;
+  color: var(--admin-ink-2, var(--color-text-body));
+}
+
+.md-doc ul,
+.md-doc ol {
+  padding-left: 1.35em;
+  margin: 0.4em 0 0.8em;
+}
+
+.md-doc .md-quote {
+  margin: 0.6em 0;
+  padding: 0.55em 0.9em;
+  border-left: 3px solid var(--color-primary, #5b8def);
+  background: color-mix(in srgb, var(--color-primary, #5b8def) 8%, transparent);
+  border-radius: 0 8px 8px 0;
+}
+
+.md-doc .md-pre {
+  margin: 0.6em 0 1em;
+  padding: 12px 14px;
+  overflow: auto;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-bg-deep, #0b0f19) 88%, #111);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.md-doc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.md-doc p code,
+.md-doc li code,
+.md-doc td code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-border, #445) 35%, transparent);
+}
+
+.md-doc .md-table {
+  margin: 0.5em 0 1em;
+  font-size: 13px;
+}
+
+.md-doc hr {
   border: 0;
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--color-bg-deep) 80%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--color-border, #334) 70%, transparent);
+  margin: 1.2em 0;
 }

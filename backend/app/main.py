@@ -87,13 +87,14 @@ async def seed_identity_data() -> None:
             else:
                 role.permissions = [perm_by_code[c] for c in codes if c in perm_by_code]
 
+        super_password = (settings.SUPER_ADMIN_PASSWORD or "Super123!").strip() or "Super123!"
         if not await db.scalar(select(User).where(User.username == "super")):
             db.add(
                 User(
                     username="super",
                     email="super@example.com",
                     nickname="超级管理员",
-                    hashed_password=hash_password("Super123!"),
+                    hashed_password=hash_password(super_password),
                     roles=[roles["super_admin"]],
                 )
             )
@@ -104,11 +105,11 @@ async def seed_identity_data() -> None:
             )
             if fixed_super:
                 fixed_super.status = "active"
-                # 开发环境保证默认密码可用（避免历史库密码漂移导致无法登录）
-                if not verify_password("Super123!", fixed_super.hashed_password):
-                    # 仅当仍是占位邮箱时重置，避免覆盖用户已改密码
-                    if (fixed_super.email or "").lower() in {"super@example.com", "super@local"}:
-                        fixed_super.hashed_password = hash_password("Super123!")
+                # 可选：将 DB 密码同步为 .env 中 SUPER_ADMIN_PASSWORD（云端建议首次后关闭）
+                if settings.SUPER_ADMIN_SYNC_PASSWORD and not verify_password(
+                    super_password, fixed_super.hashed_password
+                ):
+                    fixed_super.hashed_password = hash_password(super_password)
                 if "super_admin" in roles and not any(r.name == "super_admin" for r in fixed_super.roles):
                     fixed_super.roles = list(fixed_super.roles) + [roles["super_admin"]]
             if "super_admin" in roles:
@@ -124,45 +125,56 @@ async def seed_identity_data() -> None:
                     if "admin" in roles and not any(r.name == "admin" for r in remaining):
                         remaining.append(roles["admin"])
                     extra.roles = remaining
-        if not await db.scalar(select(User).where(User.username == "admin")):
-            db.add(
-                User(
-                    username="admin",
-                    email="admin@example.com",
-                    nickname="系统管理员",
-                    hashed_password=hash_password("Admin123!"),
-                    roles=[roles["admin"]],
+        if settings.SEED_DEMO_USERS:
+            if not await db.scalar(select(User).where(User.username == "admin")):
+                db.add(
+                    User(
+                        username="admin",
+                        email="admin@example.com",
+                        nickname="系统管理员",
+                        hashed_password=hash_password("Admin123!"),
+                        roles=[roles["admin"]],
+                    )
                 )
-            )
+            else:
+                # 若旧库 admin 误绑超管能力：保持用户名 admin，角色纠正为 admin（不强制覆盖已有多角色）
+                admin_user = await db.scalar(
+                    select(User).options(selectinload(User.roles)).where(User.username == "admin")
+                )
+                if admin_user and not any(r.name == "admin" for r in admin_user.roles):
+                    if "admin" in roles:
+                        admin_user.roles = [roles["admin"]]
+
+            # 演示员工：带部门，便于上传隔离联调
+            if "staff" in roles:
+                for uname, email, nick, dept in (
+                    ("staff_a", "staff_a@example.com", "A部门员工", "A"),
+                    ("staff_b", "staff_b@example.com", "B部门员工", "B"),
+                ):
+                    existing = await db.scalar(
+                        select(User).options(selectinload(User.roles)).where(User.username == uname)
+                    )
+                    if not existing:
+                        db.add(
+                            User(
+                                username=uname,
+                                email=email,
+                                nickname=nick,
+                                department=dept,
+                                hashed_password=hash_password("Staff123!"),
+                                roles=[roles["staff"]],
+                            )
+                        )
+                    else:
+                        existing.department = existing.department or dept
+                        if not any(r.name == "staff" for r in existing.roles):
+                            existing.roles = [roles["staff"]]
         else:
-            # 若旧库 admin 误绑超管能力：保持用户名 admin，角色纠正为 admin（不强制覆盖已有多角色）
+            # 云端仍纠正已存在 admin 的误绑超管角色，但不新建演示账号
             admin_user = await db.scalar(select(User).options(selectinload(User.roles)).where(User.username == "admin"))
             if admin_user and not any(r.name == "admin" for r in admin_user.roles):
                 if "admin" in roles:
                     admin_user.roles = [roles["admin"]]
-
-        # 演示员工：带部门，便于上传隔离联调
-        if "staff" in roles:
-            for uname, email, nick, dept in (
-                ("staff_a", "staff_a@example.com", "A部门员工", "A"),
-                ("staff_b", "staff_b@example.com", "B部门员工", "B"),
-            ):
-                existing = await db.scalar(select(User).options(selectinload(User.roles)).where(User.username == uname))
-                if not existing:
-                    db.add(
-                        User(
-                            username=uname,
-                            email=email,
-                            nickname=nick,
-                            department=dept,
-                            hashed_password=hash_password("Staff123!"),
-                            roles=[roles["staff"]],
-                        )
-                    )
-                else:
-                    existing.department = existing.department or dept
-                    if not any(r.name == "staff" for r in existing.roles):
-                        existing.roles = [roles["staff"]]
 
         # 废弃旧「user」角色：迁移到 guest 后删除（与访客功能重复）
         legacy_user_role = await db.scalar(select(Role).where(Role.name == "user"))
@@ -301,11 +313,11 @@ async def seed_model_configs() -> None:
         if "rerank" not in existing_types:
             defaults.append(
                 ModelConfig(
-                    name="Cohere Rerank（默认）",
+                    name="默认 Rerank（千问）",
                     model_type="rerank",
-                    provider=settings.RERANK_PROVIDER or "cohere",
-                    model_name=settings.RERANK_MODEL or "rerank-v4.0-pro",
-                    base_url=settings.RERANK_BASE_URL or "https://api.cohere.ai",
+                    provider=settings.RERANK_PROVIDER or "dashscope",
+                    model_name=settings.RERANK_MODEL or "qwen3-vl-rerank",
+                    base_url=settings.RERANK_BASE_URL or None,
                     is_default=True,
                     is_enabled=True,
                     config={"candidate_multiplier": settings.RERANK_CANDIDATE_MULTIPLIER},
@@ -333,6 +345,7 @@ async def seed_query_processing_config() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     setup_logging()
+    settings.assert_cloud_ready()
     get_langfuse()
     # CI/裸库需先装扩展，再 create_all（否则 gin_trgm_ops 索引会失败）
     await ensure_postgres_extensions()
@@ -410,10 +423,8 @@ app = FastAPI(
     redoc_url="/redoc",
     description=(
         "AI 知识库 RAG 平台 API。\n\n"
-        "**文档页说明**：若 Swagger/ReDoc 样式异常，请确认可访问 jsDelivr CDN，"
-        "或改用直连 API 端口 `http://127.0.0.1:8000/docs`。"
-        "统一入口 `http://localhost:8080/docs` 与 `/redoc` 已反代到本服务。"
-        "OpenAPI schema 生成失败时请检查自定义响应模型是否存在循环引用。"
+        "接入说明见仓库 `docs/API_INTEGRATION_GUIDE.md`；字段契约见 `docs/API.md`。\n"
+        "Swagger UI：统一入口下的 `/docs`（由 Nginx 反代到本服务）。"
     ),
 )
 
@@ -430,6 +441,11 @@ def custom_openapi():
             description=app.description,
             routes=app.routes,
         )
+        public = (settings.PUBLIC_BASE_URL or "").rstrip("/")
+        if public:
+            openapi_schema["servers"] = [
+                {"url": f"{public}/api/v1", "description": "当前部署公网入口"},
+            ]
     except Exception as exc:  # noqa: BLE001
         # Schema 构建失败时仍返回可渲染的最小文档，避免 /docs 白屏
         openapi_schema = {
@@ -454,10 +470,12 @@ def custom_openapi():
 
 app.openapi = custom_openapi  # type: ignore[method-assign]
 
+_cors_origins = settings.cors_origin_list or ["*"]
+_cors_credentials = bool(settings.CORS_ALLOW_CREDENTIALS) and "*" not in _cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS.split(","),
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -471,6 +489,11 @@ app.include_router(documents_router, prefix="/api/v1")
 @app.get("/metrics", tags=["系统监控"], summary="Prometheus 指标端点")
 async def metrics() -> Response:
     """Prometheus 刮取入口（无 BaseResponse 包装）。"""
+    if not settings.METRICS_PUBLIC:
+        # 云端默认关闭公网刮取；内网可把 METRICS_PUBLIC=true 或经安全组限制
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Not Found")
     payload, content_type = metrics_payload()
     return Response(content=payload, media_type=content_type)
 

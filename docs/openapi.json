@@ -10,14 +10,23 @@
   },
   "servers": [
     {
-      "url": "http://localhost:8080/api/v1",
-      "description": "本地 / Docker 统一入口"
+      "url": "http://localhost:18080/api/v1",
+      "description": "本机 Docker 统一入口（宿主机 18080→容器 8080）"
+    },
+    {
+      "url": "https://{host}/api/v1",
+      "description": "云端 HTTPS 域名（见 CLOUD_DEPLOY.md）",
+      "variables": {
+        "host": {
+          "default": "kb.example.com"
+        }
+      }
     }
   ],
   "tags": [
     {
       "name": "认证",
-      "description": "注册登录与当前用户"
+      "description": "注册登录、资料与改密"
     },
     {
       "name": "用户管理",
@@ -45,7 +54,7 @@
     },
     {
       "name": "智能问答",
-      "description": "SSE 问答与会话"
+      "description": "SSE 问答（含 Guard）与会话"
     },
     {
       "name": "命中率测试",
@@ -61,7 +70,7 @@
     },
     {
       "name": "系统监控",
-      "description": "健康检查与统计"
+      "description": "健康检查、统计与 Guard 事件"
     }
   ],
   "paths": {
@@ -935,6 +944,242 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UserUpdateRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/change-password": {
+      "post": {
+        "summary": "修改本人密码",
+        "description": "需提供原密码，并两次确认新密码。固定超管账号 super 禁止调用，仅可通过 .env 的 SUPER_ADMIN_PASSWORD 维护。",
+        "tags": [
+          "认证"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或 Token 无效/过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限或用户被禁用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "字段校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
               }
             }
           }
@@ -18285,7 +18530,7 @@
     "/monitor/stats": {
       "get": {
         "summary": "系统统计概览",
-        "description": "用户/知识库/文档/会话/队列规模及趋势。需要 system:read。",
+        "description": "用户/知识库/文档/会话/队列规模、趋势与 Guard 阻拦计数。需要 system:read。",
         "tags": [
           "系统监控"
         ],
@@ -18434,6 +18679,185 @@
         "security": [
           {
             "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/monitor/guard-events": {
+      "get": {
+        "summary": "LLM Guard 阻拦事件列表",
+        "description": "分页返回阻拦审计（账号、IP、意图、原因码）；不含完整问题原文。需要 system:read。",
+        "tags": [
+          "系统监控"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/GuardBlockedEventListResponse"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或 Token 无效/过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限或用户被禁用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "页码，从 1 开始",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "每页条数，最大 100",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
           }
         ]
       }
@@ -18591,6 +19015,34 @@
             "description": "所属部门编码，如 A / B",
             "maxLength": 50,
             "nullable": true
+          }
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": [
+          "old_password",
+          "new_password",
+          "confirm_password"
+        ],
+        "properties": {
+          "old_password": {
+            "type": "string",
+            "description": "原密码",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "new_password": {
+            "type": "string",
+            "description": "新密码",
+            "minLength": 8,
+            "maxLength": 128
+          },
+          "confirm_password": {
+            "type": "string",
+            "description": "确认新密码",
+            "minLength": 8,
+            "maxLength": 128
           }
         }
       },
@@ -19054,7 +19506,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "example": "gpt-4o"
+            "example": "qwen3.7-plus"
           },
           "base_url": {
             "type": "string",
@@ -20096,6 +20548,10 @@
           "event": {
             "type": "string",
             "enum": [
+              "intent",
+              "guard_blocked",
+              "query_processing",
+              "cache_hit",
               "chunk",
               "citations",
               "done",
@@ -20142,6 +20598,11 @@
               "medium",
               "low"
             ],
+            "nullable": true
+          },
+          "confidence_score": {
+            "type": "number",
+            "description": "done 事件数值置信度，范围 0~1；无法计算时为 -1",
             "nullable": true
           },
           "performance": {
@@ -20522,6 +20983,12 @@
           },
           "hit_rate": {
             "type": "number",
+            "description": "命中率 = hit_count / total_questions",
+            "nullable": true
+          },
+          "score": {
+            "type": "number",
+            "description": "综合得分：各题命中片段相关度的算术平均（0–1）；无命中时为 0",
             "nullable": true
           },
           "recall_at_k": {
@@ -21002,6 +21469,95 @@
             "minItems": 7,
             "maxItems": 7,
             "description": "近 7 天每日命中率 0–1（含今天，升序）"
+          },
+          "guard_blocked_24h": {
+            "type": "integer",
+            "description": "最近 24 小时 Guard 阻拦次数",
+            "default": 0
+          },
+          "guard_blocked_7d": {
+            "type": "integer",
+            "description": "最近 7 天 Guard 阻拦次数",
+            "default": 0
+          },
+          "guard_recent_events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "最近阻拦摘要；完整列表见 /monitor/guard-events"
+          }
+        }
+      },
+      "GuardBlockedEventItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "detector": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "actor_label": {
+            "type": "string",
+            "description": "注册用户名或「访客」"
+          },
+          "client_ip": {
+            "type": "string",
+            "nullable": true
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "is_registered": {
+            "type": "boolean"
+          },
+          "question_preview": {
+            "type": "string",
+            "description": "脱敏短摘要",
+            "nullable": true
+          }
+        }
+      },
+      "GuardBlockedEventListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardBlockedEventItem"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "blocked_24h": {
+            "type": "integer"
+          },
+          "blocked_7d": {
+            "type": "integer"
           }
         }
       }

@@ -23,7 +23,21 @@ class Settings(BaseSettings):
     APP_NAME: str = "AI-KnowledgeBase-RAG"
     APP_VERSION: str = "2.1.0"
     DEBUG: bool = False
+    # local=开发联调；cloud=云端生产（启动时强制校验密钥与 CORS）
+    DEPLOYMENT_MODE: str = "local"
     SECRET_KEY: str = "change-me"
+    # 对外公网根地址（含协议与域名，无尾斜杠），云端部署必填，例如 https://kb.example.com
+    PUBLIC_BASE_URL: str = ""
+    # 唯一超管账号 super 的登录密码：仅通过 .env 维护，页面不可改密
+    SUPER_ADMIN_PASSWORD: str = "Super123!"
+    # 是否在每次启动时把 DB 中 super 密码强制同步为 SUPER_ADMIN_PASSWORD（云端建议 false，首次引导后再关）
+    SUPER_ADMIN_SYNC_PASSWORD: bool = True
+    # 是否播种演示账号 admin / staff_*（云端务必 false）
+    SEED_DEMO_USERS: bool = True
+    # 是否开放公开注册接口（云端可关，仅管理员后台建号）
+    AUTH_REGISTER_ENABLED: bool = True
+    # 是否允许未鉴权访问 /metrics（云端建议 false，由内网 Prometheus 抓取或加鉴权）
+    METRICS_PUBLIC: bool = True
     LOG_LEVEL: str = "INFO"
     LOG_DIR: str = str(_PROJECT_ROOT / "data" / "logs")
     LOG_MAX_BYTES: int = 10 * 1024 * 1024
@@ -40,6 +54,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
+    REDIS_PASSWORD: str = ""
 
     # ---------- Chroma 向量库（Client-Server 模式） ----------
     CHROMA_HOST: str = "chroma"
@@ -53,42 +68,44 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "change-me"
     MINIO_BUCKET: str = "knowledge-base-docs"
 
-    # ---------- LLM 大模型 ----------
-    LLM_PROVIDER: str = "openai"
+    # ---------- LLM 大模型（默认千问 / DashScope 兼容模式） ----------
+    LLM_PROVIDER: str = "dashscope"
     LLM_API_KEY: str = "change-me"
-    LLM_MODEL: str = "gpt-4o"
+    LLM_MODEL: str = "qwen3.7-plus"
     LLM_BASE_URL: str = ""
     LLM_TIMEOUT_SECONDS: int = 120
     LLM_MAX_TOKENS: int = 2048
+    # 千问等混合思考模型：主回答流式开启思考；推理写入 reasoning_content，由 LLMService 包装为 <think> 供前端气泡展示
+    LLM_ENABLE_THINKING: bool = True
+    # 思考 token 上限（厂商 extra_body.thinking_budget）；0 表示不传该字段
+    LLM_THINKING_BUDGET: int = 2048
 
     # ---------- 轻量任务模型 ----------
-    # Guard 与 Query 预处理不再占用主回答模型。默认使用 MiniMax 官方高速文本模型；
-    # Base URL 与 API Key 留空时复用主 LLM 的连接信息，但客户端和连接池相互独立。
-    LLM_GUARD_MODEL: str = "MiniMax-M2.7-highspeed"
+    # Guard 与 Query 预处理默认复用主 LLM；Base URL / API Key 留空时继承主连接。
+    LLM_GUARD_MODEL: str = "qwen3.7-plus"
     LLM_GUARD_BASE_URL: str = ""
     LLM_GUARD_API_KEY: str = ""
     LLM_GUARD_TIMEOUT_SECONDS: int = 20
-    QA_QUERY_PROCESSING_MODEL: str = "MiniMax-M2.7-highspeed"
+    QA_QUERY_PROCESSING_MODEL: str = "qwen3.7-plus"
     QA_QUERY_PROCESSING_BASE_URL: str = ""
     QA_QUERY_PROCESSING_API_KEY: str = ""
     QA_QUERY_PROCESSING_TIMEOUT_SECONDS: int = 30
 
-    # ---------- Embedding 嵌入模型 ----------
+    # ---------- Embedding 嵌入模型（千问） ----------
     EMBEDDING_PROVIDER: str = "dashscope"
     EMBEDDING_API_KEY: str = "change-me"
-    EMBEDDING_MODEL_NAME: str = "text-embedding-v3"
+    EMBEDDING_MODEL_NAME: str = "qwen3.7-text-embedding"
     EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     EMBEDDING_TIMEOUT_SECONDS: int = 60
-    # 每次向量化请求的最大文本条数；阿里云 DashScope text-embedding-v3 上限为 10
+    # 每次向量化请求的最大文本条数；按厂商限额调整
     EMBEDDING_BATCH_SIZE: int = 10
 
-    # ---------- Rerank 重排 ----------
-    # 默认采用 Cohere 官方多语言 Rerank。密钥为空时服务会安全降级为原始检索排序，
-    # 不会因为外部重排服务不可用而中断知识库问答。
-    RERANK_PROVIDER: str = "cohere"
+    # ---------- Rerank 重排（默认千问 DashScope） ----------
+    # 密钥为空时服务会安全降级为原始检索排序，不中断知识库问答。
+    RERANK_PROVIDER: str = "dashscope"
     RERANK_API_KEY: str = ""
-    RERANK_MODEL: str = "rerank-v4.0-pro"
-    RERANK_BASE_URL: str = "https://api.cohere.ai"
+    RERANK_MODEL: str = "qwen3-vl-rerank"
+    RERANK_BASE_URL: str = "https://dashscope.aliyuncs.com/api/v1"
     RERANK_TIMEOUT_SECONDS: int = 30
     # 重排前扩大候选集，避免只对最终 Top-K 重排而失去纠正召回顺序的意义。
     RERANK_CANDIDATE_MULTIPLIER: int = 4
@@ -104,7 +121,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # 逗号分隔的允许来源；同域反代可留空或写具体 https://domain。生产禁止使用 *
     CORS_ORIGINS: str = "*"
+    CORS_ALLOW_CREDENTIALS: bool = True
 
     # ---------- 快照策略 ----------
     SNAPSHOT_MAX_COUNT: int = 50
@@ -190,7 +209,45 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         """返回 Redis 异步客户端连接 URL。"""
+        if self.REDIS_PASSWORD:
+            from urllib.parse import quote
+
+            pwd = quote(self.REDIS_PASSWORD, safe="")
+            return f"redis://:{pwd}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """解析 CORS 允许来源列表。"""
+        raw = (self.CORS_ORIGINS or "").strip()
+        if not raw:
+            return []
+        return [part.strip() for part in raw.split(",") if part.strip()]
+
+    def assert_cloud_ready(self) -> None:
+        """DEPLOYMENT_MODE=cloud 时拒绝占位密钥，避免带着默认口令上线。"""
+        if (self.DEPLOYMENT_MODE or "local").strip().lower() != "cloud":
+            return
+        weak_markers = {"", "change-me", "<请填写>", "Super123!", "Admin123!", "Staff123!"}
+        problems: list[str] = []
+        if (self.SECRET_KEY or "").strip() in weak_markers:
+            problems.append("SECRET_KEY")
+        if (self.JWT_SECRET_KEY or "").strip() in weak_markers:
+            problems.append("JWT_SECRET_KEY")
+        if (self.POSTGRES_PASSWORD or "").strip() in weak_markers:
+            problems.append("POSTGRES_PASSWORD")
+        if (self.MINIO_ACCESS_KEY or "").strip() in weak_markers or (self.MINIO_SECRET_KEY or "").strip() in weak_markers:
+            problems.append("MINIO_ACCESS_KEY/MINIO_SECRET_KEY")
+        if (self.SUPER_ADMIN_PASSWORD or "").strip() in {"", "Super123!", "<请填写>"}:
+            problems.append("SUPER_ADMIN_PASSWORD")
+        if "*" in self.cors_origin_list or not self.cors_origin_list:
+            problems.append("CORS_ORIGINS 须为具体 https 域名（禁止 *）")
+        if not (self.PUBLIC_BASE_URL or "").strip().startswith("https://"):
+            problems.append("PUBLIC_BASE_URL 须为 https:// 开头的公网根地址")
+        if problems:
+            raise RuntimeError(
+                "云端安全检查未通过，请修改 .env 后重启：" + "；".join(problems)
+            )
 
     @property
     def chroma_http_url(self) -> str:

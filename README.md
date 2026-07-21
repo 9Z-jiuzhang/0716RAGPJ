@@ -4,7 +4,9 @@
 
 - **应用版本**：`APP_VERSION=2.1.0`（与产品手册 V2.1 对齐）
 - **技术栈**：FastAPI（异步）· PostgreSQL（pg_trgm + tsvector）· Chroma（向量库）· Redis（会话热态）· MinIO（对象存储）· 原生 ES Module 前端 · Docker Compose 编排
-- **统一入口**：`http://localhost:8080`（Nginx 反向代理）
+- **统一入口（本机 Docker 默认）**：`http://localhost:18080`（Nginx 反向代理；容器内监听 8080）
+- **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml`）
+- **接入第三方 / App**：见 [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md)
 
 ---
 
@@ -35,7 +37,7 @@
 
 ## 一、系统架构
 
-平台采用「统一反向代理 + 无状态 API + 多存储后端」的容器化架构。所有外部流量经由单一 Nginx 入口（`:8080`）分流到静态前端、FastAPI 后端与 Grafana；后端通过异步驱动访问四类存储（关系库 / 向量库 / 缓存 / 对象存储），并调用外部 LLM 与 Embedding HTTP API。
+平台采用「统一反向代理 + 无状态 API + 多存储后端」的容器化架构。所有外部流量经由单一 Nginx 入口（本机宿主机 **`:18080`** → 容器 `:8080`）分流到静态前端、FastAPI 后端与 Grafana；后端通过异步驱动访问四类存储（关系库 / 向量库 / 缓存 / 对象存储），并调用外部 LLM 与 Embedding HTTP API。
 
 ### 1.1 架构总览图
 
@@ -46,7 +48,7 @@ flowchart TB
         Admin["管理端 SPA<br/>frontend/admin"]
     end
 
-    subgraph Edge["统一入口 (nginx :8080)"]
+    subgraph Edge["统一入口 (nginx 宿主机:18080)"]
         RP["reverse-proxy.conf<br/>限流 / SSE 直通 / 100MB 上传"]
     end
 
@@ -57,14 +59,14 @@ flowchart TB
 
     subgraph Storage["存储层"]
         PG[("PostgreSQL :5432<br/>业务库 + 全文检索")]
-        CH[("Chroma :8001<br/>向量库")]
+        CH[("Chroma :18001→8000<br/>向量库")]
         RD[("Redis :16379→6379<br/>会话热态 / 任务队列")]
-        MO[("MinIO :9000/9001<br/>原始文档对象存储")]
+        MO[("MinIO :19000/19001<br/>原始文档对象存储")]
     end
 
     subgraph External["外部模型服务"]
-        LLM["LLM API<br/>(OpenAI 兼容)"]
-        EMB["Embedding API<br/>(DashScope 等)"]
+        LLM["LLM API<br/>(OpenAI 兼容 / 千问)"]
+        EMB["Embedding / Rerank API<br/>(DashScope 等)"]
     end
 
     subgraph Observ["可观测性"]
@@ -95,9 +97,9 @@ flowchart TB
 
 ```text
 浏览器
-  │  https://localhost:8080
+  │  http://localhost:18080   （云端一般为 https://你的域名）
   ▼
-nginx 反向代理 (reverse-proxy.conf, :8080)
+nginx 反向代理 (reverse-proxy.conf, 容器 :8080)
   ├── /                → web 静态容器 (:80)   → guest / admin / shared 静态资源
   ├── /api/v1/*        → api (FastAPI :8000)  → 业务接口（proxy_buffering off, read_timeout 600s，SSE 安全）
   ├── /api/v1/auth/*   → api                   → 更严格的 auth 限流（5r/s）
@@ -108,6 +110,7 @@ nginx 反向代理 (reverse-proxy.conf, :8080)
 - **限流**：`api_limit` 30r/s（burst 60）、`auth_limit` 5r/s（burst 10）。
 - **上传上限**：`client_max_body_size 100m`。
 - **SSE**：`/qa/ask` 依赖 `proxy_buffering off` + `proxy_read_timeout 600s` 保证流式不被缓冲、不超时。
+- **转发头**：携带 `X-Forwarded-For` / `X-Forwarded-Proto`，便于云负载均衡与 Guard 审计记录真实 IP。
 
 ### 1.3 RAG 问答数据流
 
@@ -116,40 +119,43 @@ nginx 反向代理 (reverse-proxy.conf, :8080)
 ```text
 问题输入
   │
+  ├─[0] LLM Guard：本地规则 + 可选 LLM 意图分类；恶意 → SSE guard_blocked 并结束
   ├─[会话] 有 session_id → 校验归属并续聊（expired 自动恢复 active）；无 session_id → 始终新建
   │         （X-Guest-Id 仅访客归属，不自动复用旧会话）
   ├─[范围] resolve_kb_targets：按身份计算可访问且已建索引的知识库
   ├─[记忆] 从 Redis 热态（或回填 PostgreSQL 历史）加载最近 N 轮 + 摘要
-  ├─[改写] LLM 结合历史改写查询（失败/过长则回退原问）
+  ├─[改写] Query 预处理（改写/扩展/HyDE，可配置）；失败则回退原问
   ├─[检索] HybridRetriever：向量(Chroma) + 全文(PostgreSQL tsvector/trgm)
-  │         └─ hybrid 策略用 RRF(k=60) 融合，阈值过滤 + 软兜底
-  ├─[生成] 组装系统提示 + 摘要 + 历史 + 证据块 → LLM.stream_chat
-  │         └─ SSE 逐字下发 chunk；记录 token 用量到 Langfuse
-  ├─[兜底] 无证据时：仅提示 / LLM 参考回答 /（可选）Web 搜索，严禁编造来源
-  └─[落库] 写入 QAMessage（含 citations），更新会话与 Redis 记忆，overflow 触发摘要
+  │         └─ hybrid 用 RRF 融合 → 可选 Rerank → 阈值过滤 + 软兜底
+  ├─[生成] 组装系统提示 + 摘要 + 历史 + 证据块 → LLM 流式输出（可含思考）
+  │         └─ SSE 下发 chunk；用量上报 Langfuse
+  ├─[兜底] 无证据时：仅提示 / LLM 参考回答，严禁编造来源
+  └─[落库] 写入 QAMessage（含 citations），更新会话与 Redis 记忆
      │
      ▼
-  SSE 事件：chunk（增量文本）→ citations（引用来源）→ done（session_id/message_id/confidence）
-            出错时 error
+  SSE 事件：intent →（可选 query_processing / cache_hit）→ chunk* → citations → done
+            安全拒绝时 guard_blocked；出错时 error
 
 闲置超过 `QA_SESSION_IDLE_EXPIRE_MINUTES` 的会话由后台扫描标为 `expired` 并清理 Redis；历史仍可查看，续聊可重新激活。
 ```
 
 ### 1.4 服务与端口
 
-| 服务 | 镜像 | 宿主机端口 | 说明 |
-|------|------|-----------|------|
-| **nginx**（统一入口） | `nginx:1.25-alpine` | **8080** | **推荐入口**：静态 + `/api` + `/grafana` 反代 |
+| 服务 | 镜像 | 宿主机端口（本机 compose） | 说明 |
+|------|------|---------------------------|------|
+| **nginx**（统一入口） | `nginx:1.25-alpine` | **18080→8080** | **推荐入口**：静态 + `/api` + `/grafana` 反代 |
 | web（静态） | `nginx:1.25-alpine` | 80 | 仅静态资源，内部被反代引用 |
-| api | 由 `backend/Dockerfile` 构建 | 8000 | FastAPI，`/docs` Swagger |
+| api | 由 `backend/Dockerfile` 构建 | **18000→8000** | FastAPI；生产请勿对公网暴露 |
 | postgres | `postgres:16-alpine` | 5432 | 业务主库（uuid-ossp + pg_trgm） |
-| redis | `redis:7-alpine` | **16379→6379** | Windows 保留 6379，故宿主机映射 16379；容器内仍 `redis:6379` |
-| chroma | `chromadb/chroma:latest` | 8001→8000 | 向量库（Client-Server 持久化模式） |
-| minio | `minio/minio:latest` | 9000 / 9001 | 对象存储 API / 控制台 |
+| redis | `redis:7-alpine` | **16379→6379** | Windows 常保留 6379；容器内仍 `redis:6379` |
+| chroma | `chromadb/chroma:latest` | **18001→8000** | 向量库（Client-Server 持久化） |
+| minio | `minio/minio:latest` | **19000/19001** | 对象存储 API / 控制台 |
 | prometheus | `prom/prometheus:latest` | 9090 | 指标采集 |
-| grafana | `grafana/grafana:latest` | 3001→3000 | 面板（子路径 `/grafana`，允许匿名 Viewer + iframe） |
+| grafana | `grafana/grafana:latest` | 3001→3000 | 面板（子路径 `/grafana`） |
 
-> LLM 追踪与用量监测对接 **Langfuse Cloud**（或任意兼容端点），通过 `.env` 的 `LANGFUSE_*` 配置；Compose **不再**内置 `langfuse-server` / `langfuse-db`。
+> 云端请使用 `docker-compose.prod.yml`：仅暴露统一入口，数据面端口不对公网开放。详见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)。
+
+> LLM 追踪与用量监测对接 **Langfuse Cloud**（或任意兼容端点），通过 `.env` 的 `LANGFUSE_*` 配置；Compose **不再**内置 Langfuse 容器。
 
 ---
 
@@ -186,18 +192,21 @@ app/
 
 | 模块 | 路由前缀 | 关键服务 | 能力概述 |
 |------|----------|----------|----------|
-| 认证与用户中心 | `/api/v1/auth` | — | 注册、登录、刷新 Token、当前用户信息、改资料 |
-| 用户管理 | `/api/v1/users` | — | 用户 CRUD（含删除）、启停、角色绑定（全量覆盖）；仅可管理等级更低的用户，写审计 |
-| 角色与权限 | `/api/v1/roles` | — | 角色 CRUD、权限清单；**配置权限仅超管**；内置角色受保护 |
-| 部门管理 | `/api/v1/departments` | `department.py` | 部门 CRUD、成员与知识库关联；GUEST（访客专用）部门受保护 |
-| 大模型管理 | `/api/v1/models` | `model_config.py`、`model_usage.py` | LLM/Embedding/Rerank 配置（密钥仅存环境变量名）、Langfuse 用量监测 |
-| 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py` | KB CRUD、重向量化、进度、KB 级权限授权 |
-| 文档管理 | `/api/v1/knowledge-bases/{kb_id}/documents` | `document_service.py`、`document_pipeline.py` | 上传、解析、分段规则/预览、重分段、规范化、chunk 编辑、失败重试 |
-| 智能问答 | `/api/v1/qa` | `qa_pipeline.py` | SSE 流式问答、会话管理、反馈；访客可用 |
-| 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例 CRUD、执行、多策略对比、Recall@K/MRR、CSV 导出 |
-| 快照管理 | `/api/v1/knowledge-bases/{kb_id}/snapshots` | `snapshot.py` | 手动/自动快照、回退预览、回退（含保护快照）、清理 |
-| 审计日志 | `/api/v1/audit` | `audit.py`（AuditService） | 操作审计查询与详情（含变更对比） |
-| 系统监控 | `/api/v1/monitor` | `monitor.py` | 健康检查（公开）、系统统计；`/metrics` Prometheus |
+| 认证与用户中心 | `/api/v1/auth` | — | 注册、登录、刷新 Token、当前用户、改资料、**修改密码**（超管除外） |
+| 用户管理 | `/api/v1/users` | — | 用户 CRUD、启停、角色绑定；仅可管理等级更低的用户 |
+| 角色与权限 | `/api/v1/roles` | — | 角色 CRUD、权限清单；**配置权限仅超管** |
+| 部门管理 | `/api/v1/departments` | `department.py` | 部门 CRUD、成员与知识库关联；GUEST 部门受保护 |
+| 大模型管理 | `/api/v1/models` | `model_config.py`、`model_usage.py` | LLM/Embedding/Rerank 配置、Langfuse 用量 |
+| 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py` | KB CRUD、重向量化、进度、KB 级 ACL |
+| 文档管理 | `/api/v1/knowledge-bases/{kb_id}/documents` | `document_service.py`、`document_pipeline.py` | 上传、解析、分段、规范化、chunk 编辑、重试 |
+| 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`llm_guard.py` | SSE 流式问答（含 Guard）、会话、反馈；访客可用 |
+| 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例、执行、多策略对比；得分=命中片段相关度均值 |
+| 快照管理 | `/api/v1/knowledge-bases/{kb_id}/snapshots` | `snapshot.py` | 快照创建、回退预览与回退 |
+| RAGAS 评估 | `/api/v1/ragas` | `ragas_evaluation.py` | 样本预览/生成、评估运行与详情 |
+| 角色缓存 | `/api/v1/role-caches` | `role_cache.py` | 按角色缓存高频问题 |
+| Query 预处理 | `/api/v1/query-processing` | — | 改写/扩展/HyDE 策略配置 |
+| 审计日志 | `/api/v1/audit` | `audit.py` | 操作审计查询与详情 |
+| 系统监控 | `/api/v1/monitor` | `monitor.py` | 健康检查、统计、**Guard 拦截事件列表**；`/metrics` |
 
 ### 2.3 访问控制模型（部门驱动）
 
@@ -256,17 +265,17 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 `backend/app/retrieval/`：
 
 - **scope.py**：`resolve_kb_targets` 按 [2.3](#23-访问控制模型部门驱动) 计算可访问 KB，与请求 `kb_ids` 取交集，且**仅保留有 `current_index_version` 的 KB**（未建索引的库被跳过）。
-- **vector.py**：查询经 `embedding_service.embed_query` 向量化后调用 `chroma_store.aquery_multi_kb` 跨库检索，`score = 1/(1+distance)`。
-- **fulltext.py**：PostgreSQL 关键词检索。主路径 `plainto_tsquery('simple')` + `ts_rank_cd`（GIN on `content_tsv`）；召回不足时叠加 trigram（`similarity` + ILIKE，中文 n-gram 分词）。每条 SQL 在 savepoint 内执行，失败不污染外层事务。
-- **hybrid.py**：按策略分派。`hybrid` 在两路都命中时用 **RRF** 融合（`score = Σ 1/(k+rank)`，`k=QA_RRF_K=60`），应用相关性阈值（`QA_RELEVANCE_THRESHOLD=0.3`），并在阈值清空但原有命中时保留 top-k 软兜底。向量失败不阻断全文。
+- **vector.py**：查询经 `embedding_service.embed_query` 向量化后调用 Chroma 跨库检索；cosine 空间下展示相关度 `score = 1 - distance`（夹到 0–1）。
+- **fulltext.py**：PostgreSQL 关键词检索。主路径 `plainto_tsquery('simple')` + `ts_rank_cd`；召回不足时叠加 trigram；中文查询展示分可取 `max(pg_trgm, 字面覆盖率)`。
+- **hybrid.py**：按策略分派。`hybrid` 多路命中时用 **RRF** 融合并归一化，再可选 **Rerank**，最后应用相关性阈值与软兜底。
 
 ### 2.6 前端
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE，引用来源可折叠、置信度提示）、登录/注册、对话历史、个人中心、文档上传（员工/管理员）。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页（系统介绍 + 角色问候 + 统计图表）、用户/角色/部门管理、大模型管理（含 Langfuse 用量监测卡片）、知识库/文档/快照管理、命中率测试、审计日志、系统监控（内嵌 Grafana iframe）。
-- **共享** `frontend/shared/`：`api.js`（HTTP 客户端 + `askStream` SSE 读取器）、`auth.js`（会话与 RBAC 助手）、`router.js`、公共 CSS。
+- **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度、置信提示）、登录/注册、对话历史、个人中心（含改密）、文档上传（员工/管理员）。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标与安全窗口、用户/角色/部门、大模型与用量、知识库/文档工作台/快照、命中率测试、RAGAS、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（Grafana）、**API 接入指南**。
+- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、公共 CSS；接入指南 Markdown 亦挂在 `/assets/docs/`。
 
 ### 2.7 可观测性
 
@@ -291,30 +300,32 @@ docker compose up -d grafana
 
 | 入口 | 地址 |
 |------|------|
-| 统一入口 / 访客端 | http://localhost:8080/ |
-| 管理端 | http://localhost:8080/admin/ |
-| API Swagger | http://localhost:8080/docs |
-| 健康检查 | http://localhost:8080/api/v1/monitor/health |
-| Grafana | http://localhost:8080/grafana/ |
+| 统一入口 / 访客端 | http://localhost:18080/ |
+| 管理端 | http://localhost:18080/admin/ |
+| API Swagger | http://localhost:18080/docs |
+| 健康检查 | http://localhost:18080/api/v1/monitor/health |
+| Grafana | http://localhost:18080/grafana/ |
+| API 直连（调试） | http://localhost:18000/docs |
 
-> Langfuse 用量/追踪请在 `.env` 配置 `LANGFUSE_HOST` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（云端或自建端点均可）。
+> Langfuse：在 `.env` 配置 `LANGFUSE_HOST` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`。  
+> **云端**：`docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d --build`，见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)。
 
-**内置账号**（种子数据，默认密码在 `backend/app/main.py` 的 `seed_identity_data`）：
+**内置账号**（`SEED_DEMO_USERS=true` 时播种；云端建议关闭演示账号）：
 
 | 账号 | 角色 | 默认密码 | 说明 |
 |------|------|----------|------|
-| `super` | super_admin | `Super123!` | 超级管理员 |
-| `admin` | admin | `Admin123!` | 系统管理员 |
-| `staff_a` | staff | `Staff123!` | A 部门员工 |
-| `staff_b` | staff | `Staff123!` | B 部门员工 |
+| `super` | super_admin | 见 `.env` 的 `SUPER_ADMIN_PASSWORD`（示例 `Super123!`） | 唯一固定超管；**不可页面改密** |
+| `admin` | admin | `Admin123!` | 系统管理员（演示） |
+| `staff_a` | staff | `Staff123!` | A 部门员工（演示） |
+| `staff_b` | staff | `Staff123!` | B 部门员工（演示） |
 
-> 请务必在正式环境修改上述默认密码，并使用强随机的 `SECRET_KEY` / `JWT_SECRET_KEY`。
+> 正式环境务必使用强随机 `SECRET_KEY` / `JWT_SECRET_KEY` / 超管密码，并设置 `DEPLOYMENT_MODE=cloud`。
 
-**本地开发**：本项目要求 **Python 3.10**。可在 `api` 容器内执行 lint/测试，或使用等价 3.10 环境：
+**本地开发**：要求 **Python 3.10**。可在 `api` 容器内执行测试，或：
 
 ```bash
 pip install -r requirements.txt
-# .env 中主机改为 localhost；CHROMA_PORT=8001；REDIS 宿主机端口 16379
+# 宿主机调试时：POSTGRES/REDIS/CHROMA 指向 localhost；CHROMA_PORT=18001；REDIS_PORT=16379
 uvicorn app.main:app --reload --app-dir backend --port 8000
 pytest backend/tests -q
 ```
@@ -327,19 +338,18 @@ pytest backend/tests -q
 
 | 分组 | 关键变量（默认） |
 |------|------------------|
-| 应用 | `APP_NAME`、`APP_VERSION=2.1.0`、`DEBUG=false`、`SECRET_KEY` |
-| PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=5432`、`POSTGRES_DB=knowledge_base`、`POSTGRES_USER=kb_user`、`POSTGRES_PASSWORD` |
-| Redis | `REDIS_HOST=redis`、`REDIS_PORT=6379`、`REDIS_DB=0` |
+| 应用 | `APP_NAME`、`APP_VERSION=2.1.0`、`DEBUG=false`、`DEPLOYMENT_MODE=local\|cloud`、`PUBLIC_BASE_URL`、`SECRET_KEY` |
+| 超管 / 种子 | `SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_SYNC_PASSWORD`、`SEED_DEMO_USERS`、`AUTH_REGISTER_ENABLED`、`METRICS_PUBLIC` |
+| PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=5432`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
+| Redis | `REDIS_HOST=redis`、`REDIS_PORT=6379`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
 | Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`、`CHROMA_TENANT`、`CHROMA_DATABASE` |
-| MinIO | `MINIO_ENDPOINT=minio:9000`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET=knowledge-base-docs` |
-| LLM | `LLM_PROVIDER=openai`、`LLM_API_KEY`、`LLM_MODEL=gpt-4o`、`LLM_BASE_URL`、`LLM_TIMEOUT_SECONDS=120`、`LLM_MAX_TOKENS=2048` |
-| Embedding | `EMBEDDING_PROVIDER=dashscope`、`EMBEDDING_API_KEY`、`EMBEDDING_MODEL_NAME=text-embedding-v3`、`EMBEDDING_API_BASE`、`EMBEDDING_BATCH_SIZE=10` |
-| Rerank（可选） | `RERANK_PROVIDER`、`RERANK_API_KEY`、`RERANK_MODEL` |
-| Langfuse | `LANGFUSE_HOST`（默认云端）、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`LANGFUSE_REDACT_MAX_LEN=500` |
-| JWT | `JWT_SECRET_KEY`、`JWT_ALGORITHM=HS256`、`ACCESS_TOKEN_EXPIRE_MINUTES=30`、`REFRESH_TOKEN_EXPIRE_DAYS=7` |
-| 快照 | `SNAPSHOT_MAX_COUNT=50`、`SNAPSHOT_RETENTION_DAYS=90` |
-| 上传 | `MAX_UPLOAD_BYTES=104857600`（100MB）、`VIRUS_SCAN_ENABLED=false` |
-| 问答/记忆 | `QA_CONTEXT_WINDOW=10`、`QA_SESSION_TTL_MINUTES=30`、`QA_SESSION_IDLE_EXPIRE_MINUTES=30`、`QA_SESSION_EXPIRE_SWEEP_SECONDS=60`、`QA_DEFAULT_STRATEGY=hybrid`、`QA_DEFAULT_TOP_K=5`、`QA_RELEVANCE_THRESHOLD=0.3`、`QA_RRF_K=60`、`QA_GUEST_SESSION_TTL_MINUTES=30` |
+| MinIO | `MINIO_ENDPOINT=minio:9000`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET` |
+| LLM | `LLM_PROVIDER=dashscope`、`LLM_API_KEY`、`LLM_MODEL=qwen3.7-plus`、`LLM_BASE_URL`、思考相关开关 |
+| Embedding | `EMBEDDING_PROVIDER=dashscope`、`EMBEDDING_API_KEY`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_BATCH_SIZE` |
+| Rerank | `RERANK_PROVIDER=dashscope`、`RERANK_API_KEY`、`RERANK_MODEL` |
+| Langfuse | `LANGFUSE_HOST`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` |
+| JWT / CORS | `JWT_SECRET_KEY`、`ACCESS_TOKEN_EXPIRE_MINUTES=30`、`CORS_ORIGINS`、`CORS_ALLOW_CREDENTIALS` |
+| 问答 / Guard | `QA_*`、`LLM_GUARD_*`、`ROLE_CACHE_*`、`RAGAS_*` |
 
 > **安全提示**：模型 API Key 通过 `ModelConfig.api_key_env`（环境变量**名**）引用，**不落库、不在接口明文返回**。
 
@@ -376,18 +386,19 @@ pytest backend/tests -q
 
 | 脚本 | 位置 | 用途 |
 |------|------|------|
-| `e2e_real_stack.ps1` | `scripts/` | 禁用 Mock 的真实全栈 E2E：health → login → KB → 上传 → ready 轮询 → 命中率 → 快照 → SSE 问答，结果写本地 `e2e_results.json`（已 gitignore） |
-| `verify_qa_stack.ps1` | `scripts/` | QA 模块冒烟：拉起核心栈、迁移、访客 SSE 问答、`:8080` 入口健康检查 |
-| `generate_openapi.py` | `scripts/` | 生成 `docs/openapi.json`（OpenAPI 3.0.3 契约） |
-| `seed_qa_test_kb.py` | `scripts/` | 从 `testdata/qa_kb/*.md` 灌入测试知识库（依赖 PostgreSQL 全文，无需 Chroma） |
-| `reindex_chroma.py` | `backend/app/scripts/` | 容器内回填：将 `document_chunks` 重新写入 Chroma（`python -m app.scripts.reindex_chroma`） |
+| `e2e_real_stack.ps1` | `scripts/` | 真实全栈 E2E（health→登录→KB→上传→命中率→快照→SSE） |
+| `verify_qa_stack.ps1` | `scripts/` | QA 冒烟：核心栈与统一入口健康检查 |
+| `generate_openapi.py` | `scripts/` | 生成 `docs/openapi.json` |
+| `seed_qa_test_kb.py` | `scripts/` | 灌入测试知识库文档 |
+| `fix_unique_super_admin.py` | `scripts/` | 修正非固定账号上的超管角色 |
+| `reindex_chroma.py` | `backend/app/scripts/` | 将 `document_chunks` 回填 Chroma |
 
-**Windows 端口速查 / 释放**：
+**Windows 端口速查**：
 
 ```powershell
-$ports = 8000,8080,5432,16379,8001,9000,9001,9090,3001
+$ports = 18000,18080,5432,16379,18001,19000,19001,9090,3001,80
 foreach ($p in $ports) { netstat -ano | findstr ":$p " | findstr LISTENING }
-docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
+docker compose ps
 ```
 
 ---
@@ -398,12 +409,14 @@ docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
 
 | 文件 | 说明 |
 |------|------|
-| [`docs/openapi.json`](docs/openapi.json) | 机器可读 OpenAPI 3.0.3 契约（前后端唯一事实来源） |
-| [`docs/API.md`](docs/API.md) | 中文接口文档（逐接口详解：路径、权限、请求/响应字段、约束） |
+| [`docs/openapi.json`](docs/openapi.json) | OpenAPI 3.0.3 机器可读契约 |
+| [`docs/API.md`](docs/API.md) | 中文接口详解（字段、权限、约束） |
+| [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md) | 第三方 / Android 等接入指南 |
+| [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | 契约使用与变更流程 |
-| http://localhost:8080/docs | 运行时 Swagger UI |
+| 运行时 Swagger | http://localhost:18080/docs |
 
-重新生成契约：`python scripts/generate_openapi.py`。
+重新生成契约：`python scripts/generate_openapi.py`。管理端「API 接入指南」页渲染接入文档；完整字段以 `API.md` / `openapi.json` 为准。
 
 ---
 
@@ -428,20 +441,24 @@ docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
 │   ├── admin/               # 管理端 SPA（挂载 /admin/）
 │   └── shared/              # 共享 api/auth/router/css（/assets）
 ├── docker/
-│   ├── nginx/               # nginx.conf（web 静态）/ reverse-proxy.conf（:8080 入口）
+│   ├── nginx/               # nginx.conf（web）/ reverse-proxy.conf（统一入口）
 │   ├── postgres/init.sql    # 扩展与全文检索约定
 │   ├── prometheus/          # prometheus.yml / alerts.yml
 │   └── grafana/             # 数据源与面板 provisioning
 ├── docs/
-│   ├── openapi.json         # OpenAPI 契约
-│   ├── API.md               # 中文接口文档
-│   └── CONTRACT.md          # 契约使用说明
-├── scripts/                 # E2E / 契约生成 / 测试数据灌入
-├── testdata/qa_kb/          # 示例知识库文档
-├── docker-compose.yml
+│   ├── openapi.json              # OpenAPI 契约
+│   ├── API.md                    # 中文接口文档
+│   ├── API_INTEGRATION_GUIDE.md  # 第三方接入指南
+│   ├── CLOUD_DEPLOY.md           # 云端部署指南
+│   └── CONTRACT.md               # 契约说明
+├── scripts/                      # E2E / 契约生成 / 运维脚本
+├── docker-compose.yml            # 本机开发编排
+├── docker-compose.prod.yml       # 云端覆盖
 ├── requirements.txt
 └── .env.example
 ```
+
+> `docker/nginx/reverse-proxy.conf`：统一入口（容器 8080，本机常映射 18080）。
 
 ---
 
@@ -450,7 +467,7 @@ docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
 - **分支**：主开发 `develop`，稳定发布 `main`。
 - **提交**：Conventional Commits。
 - **CI**：`.github/workflows/ci.yml` 强制 `ruff` / `black` / `pytest` 通过。
-- **契约优先**：接口变更需先更新 `scripts/generate_openapi.py` 并重新生成 `docs/openapi.json`，同步 `docs/API.md`，评审后再改业务代码。
+- **契约优先**：接口变更需先更新 `scripts/generate_openapi.py` 并重新生成 `docs/openapi.json`，同步 `docs/API.md`（及必要时 `API_INTEGRATION_GUIDE.md` 与 `frontend/shared/docs/` 副本），评审后再改业务代码。
 
 ## 许可证
 

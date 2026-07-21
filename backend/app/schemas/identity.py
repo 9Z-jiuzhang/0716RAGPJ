@@ -58,6 +58,14 @@ class UserUpdateRequest(BaseModel):
     department: str | None = Field(default=None, max_length=50)
 
 
+class ChangePasswordRequest(BaseModel):
+    """当前登录用户修改自身密码；超管账号禁止走此接口。"""
+
+    old_password: str = Field(min_length=1, max_length=128, description="原密码")
+    new_password: str = Field(min_length=8, max_length=128, description="新密码")
+    confirm_password: str = Field(min_length=8, max_length=128, description="确认新密码")
+
+
 class UserStatusRequest(BaseModel):
     status: str = Field(pattern="^(active|disabled|pending)$")
 

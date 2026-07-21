@@ -27,6 +27,7 @@ from app.models.knowledge_base import KBPermission, KnowledgeBase
 from app.schemas.common import PageResponse
 from app.schemas.enums import KnowledgeBaseStatus, KnowledgeBaseType, Visibility
 from app.schemas.knowledge_base import (
+    KBPermissionItem,
     KBPermissionUpdate,
     KnowledgeBaseCreate,
     KnowledgeBaseFilter,
@@ -141,7 +142,7 @@ class KnowledgeBaseService:
     async def get_kb(self, kb_id: str, current_user: User) -> KnowledgeBaseResponse:
         """获取知识库详情（调用方已做权限校验）。"""
         kb = await self._get_active_kb(kb_id)
-        return await self._to_response(kb)
+        return await self._to_response(kb, include_permissions=True)
 
     async def update_kb(self, kb_id: str, data: KnowledgeBaseUpdate, user_id: UUID) -> KnowledgeBaseResponse:
         """更新知识库元信息。"""
@@ -364,7 +365,7 @@ class KnowledgeBaseService:
             raise KnowledgeBaseNotFoundException(kb_id)
         return kb
 
-    async def _to_response(self, kb: KnowledgeBase) -> KnowledgeBaseResponse:
+    async def _to_response(self, kb: KnowledgeBase, *, include_permissions: bool = False) -> KnowledgeBaseResponse:
         doc_count = await self.db.scalar(select(func.count()).select_from(Document).where(Document.kb_id == kb.id)) or 0
         chunk_count = (
             await self.db.scalar(
@@ -387,6 +388,19 @@ class KnowledgeBaseService:
             status = KnowledgeBaseStatus(kb.status)
         except ValueError:
             status = KnowledgeBaseStatus.ACTIVE
+        permissions: list[KBPermissionItem] = []
+        if include_permissions:
+            rows = (
+                await self.db.scalars(select(KBPermission).where(KBPermission.kb_id == kb.id).order_by(KBPermission.created_at))
+            ).all()
+            permissions = [
+                KBPermissionItem(
+                    user_id=row.user_id,
+                    role_id=row.role_id,
+                    permission=row.permission_code,
+                )
+                for row in rows
+            ]
         return KnowledgeBaseResponse(
             id=kb.id,
             name=kb.name,
@@ -405,6 +419,7 @@ class KnowledgeBaseService:
             creator_id=kb.creator_id,
             created_at=kb.created_at,
             updated_at=kb.updated_at,
+            permissions=permissions,
         )
 
     @staticmethod
