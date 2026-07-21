@@ -73,7 +73,10 @@ def _role_names(user: User) -> set[str]:
 
 
 def is_super_admin(user: User) -> bool:
-    return "super_admin" in _role_names(user)
+    # 唯一固定超管账号；不以可分配的 super_admin 角色作为判定来源
+    from app.core.super_admin_policy import is_fixed_super_account
+
+    return is_fixed_super_account(user)
 
 
 def is_platform_admin(user: User) -> bool:

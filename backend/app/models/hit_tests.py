@@ -65,6 +65,8 @@ class TestQuestions(Base):
     question: Mapped[str] = mapped_column(Text, nullable=False)
     expected_doc_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
     expected_chunk_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
+    expected_answer: Mapped[str | None] = mapped_column(Text)
+    context: Mapped[str | None] = mapped_column(Text)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     case = relationship("TestCases", back_populates="questions")

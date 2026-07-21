@@ -98,12 +98,36 @@ function renderAssistantBubbleHtml(rawText, extrasHtml = "") {
 }
 
 function formatRetrievalRelevance(value) {
-  // 引用分数来自 cosine、全文相似度、RRF 或 Rerank，统一限制到 0-1 后
-  // 保留一位小数，避免整数取整把多个不同分数误显示成同一个百分比。
+  // 引用分数来自 cosine、全文相似度、RRF 或 Rerank；非法值显示 --
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "未知";
-  const bounded = Math.max(0, Math.min(1, numeric));
+  if (!Number.isFinite(numeric) || numeric < 0) return "--";
+  // 后端约定 0~1；若误传百分比则归一
+  const bounded = numeric > 1 && numeric <= 100 ? numeric / 100 : Math.max(0, Math.min(1, numeric));
+  if (!Number.isFinite(bounded)) return "--";
   return `${(bounded * 100).toFixed(1)}%`;
+}
+
+function formatConfidenceTip(data) {
+  const levelMap = { high: "高", medium: "中", low: "低" };
+  const levelRaw = data?.confidence;
+  const scoreRaw = data?.confidence_score;
+  const scoreNum = Number(scoreRaw);
+  const hasScore = Number.isFinite(scoreNum) && scoreNum >= 0 && scoreNum <= 1;
+  const level =
+    typeof levelRaw === "string" && levelMap[levelRaw]
+      ? levelMap[levelRaw]
+      : hasScore
+        ? scoreNum >= 0.75
+          ? "高"
+          : scoreNum >= 0.4
+            ? "中"
+            : "低"
+        : null;
+  if (!level && !hasScore) {
+    return `<div class="confidence">置信提示：--（仅供参考，请结合引文核对）</div>`;
+  }
+  const scoreText = hasScore ? ` ${ (scoreNum * 100).toFixed(1) }%` : "";
+  return `<div class="confidence">置信提示：${level || "--"}${scoreText}（仅供参考，请结合引文核对）</div>`;
 }
 
 /** 登录成功后按角色跳转（优先使用后端 landing_href） */
@@ -533,9 +557,7 @@ async function sendQuestion() {
           if (event === "done") {
             bubble.classList.remove("streaming-cursor");
             currentSessionId = data.session_id || currentSessionId;
-            const conf = data.confidence || "medium";
-            const map = { high: "高", medium: "中", low: "低" };
-            confidenceTip = `<div class="confidence">置信提示：${map[conf] || conf}（仅供参考，请结合引文核对）</div>`;
+            confidenceTip = formatConfidenceTip(data);
             bubble.innerHTML = renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}`);
           }
           // 错误

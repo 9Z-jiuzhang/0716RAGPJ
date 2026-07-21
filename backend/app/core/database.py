@@ -92,6 +92,8 @@ async def ensure_schema_patches() -> None:
         # 向量化任务表：旧库缺 TimestampMixin.updated_at
         "ALTER TABLE vectorize_tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NULL",
         "UPDATE vectorize_tasks SET updated_at = COALESCE(updated_at, created_at, NOW()) WHERE updated_at IS NULL",
+        "ALTER TABLE test_questions ADD COLUMN IF NOT EXISTS expected_answer TEXT NULL",
+        "ALTER TABLE test_questions ADD COLUMN IF NOT EXISTS context TEXT NULL",
         """
         DO $$ BEGIN
           ALTER TABLE vectorize_tasks

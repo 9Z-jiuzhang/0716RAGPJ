@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.memory.models import ContextMessage
 from app.memory.session_store import SessionAccessError, session_store
 from app.models.identity import User
+from app.utils.confidence import aggregate_retrieval_confidence, clamp_display_score
 from app.models.qa import QAMessage, QASession
 from app.retrieval import hybrid_retriever, resolve_kb_targets
 from app.retrieval.types import RetrievalHit, RetrievalStrategy
@@ -269,6 +270,7 @@ class QAPipeline:
                     request_id=tracker.request_id,
                     performance=tracker.to_dict(),
                     confidence="high",
+                    confidence_score=1.0,
                     cache_hit=True,
                 )
                 return
@@ -444,13 +446,18 @@ class QAPipeline:
                 pass
             lf.flush()
 
+            conf_level, conf_score = aggregate_retrieval_confidence(
+                [c.get("score") for c in citations],
+                no_evidence=bool(retrieval_meta.get("reason")) or not citations,
+            )
             yield self._event(
                 "done",
                 session_id=str(session.id),
                 message_id=str(assistant_msg_id),
                 request_id=tracker.request_id,
                 performance=tracker.to_dict(),
-                confidence="low" if retrieval_meta.get("reason") else "high",
+                confidence=conf_level,
+                confidence_score=conf_score,
             )
 
         except SessionAccessError as exc:
@@ -724,6 +731,7 @@ class QAPipeline:
             citation["doc_id"] = str(uuid.UUID(citation["doc_id"]))
         except (ValueError, TypeError):
             citation["doc_id"] = citation["doc_id"]
+        citation["score"] = clamp_display_score(citation.get("score"))
         return citation
 
     async def _persist_turn(

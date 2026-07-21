@@ -16,6 +16,20 @@ clearDemoFlags();
 initTheme();
 initMotion();
 
+/** 将 0~1 置信度安全格式化为百分比文案；非法则 -- */
+function formatPercentCell(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return "--";
+  const bounded = n > 1 && n <= 100 ? n / 100 : Math.max(0, Math.min(1, n));
+  return `${Math.round(bounded * 100)}%`;
+}
+
+function formatPercentSafe(value, suffix) {
+  const cell = formatPercentCell(value);
+  if (cell === "--") return "";
+  return `（${cell}${suffix ? `，${suffix}` : ""}）`;
+}
+
 /** 管理端菜单（分组展示；按权限码裁剪；前端隐藏不能替代后端鉴权） */
 const MENU_GROUPS = [
   {
@@ -362,12 +376,12 @@ function openUserRolePicker({ user, roles, departments = [], onSave }) {
   const dialogId = `userRole-${Date.now()}`;
   const current = new Set(user.roles || []);
   const iAmSuper = isSuperAdmin();
-  // 超管可分配 admin / super_admin；普通管理员不可分配 admin 或超管
+  // 全系统禁止分配/撤销超管；角色列表永不出现 super_admin
   const options = (roles || [])
     .filter((r) => {
-      if (r.name === "user" || r.name === "kb_admin") return false;
+      if (r.name === "user" || r.name === "kb_admin" || r.name === "super_admin") return false;
       if (iAmSuper) return true;
-      return r.name !== "super_admin" && r.name !== "admin";
+      return r.name !== "admin";
     })
     .map(
       (r) => `<label><input type="radio" name="role_id" value="${escapeHtml(r.id)}" ${current.has(r.name) ? "checked" : ""}>
@@ -380,7 +394,7 @@ function openUserRolePicker({ user, roles, departments = [], onSave }) {
       <form class="modal" style="max-width:520px;width:92%">
         <div class="modal-header"><h3>变更「${escapeHtml(user.username)}」角色</h3></div>
         <div class="modal-body">
-          <p class="text-muted">${iAmSuper ? "超管可将用户设为管理员或超级管理员。" : "管理员不可将他人设为管理员或超级管理员，也不可改超管账号。"}</p>
+          <p class="text-muted">系统仅支持唯一超管账号 super，界面不可增设或撤销超管。${iAmSuper ? "可将用户设为管理员/员工/访客。" : "管理员不可将他人设为管理员，也不可改超管账号。"}</p>
           <div class="checkbox-grid">${options || "<span class='text-muted'>无可分配角色</span>"}</div>
           <label class="form-label" style="margin-top:12px">所属部门（员工上传隔离用）</label>
           <select class="form-control" name="department">
@@ -420,9 +434,9 @@ async function openCreateUserForm() {
       loadDepartmentOptions(),
     ]);
     roles = (roleData.items || []).filter((r) => {
-      if (r.name === "user" || r.name === "kb_admin") return false;
+      if (r.name === "user" || r.name === "kb_admin" || r.name === "super_admin") return false;
       if (isSuperAdmin()) return true;
-      return r.name !== "super_admin" && r.name !== "admin";
+      return r.name !== "admin";
     });
     departments = deptData;
   } catch (e) {
@@ -544,14 +558,17 @@ async function pageUsers() {
           <tbody>
             ${items
               .map((u) => {
+                const isFixedSuper = String(u.username || "") === "super";
                 const st = u.status === "active" ? `<span class="badge badge-success">活跃</span>` : u.status === "disabled" ? `<span class="badge badge-danger">禁用</span>` : `<span class="badge badge-warning">待验证</span>`;
-                const locked = Boolean(u.is_super_admin) && !isSuperAdmin();
                 const myRank = isSuperAdmin() ? 100 : isAdminUser() ? 50 : 0;
-                const targetRank = maxRoleRankOfUser(u);
-                const canManage = canWrite && !locked && targetRank < myRank;
+                const targetRank = isFixedSuper ? 100 : maxRoleRankOfUser(u);
+                const canManage = canWrite && !isFixedSuper && targetRank < myRank;
+                const roleCell = isFixedSuper
+                  ? `<span class="badge">超级管理员</span>`
+                  : escapeHtml(roleLabelOf(u));
                 const ops = canWrite
-                  ? locked
-                    ? `<span class="cell-muted">权限不足</span>`
+                  ? isFixedSuper
+                    ? `<span class="cell-muted">固定超管（不可操作）</span>`
                     : canManage
                       ? `<div class="table-actions">
                     <button type="button" class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
@@ -564,7 +581,7 @@ async function pageUsers() {
                   <td class="col-name"><strong class="cell-primary">${escapeHtml(u.username)}</strong></td>
                   <td>${escapeHtml(u.nickname || "-")}</td>
                   <td class="col-status">${st}</td>
-                  <td class="cell-role">${escapeHtml(roleLabelOf(u))}</td>
+                  <td class="cell-role">${roleCell}</td>
                   <td>${escapeHtml(u.department || "-")}</td>
                   <td class="col-time"><span class="cell-time">${formatDateTime(u.created_at)}</span></td>
                   <td class="col-time"><span class="cell-time">${formatDateTime(u.last_login_at)}</span></td>
@@ -605,6 +622,10 @@ async function pageUsers() {
         const id = btn.getAttribute("data-role");
         const user = items.find((x) => x.id === id);
         if (!user) return;
+        if (String(user.username || "") === "super") {
+          toast("唯一超管账号 super 不可变更角色", "error");
+          return;
+        }
         if (user.is_super_admin && !isSuperAdmin()) {
           toast("无权变更超级管理员", "error");
           return;
@@ -641,6 +662,10 @@ async function pageUsers() {
         const id = btn.getAttribute("data-del-user");
         const user = items.find((x) => x.id === id);
         if (!user) return;
+        if (String(user.username || "") === "super") {
+          toast("唯一超管账号 super 不可删除", "error");
+          return;
+        }
         const ok = await confirmDialog({
           title: "删除用户",
           message: `确定删除用户「${user.username}」？此操作不可恢复。`,
@@ -2686,7 +2711,7 @@ async function pageHitTest() {
     const mask = document.createElement("div");
     mask.className = "modal-mask";
     mask.innerHTML = `
-      <form class="modal" style="width:min(640px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+      <form class="modal" style="width:min(720px,calc(100vw - 24px));max-height:90vh;overflow:auto">
         <div class="modal-header"><h3>新建测试用例</h3></div>
         <div class="modal-body">
           <label class="form-label">用例名称</label>
@@ -2695,11 +2720,12 @@ async function pageHitTest() {
           <input class="form-control" name="description" placeholder="可选" />
           <label class="form-label" style="margin-top:10px">关联知识库（用于选择期望文档）</label>
           <select class="form-control" id="caseKbPick">${kbOptions || "<option value=''>暂无知识库</option>"}</select>
-          <label class="form-label" style="margin-top:10px">问题列表（每行一题；必须用「|文档名关键字」标注期望文档）</label>
-          <textarea class="form-control" name="questions" rows="8" required placeholder="试用期年假怎么折算？|年假
-加班如何申请调休？|考勤
-礼品超过多少需要上交？|合规"></textarea>
-          <p class="text-muted" style="margin:8px 0 0;font-size:12px">命中率必须与标准答案比较。示例：问题文本|文档名关键字；关键字必须匹配至少一份文档，否则不能创建测试用例。</p>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px">
+            <label class="form-label" style="margin:0">Examples（可多条）</label>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnAddExample">添加 Example</button>
+          </div>
+          <div id="exampleList" style="display:flex;flex-direction:column;gap:10px;margin-top:8px"></div>
+          <p class="text-muted" style="margin:8px 0 0;font-size:12px">每条 Example 需填写问题，并用文档名关键字标注期望文档；可选填写期望答案与上下文。命中率仍按期望文档/分段匹配计算。</p>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-close>取消</button>
@@ -2711,6 +2737,38 @@ async function pageHitTest() {
     mask.addEventListener("click", (e) => {
       if (e.target === mask) mask.remove();
     });
+
+    const exampleList = mask.querySelector("#exampleList");
+    const addExampleRow = (preset = {}) => {
+      const row = document.createElement("div");
+      row.className = "example-row";
+      row.style.cssText = "padding:12px;border:1px solid var(--color-border);border-radius:var(--radius);background:var(--color-bg)";
+      row.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
+          <strong style="font-size:13px">Example</strong>
+          <button type="button" class="btn btn-danger btn-sm" data-remove-example>删除</button>
+        </div>
+        <label class="form-label">问题</label>
+        <input class="form-control" name="ex_question" required placeholder="试用期年假怎么折算？" value="${escapeHtml(preset.question || "")}" />
+        <label class="form-label" style="margin-top:8px">期望文档关键字</label>
+        <input class="form-control" name="ex_doc_hint" required placeholder="如：年假" value="${escapeHtml(preset.docHint || "")}" />
+        <label class="form-label" style="margin-top:8px">期望答案（可选）</label>
+        <textarea class="form-control" name="ex_expected_answer" rows="2" placeholder="可选">${escapeHtml(preset.expectedAnswer || "")}</textarea>
+        <label class="form-label" style="margin-top:8px">上下文（可选）</label>
+        <textarea class="form-control" name="ex_context" rows="2" placeholder="可选">${escapeHtml(preset.context || "")}</textarea>
+      `;
+      row.querySelector("[data-remove-example]").onclick = () => {
+        if (exampleList.children.length <= 1) {
+          toast("至少保留一条 Example", "error");
+          return;
+        }
+        row.remove();
+      };
+      exampleList.appendChild(row);
+    };
+    mask.querySelector("#btnAddExample").onclick = () => addExampleRow();
+    addExampleRow();
+
     mask.querySelector("form").onsubmit = async (ev) => {
       ev.preventDefault();
       const fd = new FormData(ev.currentTarget);
@@ -2718,31 +2776,42 @@ async function pageHitTest() {
       const description = String(fd.get("description") || "").trim() || null;
       const kbId = mask.querySelector("#caseKbPick")?.value || "";
       const docs = (docsByKb[kbId] && docsByKb[kbId].docs) || [];
-      const lines = String(fd.get("questions") || "")
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-      if (!name || !lines.length) {
-        toast("请填写名称与至少一个问题", "error");
+      if (!name) {
+        toast("请填写用例名称", "error");
         return;
       }
-      const invalidLines = [];
-      const questions = lines.map((line, index) => {
-        const [q, hint] = line.split("|").map((s) => s.trim());
+      const rows = [...exampleList.querySelectorAll(".example-row")];
+      if (!rows.length) {
+        toast("请至少添加一条 Example", "error");
+        return;
+      }
+      const examples = [];
+      const invalid = [];
+      rows.forEach((row, index) => {
+        const question = String(row.querySelector('[name="ex_question"]')?.value || "").trim();
+        const hint = String(row.querySelector('[name="ex_doc_hint"]')?.value || "").trim();
+        const expected_answer = String(row.querySelector('[name="ex_expected_answer"]')?.value || "").trim() || null;
+        const context = String(row.querySelector('[name="ex_context"]')?.value || "").trim() || null;
         let expected_doc_ids = null;
         if (hint) {
           const matched = docs.filter((d) => String(d.filename || "").includes(hint));
           if (matched.length) expected_doc_ids = matched.map((d) => d.id);
         }
-        if (!q || !hint || !expected_doc_ids?.length) invalidLines.push(index + 1);
-        return { question: q || line, expected_doc_ids, expected_chunk_ids: null };
+        if (!question || !hint || !expected_doc_ids?.length) invalid.push(index + 1);
+        examples.push({
+          question: question || `示例${index + 1}`,
+          expected_answer,
+          context,
+          expected_doc_ids,
+          expected_chunk_ids: null,
+        });
       });
-      if (invalidLines.length) {
-        toast(`第 ${invalidLines.join("、")} 行缺少有效的期望文档关键字`, "error");
+      if (invalid.length) {
+        toast(`第 ${invalid.join("、")} 条 Example 缺少有效问题或期望文档关键字`, "error");
         return;
       }
       try {
-        await api.post("/hit-tests/cases", { name, description, questions });
+        await api.post("/hit-tests/cases", { name, description, examples, questions: [] });
         toast("用例已创建", "success");
         mask.remove();
         pageHitTest();
@@ -3742,7 +3811,7 @@ async function openQaSessionDetail(sessionId) {
                 </div>
                 <div style="display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px 12px;margin-top:12px;line-height:1.65">
                   <span class="text-muted">原始 Query</span><div>${escapeHtml(original)}</div>
-                  <span class="text-muted">识别意图</span><div>${escapeHtml(intent.name || "历史记录未包含意图")} ${intent.confidence != null ? `（${Math.round(Number(intent.confidence) * 100)}%，${intent.detector === "llm" ? "LLM 分类器" : "本地规则"}）` : ""}</div>
+                  <span class="text-muted">识别意图</span><div>${escapeHtml(intent.name || "历史记录未包含意图")} ${formatPercentSafe(intent.confidence, intent.detector === "llm" ? "LLM 分类器" : "本地规则")}</div>
                   <span class="text-muted">改写 Query</span><div>${escapeHtml(rewritten)}</div>
                   <span class="text-muted">扩展 Query</span><div>${expansions.length ? expansions.map((item) => `<code style="display:inline-block;margin:0 6px 6px 0">${escapeHtml(item)}</code>`).join("") : "-"}</div>
                   <span class="text-muted">HyDE 假设文档</span><div style="white-space:pre-wrap">${hyde ? escapeHtml(hyde) : "-"}</div>
@@ -4000,7 +4069,7 @@ async function pageMonitor() {
                       <td>${escapeHtml(event.intent)}</td>
                       <td><code>${escapeHtml(event.reason_code)}</code></td>
                       <td>${event.detector === "llm" ? "LLM 分类器" : "本地规则"}</td>
-                      <td>${Math.round(Number(event.confidence || 0) * 100)}%</td>
+                      <td>${formatPercentCell(event.confidence)}</td>
                     </tr>`
                   )
                   .join("")

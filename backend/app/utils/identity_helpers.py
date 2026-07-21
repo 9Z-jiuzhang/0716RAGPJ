@@ -38,7 +38,9 @@ def role_names_for(user: User) -> list[str]:
 
 
 def is_super_admin_user(user: User) -> bool:
-    return any(r.name == "super_admin" and r.is_enabled for r in user.roles)
+    from app.core.super_admin_policy import is_fixed_super_account
+
+    return is_fixed_super_account(user)
 
 
 def is_platform_admin_user(user: User) -> bool:

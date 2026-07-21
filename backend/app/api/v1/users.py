@@ -6,6 +6,11 @@ from app.api.helpers import ok, resolve_request_id
 from app.core.database import get_db
 from app.core.dependencies import is_super_admin, require_permission
 from app.core.security import hash_password
+from app.core.super_admin_policy import (
+    assert_create_user_roles,
+    assert_not_mutating_fixed_super,
+    assert_roles_respect_super_policy,
+)
 from app.models import AuditLog, Role, User
 from app.schemas.common import BaseResponse
 from app.schemas.identity import (
@@ -48,15 +53,21 @@ async def create_user(
         roles = (await db.scalars(select(Role).where(Role.id.in_([uuid.UUID(item) for item in data.role_ids])))).all()
         if len(roles) != len(data.role_ids):
             raise HTTPException(status_code=400, detail="包含不存在的角色")
+        assert_create_user_roles(
+            operator=operator,
+            username=data.username,
+            role_names={role.name for role in roles},
+        )
         if not is_super_admin(operator):
             op_rank = max_role_rank(operator)
             for role in roles:
                 if role_rank(role.name) >= op_rank:
                     raise HTTPException(
                         status_code=403,
-                        detail="无权分配管理员或超级管理员角色",
+                        detail="无权分配管理员或更高角色",
                     )
     else:
+        assert_create_user_roles(operator=operator, username=data.username, role_names=set())
         default_role = await db.scalar(select(Role).where(Role.name == "guest"))
         if not default_role:
             raise HTTPException(status_code=503, detail="默认访客角色不存在")
@@ -187,6 +198,7 @@ async def set_status(
     user = await db.scalar(select(User).options(selectinload(User.roles)).where(User.id == uuid.UUID(user_id)))
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    assert_not_mutating_fixed_super(operator=operator, target=user, action="set_status")
     _assert_can_manage(operator, user, action="变更状态")
     user.status = data.status
     db.add(
@@ -219,16 +231,25 @@ async def set_roles(
         raise HTTPException(status_code=400, detail="包含不存在的角色")
 
     _assert_can_manage(operator, user, action="变更角色")
+    assert_not_mutating_fixed_super(operator=operator, target=user, action="set_roles")
 
-    # 超管可分配任意角色（含 admin / super_admin）；
-    # 普通管理员不可分配 admin 或更高
+    old_names = {r.name for r in (user.roles or [])}
+    new_names = {r.name for r in roles}
+    assert_roles_respect_super_policy(
+        operator=operator,
+        target=user,
+        new_role_names=new_names,
+        old_role_names=old_names,
+    )
+
+    # 普通管理员不可分配 admin 或更高（超管角色已在策略中禁止）
     if not is_super_admin(operator):
         op_rank = max_role_rank(operator)
         for role in roles:
             if role_rank(role.name) >= op_rank:
                 raise HTTPException(
                     status_code=403,
-                    detail="无权将他人设为管理员或超级管理员",
+                    detail="无权将他人设为管理员或更高角色",
                 )
 
     user.roles = list(roles)
@@ -238,7 +259,7 @@ async def set_roles(
             action="user.roles",
             resource_type="user",
             resource_id=user_id,
-            detail={"role_ids": data.role_ids},
+            detail={"role_ids": data.role_ids, "role_names": sorted(new_names)},
         )
     )
     await db.commit()
@@ -257,6 +278,7 @@ async def delete_user(
     user = await db.scalar(select(User).options(selectinload(User.roles)).where(User.id == uuid.UUID(user_id)))
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    assert_not_mutating_fixed_super(operator=operator, target=user, action="delete_user")
     _assert_can_manage(operator, user, action="删除")
     db.add(
         AuditLog(

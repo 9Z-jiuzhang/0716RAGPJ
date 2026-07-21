@@ -780,6 +780,11 @@ schemas["AskEventResponse"] = {
         "message_id": uuid_prop(nullable=True),
         "request_id": prop("string", nullable=True),
         "confidence": prop("string", enum=["high", "medium", "low"], nullable=True),
+        "confidence_score": prop(
+            "number",
+            "done 事件数值置信度，范围 0~1；无法计算时为 -1",
+            nullable=True,
+        ),
         "performance": {
             "type": "object",
             "nullable": True,

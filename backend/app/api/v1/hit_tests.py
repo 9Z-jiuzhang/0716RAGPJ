@@ -54,10 +54,10 @@ async def create_test_case(
 
     需要 test:write 权限。创建含期望文档/分段的问题集。
     """
-    if not request.questions or len(request.questions) == 0:
+    if (not request.questions) and (not request.examples):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="问题列表不能为空",
+            detail="问题列表或 examples 不能同时为空",
         )
 
     service = HitTestService(db)

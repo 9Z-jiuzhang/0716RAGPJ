@@ -17,6 +17,7 @@ from app.schemas.hit_tests import (
     CreateTestCaseRequest,
     TestCaseListResponse,
     TestCaseResponse,
+    TestExample,
     TestQuestion,
     TestResultResponse,
     TestRunListResponse,
@@ -104,27 +105,30 @@ class HitTestService:
         返回:
             创建后的测试用例响应
         """
-        # 命中率必须与人工标注的期望结果对比；未标注问题不能用“有召回即命中”代替。
-        self._validate_ground_truth(request.questions)
+        # 合并 questions 与 examples；命中率仍按期望文档/分段计算
+        questions = self._merge_questions_and_examples(request.questions, request.examples)
+        self._validate_ground_truth(questions)
 
         # 创建测试用例数据库记录
         case = TestCases(
             id=uuid.uuid4(),
             name=request.name,
             description=request.description,
-            question_count=len(request.questions),
+            question_count=len(questions),
         )
         self.db.add(case)
         await self.db.flush()
 
         # 创建测试问题记录
-        for idx, question in enumerate(request.questions):
+        for idx, question in enumerate(questions):
             test_question = TestQuestions(
                 id=uuid.uuid4(),
                 case_id=case.id,
                 question=question.question,
                 expected_doc_ids=question.expected_doc_ids,
                 expected_chunk_ids=question.expected_chunk_ids,
+                expected_answer=question.expected_answer,
+                context=question.context,
                 sort_order=idx,
             )
             self.db.add(test_question)
@@ -164,26 +168,29 @@ class HitTestService:
         if request.description is not None:
             case.description = request.description
 
-        # 更新问题列表（如果提供）
-        if request.questions is not None:
-            self._validate_ground_truth(request.questions)
+        # 更新问题列表（如果提供 questions 或 examples）
+        if request.questions is not None or request.examples is not None:
+            questions = self._merge_questions_and_examples(request.questions or [], request.examples)
+            self._validate_ground_truth(questions)
             # 删除现有问题记录
             await self.db.execute(TestQuestions.__table__.delete().where(TestQuestions.case_id == case_id))
 
             # 创建新的问题记录
-            for idx, question in enumerate(request.questions):
+            for idx, question in enumerate(questions):
                 test_question = TestQuestions(
                     id=uuid.uuid4(),
                     case_id=case.id,
                     question=question.question,
                     expected_doc_ids=question.expected_doc_ids,
                     expected_chunk_ids=question.expected_chunk_ids,
+                    expected_answer=question.expected_answer,
+                    context=question.context,
                     sort_order=idx,
                 )
                 self.db.add(test_question)
 
             # 更新问题数量
-            case.question_count = len(request.questions)
+            case.question_count = len(questions)
 
         # 提交事务
         await self.db.commit()
@@ -607,6 +614,26 @@ class HitTestService:
         return False, None
 
     @staticmethod
+    def _merge_questions_and_examples(
+        questions: list[TestQuestion] | None,
+        examples: list[TestExample] | None,
+    ) -> list[TestQuestion]:
+        merged: list[TestQuestion] = list(questions or [])
+        for item in examples or []:
+            merged.append(
+                TestQuestion(
+                    question=item.question,
+                    expected_doc_ids=item.expected_doc_ids,
+                    expected_chunk_ids=item.expected_chunk_ids,
+                    expected_answer=item.expected_answer,
+                    context=item.context,
+                )
+            )
+        if not merged:
+            raise ValueError("请至少提供一道问题或一个 Example")
+        return merged
+
+    @staticmethod
     def _validate_ground_truth(questions: list[TestQuestion]) -> None:
         """确保每道题至少标注一个期望文档或期望分段。
 
@@ -671,8 +698,20 @@ class HitTestService:
                 question=q.question,
                 expected_doc_ids=q.expected_doc_ids,
                 expected_chunk_ids=q.expected_chunk_ids,
+                expected_answer=getattr(q, "expected_answer", None),
+                context=getattr(q, "context", None),
             )
             for q in db_questions
+        ]
+        examples = [
+            TestExample(
+                question=q.question,
+                expected_answer=q.expected_answer,
+                context=q.context,
+                expected_doc_ids=q.expected_doc_ids,
+                expected_chunk_ids=q.expected_chunk_ids,
+            )
+            for q in questions
         ]
 
         return TestCaseResponse(
@@ -681,6 +720,7 @@ class HitTestService:
             description=case.description,
             question_count=case.question_count,
             questions=questions,
+            examples=examples,
             created_at=case.created_at,
         )
 

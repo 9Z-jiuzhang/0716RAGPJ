@@ -42,10 +42,14 @@ export function normalizeUser(user) {
   if (!user || typeof user !== "object") return user;
   const roles = [].concat(user.role || [], user.roles || []).map(String).filter(Boolean);
   const uniq = [...new Set(roles)];
-  // 若 roles 含 admin/super_admin，role 字段与之对齐，避免展示为 user
-  let role = user.role ? String(user.role) : uniq[0] || "user";
-  if (uniq.includes("super_admin")) role = "super_admin";
+  // 唯一超管仅绑定固定账号 super；不以可分配角色判定
+  const isFixedSuper = String(user.username || "") === "super";
+  if (isFixedSuper) role = "super_admin";
   else if (uniq.includes("admin") && role === "user") role = "admin";
+  else if (uniq.includes("super_admin") && !isFixedSuper) {
+    // 历史脏数据：非 super 账号即使带有 super_admin 也不再视为超管
+    role = uniq.includes("admin") ? "admin" : role === "super_admin" ? "admin" : role;
+  }
   return {
     ...user,
     role,
@@ -53,7 +57,7 @@ export function normalizeUser(user) {
     role_labels: user.role_labels || [],
     permissions: user.permissions || user.permission_codes || [],
     department: user.department || user.dept || "",
-    is_super_admin: Boolean(user.is_super_admin) || uniq.includes("super_admin"),
+    is_super_admin: isFixedSuper,
   };
 }
 
@@ -64,8 +68,8 @@ export function mergeUserProfiles(local, remote) {
   const a = normalizeUser(local || {});
   const b = normalizeUser(remote || {});
   const roleRank = (u) => {
+    if (String(u.username || "") === "super" || u.is_super_admin) return 40;
     const r = new Set([].concat(u.role || [], u.roles || []));
-    if (r.has("super_admin") || u.is_super_admin) return 40;
     if (r.has("admin")) return 30;
     if (r.has("staff_dept_a") || r.has("staff_dept_b") || r.has("kb_admin") || r.has("staff")) return 20;
     if (r.has("user")) return 10;
@@ -125,12 +129,11 @@ function userFlag(key) {
   return Boolean(u && u[key]);
 }
 
-/** 超级管理员：手册「系统管理员」全量能力 */
+/** 超级管理员：仅固定账号 username === "super" */
 export function isSuperAdmin() {
   const user = getUser();
   if (!user) return false;
-  const roles = roleSet(user);
-  return roles.has("super_admin") || Boolean(user.is_super_admin);
+  return String(user.username || "") === "super";
 }
 
 /** 普通或超级管理员（可进管理端控制台） */

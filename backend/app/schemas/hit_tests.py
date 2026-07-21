@@ -14,6 +14,18 @@ class TestQuestion(BaseModel):
     question: str = Field(description="问题文本")
     expected_doc_ids: list[uuid.UUID] | None = Field(None, description="期望命中的文档 ID 列表")
     expected_chunk_ids: list[uuid.UUID] | None = Field(None, description="期望命中的分段 ID 列表")
+    expected_answer: str | None = Field(None, description="期望答案（可选，用于对照）")
+    context: str | None = Field(None, description="补充上下文（可选）")
+
+
+class TestExample(BaseModel):
+    """用例示例（创建表单「添加 Example」提交结构）"""
+
+    question: str = Field(description="示例问题")
+    expected_answer: str | None = Field(None, description="期望答案")
+    context: str | None = Field(None, description="上下文")
+    expected_doc_ids: list[uuid.UUID] | None = Field(None, description="期望命中的文档 ID 列表")
+    expected_chunk_ids: list[uuid.UUID] | None = Field(None, description="期望命中的分段 ID 列表")
 
 
 class CreateTestCaseRequest(BaseModel):
@@ -21,7 +33,11 @@ class CreateTestCaseRequest(BaseModel):
 
     name: str = Field(description="用例名称")
     description: str | None = Field(None, description="用例描述")
-    questions: list[TestQuestion] = Field(description="问题列表")
+    questions: list[TestQuestion] = Field(default_factory=list, description="问题列表")
+    examples: list[TestExample] | None = Field(
+        None,
+        description="示例列表；与 questions 合并后用于命中率匹配（至少一侧非空）",
+    )
 
 
 class UpdateTestCaseRequest(BaseModel):
@@ -30,6 +46,7 @@ class UpdateTestCaseRequest(BaseModel):
     name: str | None = Field(None, description="用例名称")
     description: str | None = Field(None, description="用例描述")
     questions: list[TestQuestion] | None = Field(None, description="问题列表")
+    examples: list[TestExample] | None = Field(None, description="示例列表")
 
 
 class TestCaseResponse(BaseModel):
@@ -40,6 +57,7 @@ class TestCaseResponse(BaseModel):
     description: str | None = Field(None, description="用例描述")
     question_count: int = Field(description="问题数量")
     questions: list[TestQuestion] = Field(description="问题列表")
+    examples: list[TestExample] = Field(default_factory=list, description="示例列表（与 questions 同源展示）")
     created_at: datetime = Field(description="创建时间")
 
 

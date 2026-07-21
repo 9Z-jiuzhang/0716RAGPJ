@@ -97,6 +97,27 @@ async def seed_identity_data() -> None:
                     roles=[roles["super_admin"]],
                 )
             )
+        else:
+            # 确保固定超管账号始终绑定 super_admin；并剥离其他账号上的超管角色
+            fixed_super = await db.scalar(
+                select(User).options(selectinload(User.roles)).where(User.username == "super")
+            )
+            if fixed_super and "super_admin" in roles:
+                if not any(r.name == "super_admin" for r in fixed_super.roles):
+                    fixed_super.roles = list(fixed_super.roles) + [roles["super_admin"]]
+            if "super_admin" in roles:
+                extras = (
+                    await db.scalars(
+                        select(User)
+                        .options(selectinload(User.roles))
+                        .where(User.username != "super", User.roles.any(Role.id == roles["super_admin"].id))
+                    )
+                ).all()
+                for extra in extras:
+                    remaining = [r for r in extra.roles if r.name != "super_admin"]
+                    if "admin" in roles and not any(r.name == "admin" for r in remaining):
+                        remaining.append(roles["admin"])
+                    extra.roles = remaining
         if not await db.scalar(select(User).where(User.username == "admin")):
             db.add(
                 User(
@@ -375,7 +396,58 @@ async def lifespan(_: FastAPI):
         await engine.dispose()
 
 
-app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=lifespan)
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    description=(
+        "AI 知识库 RAG 平台 API。\n\n"
+        "**文档页说明**：若 Swagger/ReDoc 样式异常，请确认可访问 jsDelivr CDN，"
+        "或改用直连 API 端口 `http://127.0.0.1:8000/docs`。"
+        "统一入口 `http://localhost:8080/docs` 与 `/redoc` 已反代到本服务。"
+        "OpenAPI schema 生成失败时请检查自定义响应模型是否存在循环引用。"
+    ),
+)
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+
+    try:
+        openapi_schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Schema 构建失败时仍返回可渲染的最小文档，避免 /docs 白屏
+        openapi_schema = {
+            "openapi": "3.1.0",
+            "info": {
+                "title": app.title,
+                "version": app.version,
+                "description": f"OpenAPI 生成异常：{exc}。请检查路由 Schema；可临时使用健康检查接口。",
+            },
+            "paths": {
+                "/api/v1/monitor/health": {
+                    "get": {
+                        "summary": "健康检查",
+                        "responses": {"200": {"description": "OK"}},
+                    }
+                }
+            },
+        }
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi  # type: ignore[method-assign]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS.split(","),
