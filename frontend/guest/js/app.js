@@ -1063,8 +1063,8 @@ async function pageUpload() {
             .join("")}
         </select>
       </div>
-      <div class="upload-drop" id="dropZone">点击或拖拽 PDF、Word（DOC/DOCX）、TXT、Markdown（MD）文件到此处</div>
-      <input type="file" id="fileInput" class="hidden" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
+      <div class="upload-drop" id="dropZone">点击或拖拽 PDF、Word（DOC/DOCX）、TXT、Markdown（MD）文件到此处（支持多选）</div>
+      <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
     </div>
     <div class="card span-4">
       <div class="card-header"><div class="card-header-text"><h3 class="card-title">处理进度</h3></div></div>
@@ -1075,9 +1075,10 @@ async function pageUpload() {
       <div class="meta-list" style="margin-top:16px">
         <div class="meta-row"><span class="meta-label">文件类型</span><span class="meta-value">PDF / Word / TXT / MD</span></div>
         <div class="meta-row"><span class="meta-label">权限说明</span><span class="meta-value">员工限本部门或授权库</span></div>
+        <div class="meta-row"><span class="meta-label">批量上传</span><span class="meta-value">支持一次选择多个文件</span></div>
       </div>
     </div>
-    </div>`;
+  </div>`;
 
   const drop = document.getElementById("dropZone");
   const fileInput = document.getElementById("fileInput");
@@ -1090,21 +1091,70 @@ async function pageUpload() {
   drop.addEventListener("drop", (e) => {
     e.preventDefault();
     drop.classList.remove("dragover");
-    if (e.dataTransfer.files[0]) handleUpload(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files?.length) handleUploadFiles(e.dataTransfer.files);
   });
   fileInput.onchange = () => {
-    if (fileInput.files[0]) handleUpload(fileInput.files[0]);
+    if (fileInput.files?.length) {
+      handleUploadFiles(fileInput.files);
+      fileInput.value = "";
+    }
   };
 }
 
-/** 执行上传并轮询文档管道状态（诚实进度） */
-async function handleUpload(file) {
-  const kbId = document.getElementById("kbSelect").value;
-  if (!kbId) return toast("请选择知识库", "error");
+/** 批量上传：逐个调用既有单文件接口，并汇总进度 */
+async function handleUploadFiles(fileList) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (!files.length) return toast("请选择文件", "error");
+
   const prog = document.getElementById("uploadProgress");
   const bar = document.getElementById("uploadBar");
-  prog.textContent = `正在上传 ${file.name}…`;
-  bar.style.width = "15%";
+  let ok = 0;
+  const failures = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    try {
+      await handleUpload(file, { index: i + 1, total: files.length, quietToast: files.length > 1 });
+      ok += 1;
+    } catch (e) {
+      failures.push(`${file.name}: ${e.message || "上传失败"}`);
+      if (prog) {
+        prog.innerHTML = `<span class="text-danger">第 ${i + 1}/${files.length} 个失败：${escapeHtml(e.message || "未知错误")}</span>`;
+      }
+    }
+  }
+
+  if (files.length === 1) return;
+
+  if (bar) bar.style.width = "100%";
+  if (ok && !failures.length) {
+    if (prog) prog.innerHTML = `<span class="text-success">批量上传完成：${ok}/${files.length}</span>`;
+    toast(`已成功上传 ${ok} 个文件`, "success");
+  } else if (ok) {
+    if (prog) {
+      prog.innerHTML = `<span class="text-muted">完成 ${ok}/${files.length}，失败 ${failures.length}：${escapeHtml(failures[0])}</span>`;
+    }
+    toast(`成功 ${ok} 个，失败 ${failures.length} 个`, "error");
+  } else {
+    if (prog) prog.innerHTML = `<span class="text-danger">批量上传失败：${escapeHtml(failures[0] || "未知错误")}</span>`;
+    toast(failures[0] || "上传失败", "error");
+  }
+}
+
+/** 执行上传并轮询文档管道状态（诚实进度） */
+async function handleUpload(file, opts = {}) {
+  const kbId = document.getElementById("kbSelect").value;
+  if (!kbId) {
+    toast("请选择知识库", "error");
+    throw new Error("请选择知识库");
+  }
+  const prog = document.getElementById("uploadProgress");
+  const bar = document.getElementById("uploadBar");
+  const index = opts.index || 1;
+  const total = opts.total || 1;
+  const prefix = total > 1 ? `[${index}/${total}] ` : "";
+  prog.textContent = `${prefix}正在上传 ${file.name}…`;
+  bar.style.width = total > 1 ? `${Math.max(8, Math.round(((index - 1) / total) * 100))}%` : "15%";
 
   const fd = new FormData();
   fd.append("file", file);
@@ -1113,22 +1163,29 @@ async function handleUpload(file) {
   try {
     const doc = await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
     const docId = doc?.id;
-    toast("上传成功，正在处理…", "success");
+    if (!opts.quietToast) toast("上传成功，正在处理…", "success");
     if (!docId) {
-      bar.style.width = "100%";
-      prog.innerHTML = `<span class="text-success">上传成功，已进入预处理/向量化队列</span>`;
+      bar.style.width = total > 1 ? `${Math.round((index / total) * 100)}%` : "100%";
+      prog.innerHTML = `<span class="text-success">${prefix}上传成功，已进入预处理/向量化队列</span>`;
       return;
     }
-    bar.style.width = "35%";
-    prog.textContent = `已入库，管道处理中（${doc.status || "…"}）…`;
+    bar.style.width = total > 1 ? `${Math.round(((index - 0.5) / total) * 100)}%` : "35%";
+    prog.textContent = `${prefix}已入库，管道处理中（${doc.status || "…"}）…`;
     try {
       const finalDoc = await pollUntil(
         async () => {
           const d = await api.get(`/knowledge-bases/${kbId}/documents/${docId}`);
           const st = String(d.status || "");
-          const pct = st === "ready" ? 100 : st === "error" ? 100 : busy.has(st) ? 55 : 70;
-          bar.style.width = `${pct}%`;
-          prog.textContent = `处理状态：${st}`;
+          const base = total > 1 ? ((index - 1) / total) * 100 : 0;
+          const span = total > 1 ? 100 / total : 100;
+          const pct =
+            st === "ready" || st === "error"
+              ? base + span
+              : busy.has(st)
+                ? base + span * 0.55
+                : base + span * 0.7;
+          bar.style.width = `${Math.min(100, Math.round(pct))}%`;
+          prog.textContent = `${prefix}处理状态：${st}`;
           return d;
         },
         {
@@ -1137,20 +1194,22 @@ async function handleUpload(file) {
           shouldStop: (d) => ["ready", "error"].includes(String(d?.status || "")),
         }
       );
+      bar.style.width = total > 1 ? `${Math.round((index / total) * 100)}%` : "100%";
       if (finalDoc.status === "ready") {
-        bar.style.width = "100%";
-        prog.innerHTML = `<span class="text-success">处理完成（ready）· 分段 ${escapeHtml(finalDoc.chunk_count ?? 0)}</span>`;
+        prog.innerHTML = `<span class="text-success">${prefix}处理完成（ready）· 分段 ${escapeHtml(finalDoc.chunk_count ?? 0)}</span>`;
       } else {
-        bar.style.width = "100%";
-        prog.innerHTML = `<span class="text-danger">处理失败：${escapeHtml(finalDoc.error_message || finalDoc.status || "error")}</span>`;
+        prog.innerHTML = `<span class="text-danger">${prefix}处理失败：${escapeHtml(finalDoc.error_message || finalDoc.status || "error")}</span>`;
       }
     } catch (pollErr) {
-      prog.innerHTML = `<span class="text-muted">已上传；状态轮询结束：${escapeHtml(pollErr.message || "")}。请稍后在知识库文档列表查看。</span>`;
+      prog.innerHTML = `<span class="text-muted">${prefix}已上传；状态轮询结束：${escapeHtml(pollErr.message || "")}。请稍后在知识库文档列表查看。</span>`;
     }
   } catch (e) {
-    bar.style.width = "0%";
-    prog.innerHTML = `<span class="text-danger">上传失败：${escapeHtml(e.message || "未知错误")}</span>`;
-    toast(e.message || "上传失败", "error");
+    if (!opts.quietToast) {
+      bar.style.width = "0%";
+      prog.innerHTML = `<span class="text-danger">上传失败：${escapeHtml(e.message || "未知错误")}</span>`;
+      toast(e.message || "上传失败", "error");
+    }
+    throw e;
   }
 }
 

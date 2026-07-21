@@ -2024,7 +2024,7 @@ async function pageKbDetail(id) {
           <div class="card-header">
             <div class="card-header-text">
               <h3 class="card-title">知识库授权（ACL）</h3>
-              <p class="card-sub">全量替换；保存将触发权限变更自动快照。禁止提交空列表覆盖现有授权。</p>
+              <p class="card-sub">同一用户/角色可多选权限；保存时全量替换并触发权限变更自动快照。禁止提交空列表覆盖现有授权。</p>
             </div>
             <button type="button" class="btn btn-secondary btn-sm" id="btnAclAdd">添加一行</button>
           </div>
@@ -2048,14 +2048,140 @@ async function pageKbDetail(id) {
         ["snapshot:write", "写快照"],
         ["snapshot:restore", "回退快照"],
       ];
-      let aclGrants = (k.permissions || []).map((g) => ({
-        subject_type: g.user_id ? "user" : "role",
-        user_id: g.user_id || "",
-        role_id: g.role_id || "",
-        permission: g.permission || "kb:read",
-      }));
+      // 后端按「主体 + 单权限」存储；编辑时按主体合并为多选
+      const mergeAclGrants = (raw) => {
+        const map = new Map();
+        for (const g of raw || []) {
+          const subject_type = g.user_id ? "user" : "role";
+          const user_id = g.user_id || "";
+          const role_id = g.role_id || "";
+          const key = subject_type === "user" ? `user:${user_id}` : `role:${role_id}`;
+          if (!map.has(key)) {
+            map.set(key, {
+              subject_type,
+              user_id,
+              role_id,
+              permissions: [],
+            });
+          }
+          const perm = g.permission || g.permission_code || "";
+          if (perm && !map.get(key).permissions.includes(perm)) {
+            map.get(key).permissions.push(perm);
+          }
+        }
+        return Array.from(map.values()).map((row) => ({
+          ...row,
+          permissions: row.permissions.length ? row.permissions : ["kb:read"],
+        }));
+      };
+      let aclGrants = mergeAclGrants(k.permissions || []);
       let aclUsers = [];
       let aclRoles = [];
+
+      const closeAllAclDropdowns = () => {
+        document.querySelectorAll(".acl-ms-panel").forEach((p) => {
+          p.setAttribute("hidden", "");
+          // 归还到原下拉容器，避免残留在 body
+          if (p.__aclHome && p.parentElement === document.body) {
+            p.__aclHome.appendChild(p);
+          }
+        });
+        document.querySelectorAll(".acl-ms").forEach((el) => el.classList.remove("is-open"));
+      };
+
+      const placeAclPanel = (toggle, panel) => {
+        const rect = toggle.getBoundingClientRect();
+        const width = Math.max(rect.width, 220);
+        let left = rect.left;
+        const maxLeft = window.innerWidth - width - 12;
+        if (left > maxLeft) left = Math.max(12, maxLeft);
+
+        // 先按下方展开，再用真实高度决定是否改向上
+        panel.style.left = `${Math.round(left)}px`;
+        panel.style.top = `${Math.round(rect.bottom + 4)}px`;
+        panel.style.width = `${Math.round(width)}px`;
+        panel.style.maxHeight = `${Math.min(360, Math.floor(window.innerHeight * 0.6))}px`;
+
+        const ph = panel.getBoundingClientRect().height || 240;
+        let top = rect.bottom + 4;
+        if (top + ph > window.innerHeight - 8 && rect.top > ph + 8) {
+          top = Math.max(8, rect.top - ph - 4);
+        }
+        panel.style.top = `${Math.round(top)}px`;
+      };
+
+      const openAclPanel = (ms, toggle, panel) => {
+        closeAllAclDropdowns();
+        // backdrop-filter 等会把 fixed 困在卡片内；挂到 body 才能对准触发器
+        panel.__aclHome = ms;
+        document.body.appendChild(panel);
+        panel.removeAttribute("hidden");
+        ms.classList.add("is-open");
+        placeAclPanel(toggle, panel);
+        requestAnimationFrame(() => placeAclPanel(toggle, panel));
+
+        panel.onwheel = (e) => e.stopPropagation();
+        const list = panel.querySelector(".acl-ms-list");
+        if (list) list.onwheel = (e) => e.stopPropagation();
+      };
+
+      const renderAclSingleDropdown = ({ key, summary, optionsHtml, emptyText, searchable }) => `
+        <div class="acl-ms" data-acl-dd="${escapeHtml(key)}">
+          <button type="button" class="form-control acl-ms-trigger" data-acl-ms-toggle title="${escapeHtml(summary || emptyText)}">
+            <span class="acl-ms-summary">${escapeHtml(summary || emptyText)}</span>
+            <span class="acl-ms-caret" aria-hidden="true"></span>
+          </button>
+          <div class="acl-ms-panel" hidden>
+            ${
+              searchable
+                ? `<div class="acl-ms-search-wrap">
+                     <input type="search" class="form-control acl-ms-search" data-acl-search placeholder="${escapeHtml(
+                       emptyText.includes("角色") ? "搜索角色…" : "搜索用户…"
+                     )}" autocomplete="off" />
+                   </div>`
+                : ""
+            }
+            <div class="acl-ms-list">${optionsHtml}</div>
+          </div>
+        </div>`;
+
+      const wireAclSearch = (panel) => {
+        const input = panel.querySelector("[data-acl-search]");
+        const list = panel.querySelector(".acl-ms-list") || panel;
+        if (!input) return;
+        const applyFilter = () => {
+          const q = String(input.value || "").trim().toLowerCase();
+          let visible = 0;
+          list.querySelectorAll(".acl-ms-pick").forEach((btn) => {
+            const text = String(btn.textContent || "").trim().toLowerCase();
+            const val = String(btn.getAttribute("data-value") || "");
+            // 空值占位项（选择用户/角色）始终显示
+            const show = !q || !val || text.includes(q);
+            btn.style.display = show ? "" : "none";
+            if (show && val) visible += 1;
+          });
+          let empty = list.querySelector("[data-acl-search-empty]");
+          if (q && visible === 0) {
+            if (!empty) {
+              empty = document.createElement("div");
+              empty.className = "acl-ms-empty";
+              empty.setAttribute("data-acl-search-empty", "");
+              empty.textContent = "无匹配结果";
+              list.appendChild(empty);
+            }
+          } else if (empty) {
+            empty.remove();
+          }
+        };
+        input.onclick = (e) => e.stopPropagation();
+        input.onkeydown = (e) => e.stopPropagation();
+        input.onkeyup = (e) => {
+          e.stopPropagation();
+          applyFilter();
+        };
+        input.oninput = () => applyFilter();
+      };
+
       const renderAclRows = () => {
         const box = document.getElementById("kbAclRows");
         if (!box) return;
@@ -2065,50 +2191,195 @@ async function pageKbDetail(id) {
         }
         box.innerHTML = aclGrants
           .map((g, i) => {
-            const userOpts = aclUsers
-              .map((u) => `<option value="${escapeHtml(u.id)}" ${String(g.user_id) === String(u.id) ? "selected" : ""}>${escapeHtml(u.username || u.nickname || u.id)}</option>`)
+            const selected = new Set(g.permissions || []);
+            const typeLabel = g.subject_type === "role" ? "角色" : "用户";
+            const typeOpts = [
+              ["user", "用户"],
+              ["role", "角色"],
+            ]
+              .map(
+                ([val, label]) => `<button type="button" class="acl-ms-option acl-ms-pick ${g.subject_type === val ? "is-active" : ""}" data-value="${val}">
+                <span>${label}</span>
+              </button>`
+              )
               .join("");
-            const roleOpts = aclRoles
-              .map((r) => `<option value="${escapeHtml(r.id)}" ${String(g.role_id) === String(r.id) ? "selected" : ""}>${escapeHtml(r.display_name || r.name)}</option>`)
-              .join("");
-            const permOpts = KB_ACL_CODES.map(
-              ([code, name]) => `<option value="${code}" ${g.permission === code ? "selected" : ""}>${escapeHtml(name)}（${code}）</option>`
+
+            let subjectSummary = "";
+            let subjectOpts = "";
+            if (g.subject_type === "role") {
+              const hit = aclRoles.find((r) => String(r.id) === String(g.role_id));
+              subjectSummary = hit ? hit.display_name || hit.name || String(hit.id) : "";
+              subjectOpts = [
+                `<button type="button" class="acl-ms-option acl-ms-pick ${!g.role_id ? "is-active" : ""}" data-value=""><span>选择角色</span></button>`,
+                ...aclRoles.map(
+                  (r) => `<button type="button" class="acl-ms-option acl-ms-pick ${String(g.role_id) === String(r.id) ? "is-active" : ""}" data-value="${escapeHtml(r.id)}">
+                    <span>${escapeHtml(r.display_name || r.name || r.id)}</span>
+                  </button>`
+                ),
+              ].join("");
+              if (!aclRoles.length) {
+                subjectOpts = `<div class="acl-ms-empty">暂无角色可选</div>`;
+              }
+            } else {
+              const hit = aclUsers.find((u) => String(u.id) === String(g.user_id));
+              subjectSummary = hit ? hit.username || hit.nickname || String(hit.id) : "";
+              subjectOpts = [
+                `<button type="button" class="acl-ms-option acl-ms-pick ${!g.user_id ? "is-active" : ""}" data-value=""><span>选择用户</span></button>`,
+                ...aclUsers.map(
+                  (u) => `<button type="button" class="acl-ms-option acl-ms-pick ${String(g.user_id) === String(u.id) ? "is-active" : ""}" data-value="${escapeHtml(u.id)}">
+                    <span>${escapeHtml(u.username || u.nickname || u.id)}</span>
+                  </button>`
+                ),
+              ].join("");
+              if (!aclUsers.length) {
+                subjectOpts = `<div class="acl-ms-empty">暂无用户可选</div>`;
+              }
+            }
+
+            const selectedLabels = KB_ACL_CODES.filter(([code]) => selected.has(code)).map(([, name]) => name);
+            const summaryText = selectedLabels.length ? selectedLabels.join("、") : "请选择权限";
+            const checkOpts = KB_ACL_CODES.map(
+              ([code, name]) => `<label class="acl-ms-option">
+                <input type="checkbox" value="${code}" ${selected.has(code) ? "checked" : ""} />
+                <span>${escapeHtml(name)}（${code}）</span>
+              </label>`
             ).join("");
-            return `<div class="acl-row" data-idx="${i}" style="display:grid;grid-template-columns:110px 1fr 1fr auto;gap:8px;margin-bottom:8px;align-items:center">
-              <select class="form-control" data-acl="type">
-                <option value="user" ${g.subject_type === "user" ? "selected" : ""}>用户</option>
-                <option value="role" ${g.subject_type === "role" ? "selected" : ""}>角色</option>
-              </select>
-              <select class="form-control" data-acl="user" style="${g.subject_type === "role" ? "display:none" : ""}"><option value="">选择用户</option>${userOpts}</select>
-              <select class="form-control" data-acl="role" style="${g.subject_type === "user" ? "display:none" : ""}"><option value="">选择角色</option>${roleOpts}</select>
-              <select class="form-control" data-acl="perm">${permOpts}</select>
+
+            return `<div class="acl-row" data-idx="${i}" style="display:grid;grid-template-columns:120px minmax(160px,1fr) minmax(240px,1.5fr) auto;gap:8px;margin-bottom:10px;align-items:center">
+              ${renderAclSingleDropdown({ key: "type", summary: typeLabel, optionsHtml: typeOpts, emptyText: "类型" })}
+              ${renderAclSingleDropdown({
+                key: "subject",
+                summary: subjectSummary,
+                optionsHtml: subjectOpts,
+                emptyText: g.subject_type === "role" ? "选择角色" : "选择用户",
+                searchable: true,
+              })}
+              <div class="acl-ms" data-acl-ms>
+                <button type="button" class="form-control acl-ms-trigger" data-acl-ms-toggle title="${escapeHtml(summaryText)}">
+                  <span class="acl-ms-summary">${escapeHtml(summaryText)}</span>
+                  <span class="acl-ms-caret" aria-hidden="true"></span>
+                </button>
+                <div class="acl-ms-panel" hidden><div class="acl-ms-list">${checkOpts}</div></div>
+              </div>
               <button type="button" class="btn btn-danger btn-sm" data-acl-del>删</button>
             </div>`;
           })
           .join("");
+
         box.querySelectorAll(".acl-row").forEach((row) => {
           const idx = Number(row.getAttribute("data-idx"));
-          row.querySelector('[data-acl="type"]').onchange = (e) => {
-            aclGrants[idx].subject_type = e.target.value;
-            if (e.target.value === "user") aclGrants[idx].role_id = "";
-            else aclGrants[idx].user_id = "";
-            renderAclRows();
-          };
-          const uSel = row.querySelector('[data-acl="user"]');
-          if (uSel) uSel.onchange = (e) => { aclGrants[idx].user_id = e.target.value; };
-          const rSel = row.querySelector('[data-acl="role"]');
-          if (rSel) rSel.onchange = (e) => { aclGrants[idx].role_id = e.target.value; };
-          row.querySelector('[data-acl="perm"]').onchange = (e) => { aclGrants[idx].permission = e.target.value; };
+
+          const typeDd = row.querySelector('[data-acl-dd="type"]');
+          if (typeDd) {
+            const toggle = typeDd.querySelector("[data-acl-ms-toggle]");
+            const panel = typeDd.querySelector(".acl-ms-panel");
+            toggle.onclick = (e) => {
+              e.stopPropagation();
+              if (!panel.hasAttribute("hidden")) closeAllAclDropdowns();
+              else openAclPanel(typeDd, toggle, panel);
+            };
+            panel.onclick = (e) => e.stopPropagation();
+            panel.querySelectorAll(".acl-ms-pick").forEach((btn) => {
+              btn.onclick = (e) => {
+                e.stopPropagation();
+                const val = btn.getAttribute("data-value") || "user";
+                if (aclGrants[idx].subject_type === val) {
+                  closeAllAclDropdowns();
+                  return;
+                }
+                aclGrants[idx].subject_type = val;
+                if (val === "user") aclGrants[idx].role_id = "";
+                else aclGrants[idx].user_id = "";
+                renderAclRows();
+              };
+            });
+          }
+
+          const subjectDd = row.querySelector('[data-acl-dd="subject"]');
+          if (subjectDd) {
+            const toggle = subjectDd.querySelector("[data-acl-ms-toggle]");
+            const panel = subjectDd.querySelector(".acl-ms-panel");
+            toggle.onclick = (e) => {
+              e.stopPropagation();
+              if (!panel.hasAttribute("hidden")) closeAllAclDropdowns();
+              else {
+                openAclPanel(subjectDd, toggle, panel);
+                wireAclSearch(panel);
+                const search = panel.querySelector("[data-acl-search]");
+                if (search) {
+                  search.value = "";
+                  search.dispatchEvent(new Event("input"));
+                  setTimeout(() => {
+                    search.focus({ preventScroll: true });
+                    placeAclPanel(toggle, panel);
+                  }, 0);
+                }
+              }
+            };
+            panel.onclick = (e) => e.stopPropagation();
+            panel.querySelectorAll(".acl-ms-pick").forEach((btn) => {
+              btn.onclick = (e) => {
+                e.stopPropagation();
+                const val = btn.getAttribute("data-value") || "";
+                if (aclGrants[idx].subject_type === "role") aclGrants[idx].role_id = val;
+                else aclGrants[idx].user_id = val;
+                renderAclRows();
+              };
+            });
+          }
+
+          const ms = row.querySelector("[data-acl-ms]");
+          if (ms) {
+            const toggle = ms.querySelector("[data-acl-ms-toggle]");
+            const panel = ms.querySelector(".acl-ms-panel");
+            const summary = ms.querySelector(".acl-ms-summary");
+            const syncSummary = () => {
+              const codes = Array.from(ms.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+              aclGrants[idx].permissions = codes;
+              const labels = KB_ACL_CODES.filter(([code]) => codes.includes(code)).map(([, name]) => name);
+              const text = labels.length ? labels.join("、") : "请选择权限";
+              summary.textContent = text;
+              toggle.title = text;
+            };
+            toggle.onclick = (e) => {
+              e.stopPropagation();
+              if (!panel.hasAttribute("hidden")) closeAllAclDropdowns();
+              else openAclPanel(ms, toggle, panel);
+            };
+            ms.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+              cb.onchange = () => syncSummary();
+              cb.onclick = (e) => e.stopPropagation();
+            });
+            panel.onclick = (e) => e.stopPropagation();
+          }
+
           row.querySelector("[data-acl-del]").onclick = () => {
             aclGrants.splice(idx, 1);
             renderAclRows();
           };
         });
+
+        if (!window.__aclMsOutsideClose) {
+          window.__aclMsOutsideClose = true;
+          document.addEventListener("click", () => closeAllAclDropdowns());
+          window.addEventListener("resize", () => closeAllAclDropdowns());
+          document.querySelector(".content")?.addEventListener(
+            "scroll",
+            () => closeAllAclDropdowns(),
+            { passive: true }
+          );
+        }
       };
       if (canWrite) {
         Promise.all([
-          api.get("/users?page=1&page_size=100").catch(() => ({ items: [] })),
-          api.get("/roles?page=1&page_size=100").catch(() => ({ items: [] })),
+          api.get("/users?page=1&page_size=100").catch((e) => {
+            toast(e.message || "加载用户列表失败", "error");
+            return { items: [] };
+          }),
+          api.get("/roles?page=1&page_size=100").catch((e) => {
+            toast(e.message || "加载角色列表失败", "error");
+            return { items: [] };
+          }),
         ]).then(([uData, rData]) => {
           aclUsers = uData.items || [];
           aclRoles = (rData.items || []).filter((r) => r.name !== "user" && r.name !== "kb_admin");
@@ -2117,7 +2388,7 @@ async function pageKbDetail(id) {
         const btnAdd = document.getElementById("btnAclAdd");
         if (btnAdd) {
           btnAdd.onclick = () => {
-            aclGrants.push({ subject_type: "user", user_id: "", role_id: "", permission: "kb:read" });
+            aclGrants.push({ subject_type: "user", user_id: "", role_id: "", permissions: ["kb:read"] });
             renderAclRows();
           };
         }
@@ -2125,13 +2396,20 @@ async function pageKbDetail(id) {
         if (btnSave) {
           btnSave.onclick = async () => {
             const had = (k.permissions || []).length > 0;
-            const payload = aclGrants
-              .map((g) => {
-                if (g.subject_type === "user" && g.user_id) return { user_id: g.user_id, role_id: null, permission: g.permission };
-                if (g.subject_type === "role" && g.role_id) return { user_id: null, role_id: g.role_id, permission: g.permission };
-                return null;
-              })
-              .filter(Boolean);
+            const payload = [];
+            for (const g of aclGrants) {
+              const perms = Array.from(new Set((g.permissions || []).filter(Boolean)));
+              if (!perms.length) continue;
+              if (g.subject_type === "user" && g.user_id) {
+                for (const permission of perms) {
+                  payload.push({ user_id: g.user_id, role_id: null, permission });
+                }
+              } else if (g.subject_type === "role" && g.role_id) {
+                for (const permission of perms) {
+                  payload.push({ user_id: null, role_id: g.role_id, permission });
+                }
+              }
+            }
             if (had && payload.length === 0) {
               toast("当前库已有授权，禁止用空列表覆盖。请先删行确认或保留至少一条。", "error");
               return;
@@ -2356,13 +2634,31 @@ async function pageDocuments(kbId) {
     if (!file) return toast("请选择文件", "error");
     const fd = new FormData();
     fd.append("file", file);
-    try {
-      await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
-      toast("上传成功", "success");
-      await renderList();
-    } catch (e) {
-      toast(e.message || "上传失败", "error");
+    await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
+  };
+
+  const doUploadFiles = async (fileList) => {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return toast("请选择文件", "error");
+    let ok = 0;
+    const failures = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        await doUploadFile(file);
+        ok += 1;
+      } catch (e) {
+        failures.push(`${file.name}: ${e.message || "上传失败"}`);
+      }
     }
+    if (ok && !failures.length) {
+      toast(files.length === 1 ? "上传成功" : `已成功上传 ${ok} 个文件`, "success");
+    } else if (ok && failures.length) {
+      toast(`成功 ${ok} 个，失败 ${failures.length} 个：${failures[0]}`, "error");
+    } else {
+      toast(failures[0] || "上传失败", "error");
+    }
+    await renderList();
   };
 
   const openDocWorkbench = async (docId, filenameHint) => {
@@ -2632,10 +2928,13 @@ async function pageDocuments(kbId) {
     zone.addEventListener("drop", (e) => {
       e.preventDefault();
       zone.classList.remove("dragover");
-      if (e.dataTransfer.files?.[0]) doUploadFile(e.dataTransfer.files[0]);
+      if (e.dataTransfer.files?.length) doUploadFiles(e.dataTransfer.files);
     });
     fileInput.onchange = () => {
-      if (fileInput.files?.[0]) doUploadFile(fileInput.files[0]);
+      if (fileInput.files?.length) {
+        doUploadFiles(fileInput.files);
+        fileInput.value = "";
+      }
     };
   };
 
@@ -2662,7 +2961,7 @@ async function pageDocuments(kbId) {
           <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button>
           ${
             canUpload
-              ? `<input type="file" id="adminFile" class="hidden" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
+              ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
                  ${canSegment ? `<button class="btn btn-secondary btn-sm" id="btnPreviewUpload">入库前预分段</button>` : ""}
                  <button class="btn btn-sm" id="btnAdminUpload">选择并上传</button>`
               : ""
@@ -2675,11 +2974,11 @@ async function pageDocuments(kbId) {
           <div class="kb-dropzone-inner">
             <span class="kb-dropzone-icon" aria-hidden="true"></span>
             <p class="kb-dropzone-title">将文件拖拽到此处</p>
-            <p class="kb-dropzone-lead">也可点击本区域或上方按钮选择文件</p>
+            <p class="kb-dropzone-lead">也可点击本区域或上方按钮选择文件（支持多选）</p>
             <ul class="kb-dropzone-meta">
               <li>支持格式：PDF、DOC、DOCX、TXT、MD</li>
               <li>单文件最大：100MB</li>
-              <li>一次上传：1 个文件</li>
+              <li>一次可批量上传多个文件</li>
             </ul>
           </div>
         </div>
@@ -2754,7 +3053,7 @@ async function pageDocuments(kbId) {
                   .join("") || `<p class="text-muted">无分段</p>`}
               </div>
               <div style="padding:0 12px 12px"><button type="button" class="btn btn-sm" id="btnConfirmUploadAfterPreview">确认上传此文件</button></div>`;
-            document.getElementById("btnConfirmUploadAfterPreview").onclick = () => doUploadFile(f);
+            document.getElementById("btnConfirmUploadAfterPreview").onclick = () => doUploadFiles([f]);
             toast("预分段完成", "success");
           } catch (e) {
             toast(e.message || "预分段失败", "error");
