@@ -7,7 +7,7 @@
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  color: #e8e8ef;
+  color: var(--color-text);
   background: #0b0f19;
   overflow: hidden;
   isolation: isolate;
@@ -47,7 +47,7 @@
   gap: 10px;
   font-weight: 600;
   font-size: 16px;
-  color: #fff;
+  color: var(--color-text);
   cursor: pointer;
   user-select: none;
 }
@@ -71,14 +71,14 @@
 }
 
 .landing-links a {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--color-text-body);
   font-size: 13px;
   text-decoration: none;
   transition: var(--transition);
 }
 
 .landing-links a:hover {
-  color: #fff;
+  color: var(--color-text);
   text-decoration: none;
 }
 
@@ -116,7 +116,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--color-text-body);
   font-size: 12px;
   margin-bottom: 22px;
 }
@@ -131,7 +131,7 @@
 
 .landing-hero h1 {
   margin: 0;
-  color: #fff;
+  color: var(--color-text);
   font-size: clamp(32px, 5vw, 48px);
   font-weight: 700;
   letter-spacing: -0.03em;
@@ -139,14 +139,14 @@
 
 .landing-sub {
   margin: 12px 0 0;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--color-text-body);
   font-size: clamp(22px, 3.5vw, 34px);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 
 .landing-links span {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
@@ -166,7 +166,7 @@
   border: none;
   border-radius: 999px;
   background: var(--color-primary-gradient);
-  color: #fff;
+  color: var(--btn-fg-on-fill);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -176,19 +176,25 @@
 }
 
 .landing-enter:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 16px 48px rgba(168, 85, 247, 0.45);
-  filter: brightness(1.06);
+  transform: none;
+  box-shadow: var(--shadow-btn);
+  filter: none;
+}
+
+.landing-enter:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  filter: brightness(0.9);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
 .landing-enter-ghost {
   min-width: 140px;
   height: 48px;
   padding: 0 28px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid var(--btn-ghost-border);
   border-radius: 999px;
   background: transparent;
-  color: #fff;
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -196,8 +202,15 @@
 }
 
 .landing-enter-ghost:hover {
-  border-color: rgba(158, 149, 245, 0.8);
-  background: rgba(115, 103, 240, 0.15);
+  border-color: var(--btn-ghost-border);
+  background: transparent;
+  color: var(--color-text);
+}
+
+.landing-enter-ghost:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  background: var(--color-primary-soft);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 /* ---------- 登录：左右功能分区、视觉完全融合（无分割线） ---------- */
@@ -709,37 +722,54 @@
   100% { opacity: 0.55; transform: translate(-50%, -50%) rotate(34deg); }
 }
 
-/* 右侧毛玻璃登录卡：光斑可透出 */
+/* 登录框：参考毛玻璃卡片外观（粉→薰衣草渐变），不改卡片内容结构 */
 .auth-materio-card {
+  --auth-ink-1: #2a3142; /* 主标题 / 强调 / 输入正文 */
+  --auth-ink-2: #4a5568; /* 标签 / 次级正文 */
+  --auth-ink-3: #6b7280; /* 辅助说明 / 未激活 Tab */
+  --auth-ink-4: #8b93a3; /* 占位符 / 最弱 */
+
   width: min(420px, 100%);
-  padding: 28px 28px 22px;
-  border-radius: 24px;
+  padding: 40px 36px 32px;
+  border-radius: 32px;
   text-align: left;
-  background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 236, 242, 0.72) 0%,
+    rgba(236, 232, 255, 0.58) 52%,
+    rgba(220, 228, 255, 0.52) 100%
+  );
+  backdrop-filter: blur(28px) saturate(1.15);
+  -webkit-backdrop-filter: blur(28px) saturate(1.15);
+  border: 1px solid rgba(255, 255, 255, 0.55);
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 0 48px color-mix(in srgb, var(--color-primary) 14%, transparent);
+    0 28px 64px rgba(40, 35, 70, 0.14),
+    0 8px 24px rgba(40, 35, 70, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
   transition: var(--theme-transition);
+  color: var(--auth-ink-2);
 }
 
-html[data-theme="light"] .auth-materio-card {
-  background: rgba(255, 255, 255, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.72);
+html[data-theme="light"] .auth-materio-card,
+html[data-theme="dark"] .auth-materio-card {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 236, 242, 0.72) 0%,
+    rgba(236, 232, 255, 0.58) 52%,
+    rgba(220, 228, 255, 0.52) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.55);
   box-shadow:
-    0 16px 40px rgba(20, 184, 166, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 0 40px color-mix(in srgb, var(--color-primary) 10%, transparent);
+    0 28px 64px rgba(40, 35, 70, 0.14),
+    0 8px 24px rgba(40, 35, 70, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
 html[data-theme="light"] .auth-materio-mesh {
   opacity: 0.28;
   background-image:
-    linear-gradient(rgba(20, 184, 166, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 184, 166, 0.08) 1px, transparent 1px);
+    linear-gradient(color-mix(in srgb, var(--color-primary) 12%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 12%, transparent) 1px, transparent 1px);
 }
 
 html[data-theme="light"] .auth-blob {
@@ -755,34 +785,41 @@ html[data-theme="light"] .auth-figure-core em {
   background: #fff;
 }
 
+.auth-materio-head {
+  text-align: center;
+}
+
 .auth-materio-head h2,
 .auth-materio-head h1 {
-  margin: 0 0 6px;
-  font-size: 22px;
+  margin: 0 0 8px;
+  font-size: 26px;
   font-weight: 700;
-  color: var(--color-text);
-  letter-spacing: -0.02em;
+  color: var(--auth-ink-1);
+  letter-spacing: -0.03em;
+  text-shadow: none;
+  text-align: center;
 }
 
 .auth-materio-head p {
-  margin: 0 0 18px;
-  color: var(--color-text-secondary);
+  margin: 0 0 22px;
+  color: var(--auth-ink-3);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
+  text-align: center;
 }
 
 .auth-materio .auth-tabs {
   margin-bottom: 18px;
-  border-bottom-color: color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-bottom-color: rgba(120, 130, 160, 0.18);
 }
 
 .auth-materio .auth-tab {
-  color: var(--color-text-secondary);
+  color: var(--auth-ink-3);
 }
 
 .auth-materio .auth-tab.active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
+  color: var(--auth-ink-1);
+  border-bottom-color: var(--auth-ink-1);
 }
 
 .auth-materio-row {
@@ -798,83 +835,122 @@ html[data-theme="light"] .auth-figure-core em {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--color-text-body);
+  color: var(--auth-ink-2);
   cursor: pointer;
   user-select: none;
 }
 
 .auth-hint-inline {
   font-size: 12px;
+  color: var(--auth-ink-3);
 }
 
 .auth-materio .auth-input.form-control,
 .auth-materio .form-control.auth-input {
-  border: 1px solid color-mix(in srgb, var(--color-border) 90%, transparent);
-  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 14px;
   border-image: none;
-  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
-  color: var(--color-text);
-  height: 46px;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--auth-ink-1);
+  height: 48px;
   transform: none;
-  box-shadow: none;
+  box-shadow: inset 0 1px 2px rgba(40, 35, 70, 0.04);
 }
 
 .auth-materio .auth-input.form-control::placeholder {
-  color: var(--color-text-secondary);
-  opacity: 0.75;
+  color: var(--auth-ink-4);
+  opacity: 1;
 }
 
 .auth-materio .auth-input.form-control:hover {
-  background: var(--color-bg-hover);
-  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.75);
 }
 
 .auth-materio .auth-input.form-control:focus {
-  border-color: var(--color-primary);
+  border-color: rgba(42, 53, 80, 0.35);
   border-bottom-width: 1px;
-  background: color-mix(in srgb, var(--color-primary-soft) 60%, transparent);
-  box-shadow: 0 0 0 3px var(--color-primary-soft), 0 0 18px var(--color-focus-ring);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 0 0 3px rgba(42, 53, 80, 0.1);
   transform: none;
 }
 
 .auth-materio .form-group label {
-  color: var(--color-text-secondary);
+  color: var(--auth-ink-2);
   font-size: 13px;
+  font-weight: 500;
 }
 
 .auth-materio-submit {
   width: 100%;
-  height: 46px;
+  height: 48px;
   font-weight: 600;
   font-size: 15px;
-  background: var(--color-primary-gradient);
+  background: var(--color-primary);
+  background-image: var(--color-primary-gradient);
   border: none;
-  border-radius: var(--radius-pill);
+  border-radius: 14px;
   box-shadow: var(--shadow-btn);
-  color: #fff;
+  color: var(--btn-fg-on-fill, var(--color-text));
   transition: transform 180ms var(--ease-standard), box-shadow 180ms ease, filter 180ms ease;
 }
 
 .auth-materio-submit:hover {
-  transform: translateY(-2px);
-  filter: brightness(1.06);
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--color-primary) 45%, transparent);
+  transform: none;
+  filter: none;
+  box-shadow: var(--shadow-btn);
+}
+
+.auth-materio-submit:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  filter: brightness(0.9);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
 .auth-materio-guest {
-  margin: 18px 0 0;
+  margin: 20px 0 0;
   text-align: center;
   font-size: 13px;
-  color: var(--color-text-secondary);
+  color: var(--auth-ink-3);
 }
 
 .auth-materio-guest .btn-text {
-  color: var(--color-primary);
+  color: var(--auth-ink-1);
   font-weight: 600;
 }
 
 .auth-materio-guest .btn-text:hover {
-  color: var(--color-primary-light);
+  color: var(--auth-ink-2);
+}
+
+/* ---------- 全局首页：移除左侧装饰框 / 舞台艺术，仅保留居中登录框 ---------- */
+.auth-materio-visual,
+.auth-materio-stage-art,
+.auth-materio-geo,
+.auth-figure {
+  display: none !important;
+}
+
+.auth-materio-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: none;
+  width: 100%;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 32px 20px;
+  gap: 0;
+}
+
+.auth-materio-panel {
+  flex: 0 1 auto;
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 /* 平板及以下：单列，光斑居中，表单在下 */
@@ -1146,7 +1222,7 @@ html[data-theme="light"] .auth-figure-core em {
   border-bottom: 1px solid transparent;
   background: rgba(255, 255, 255, 0.03);
   border-radius: var(--radius);
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-text);
 }
 
 .qa-composer textarea:focus {
@@ -1160,7 +1236,7 @@ html[data-theme="light"] .auth-figure-core em {
   height: 40px;
   background: var(--color-primary-gradient);
   border: none;
-  color: #fff;
+  color: var(--btn-fg-on-fill);
   font-weight: 600;
   border-radius: var(--radius-pill);
   box-shadow: var(--shadow-btn);
@@ -1185,7 +1261,7 @@ html[data-theme="light"] .auth-figure-core em {
   border-radius: 14px;
   background: var(--color-primary-gradient);
   box-shadow: var(--shadow-btn);
-  color: #fff;
+  color: var(--btn-fg-on-fill);
   font-size: 16px;
   font-weight: 600;
 }
@@ -1271,16 +1347,16 @@ html[data-theme="light"] .auth-figure-core em {
 
 .msg-row.user .msg-bubble {
   background: var(--color-primary-gradient);
-  color: #ffffff;
+  color: var(--btn-fg-on-fill);
   border-radius: 16px 16px 4px 16px;
-  box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--color-primary) 35%, transparent);
   border: none;
 }
 
 .msg-row.assistant .msg-bubble {
   background: rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(12px);
-  color: #e2e8f0;
+  color: var(--color-text-body);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px 16px 16px 4px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
@@ -1492,8 +1568,15 @@ details.citation-item[open] > summary.citation-meta::before {
 /* 输入区样式已在上方 TechStart 沉浸式区块定义 */
 
 .qa-composer .btn:hover {
-  box-shadow: 0 6px 28px rgba(168, 85, 247, 0.55);
-  filter: brightness(1.06);
+  box-shadow: var(--shadow-btn);
+  filter: none;
+  transform: none;
+}
+
+.qa-composer .btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  filter: brightness(0.9);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
 /* Auth */

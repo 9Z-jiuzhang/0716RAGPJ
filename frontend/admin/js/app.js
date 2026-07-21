@@ -65,6 +65,7 @@ const MENU_GROUPS = [
       { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
       { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
       { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
+      { path: "/admin/fastapi", label: "FastAPI", perm: "system:read" },
     ],
   },
 ];
@@ -225,6 +226,7 @@ async function dispatchRender() {
   if (path === "/admin/hit-test") return pageHitTest();
   if (path === "/admin/audit") return pageAudit();
   if (path === "/admin/monitor") return pageMonitor();
+  if (path === "/admin/fastapi") return pageFastApi();
   return pageDashboard();
 }
 
@@ -325,13 +327,18 @@ async function pageDashboard() {
           <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 7 天问答量</h3></div></div>
           ${renderBars(qa, { labels: qaLabels })}
         </div>
-        <div class="card dash-chart-card span-4">
+        <div class="card dash-chart-card dash-security-card span-4">
           <div class="card-header"><div class="card-header-text"><h3 class="card-title">安全窗口</h3></div></div>
-          <div class="dash-security-metrics">
-            <div><span class="label">近 24h 阻拦</span><strong data-count-up="${s.guard_blocked_24h ?? 0}">0</strong></div>
-            <div><span class="label">近 7 天阻拦</span><strong data-count-up="${s.guard_blocked_7d ?? 0}">0</strong></div>
+          <div class="dash-security-body">
+            <div class="dash-security-metrics">
+              <div><span class="label">近 24h 阻拦</span><strong data-count-up="${s.guard_blocked_24h ?? 0}">0</strong></div>
+              <div><span class="label">近 7 天阻拦</span><strong data-count-up="${s.guard_blocked_7d ?? 0}">0</strong></div>
+            </div>
+            <p class="text-muted dash-security-note">涵盖提示注入、窃密、越权与危险命令。</p>
           </div>
-          <p class="text-muted dash-security-note">涵盖提示注入、窃密、越权与危险命令。</p>
+          <div class="dash-security-actions">
+            <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/monitor">拦截详情</button>
+          </div>
         </div>
         <div class="card dash-chart-card span-4">
           <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 7 天命中率</h3></div></div>
@@ -2153,6 +2160,18 @@ async function pageDocuments(kbId) {
           <button class="btn btn-sm" id="btnAdminUpload">上传</button>
         `,
       })}
+      <div class="kb-dropzone" aria-hidden="true">
+        <div class="kb-dropzone-inner">
+          <span class="kb-dropzone-icon" aria-hidden="true"></span>
+          <p class="kb-dropzone-title">将文件拖拽到此处</p>
+          <p class="kb-dropzone-lead">也可使用上方「选择文件 + 上传」按钮</p>
+          <ul class="kb-dropzone-meta">
+            <li>支持格式：PDF、DOC、DOCX、TXT、MD</li>
+            <li>单文件最大：100MB</li>
+            <li>一次上传：1 个文件</li>
+          </ul>
+        </div>
+      </div>
       <div class="card panel-fill">
         <div class="card-header">
           <div class="card-header-text">
@@ -4108,6 +4127,37 @@ async function pageMonitor() {
     </div>`;
 }
 
+/** FastAPI OpenAPI / Swagger 文档页（同源嵌入 /docs） */
+async function pageFastApi() {
+  if (!requirePerm("system:read", "FastAPI")) return;
+  document.getElementById("pageRoot").innerHTML = `
+    ${pageHead({
+      title: "FastAPI 接口文档",
+      desc: "Swagger UI（OpenAPI）。可在此调试 REST 接口；密钥与鉴权请勿在公共场合展示。",
+      actions: `
+        <a class="btn btn-secondary btn-sm" href="/docs" target="_blank" rel="noopener">新窗口打开 /docs</a>
+        <a class="btn btn-text btn-sm" href="/openapi.json" target="_blank" rel="noopener">OpenAPI JSON</a>
+      `,
+    })}
+    <div class="card panel-fill fastapi-docs-card">
+      <div class="card-header">
+        <div class="card-header-text">
+          <h3 class="card-title">Swagger UI</h3>
+          <p class="card-sub">经统一入口同源加载，路径：/docs</p>
+        </div>
+      </div>
+      <div class="embed-frame fastapi-docs-frame">
+        <iframe
+          title="FastAPI Swagger UI"
+          src="/docs"
+          class="fastapi-docs-iframe"
+          loading="lazy"
+          referrerpolicy="same-origin"
+        ></iframe>
+      </div>
+    </div>`;
+}
+
 /* ========== 启动 ========== */
 [
   "/admin",
@@ -4126,6 +4176,7 @@ async function pageMonitor() {
   "/admin/hit-test",
   "/admin/audit",
   "/admin/monitor",
+  "/admin/fastapi",
   "*",
 ].forEach((p) => route(p, () => dispatchRender()));
 

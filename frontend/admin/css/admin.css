@@ -1,4 +1,211 @@
 /* ============================================================
+ * 管理端：与全局首页（登录首页）统一的色阶 / 卡片 / 字体
+ * ============================================================ */
+
+.app-shell-admin {
+  --admin-ink-1: #2a3142;
+  --admin-ink-2: #4a5568;
+  --admin-ink-3: #6b7280;
+  --admin-ink-4: #8b93a3;
+
+  --color-text: var(--admin-ink-1);
+  --color-text-body: var(--admin-ink-2);
+  --color-text-secondary: var(--admin-ink-3);
+
+  --glass-bg: rgba(255, 255, 255, 0.52);
+  --glass-bg-soft: rgba(255, 255, 255, 0.62);
+  --glass-blur: blur(28px) saturate(1.12);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.55);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+
+  --shadow: 0 28px 64px rgba(40, 35, 70, 0.12), 0 8px 24px rgba(40, 35, 70, 0.05), var(--glass-inset);
+  --shadow-hover: 0 32px 72px rgba(40, 35, 70, 0.16), 0 10px 28px rgba(40, 35, 70, 0.08), var(--glass-inset);
+
+  --table-head-bg: rgba(255, 255, 255, 0.42);
+  --table-row-hover: rgba(255, 255, 255, 0.28);
+  --table-divider: rgba(120, 130, 160, 0.16);
+  --nav-glass: rgba(255, 255, 255, 0.5);
+  --sidebar-glass: rgba(255, 255, 255, 0.55);
+
+  --radius-card: 28px;
+  --card-pad: 28px;
+  color: var(--admin-ink-2);
+  font-family: var(--font-sans);
+
+  /* 管理浅色壳：按钮令牌强制可读，主色随当前主题；禁止白字 */
+  --btn-fg-on-fill: #2a3142;
+  --btn-ghost-fg: var(--admin-ink-1);
+  --btn-ghost-bg: rgba(255, 255, 255, 0.9);
+  --btn-ghost-border: color-mix(in srgb, var(--color-primary) 40%, rgba(61, 70, 89, 0.25));
+  --btn-ghost-hover-bg: #ffffff;
+  --btn-ghost-hover-fg: var(--admin-ink-1);
+}
+
+/* 页头分级：1 级标题 / 3 级说明 */
+.app-shell-admin .page-head h1 {
+  color: var(--admin-ink-1);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-shadow: none;
+}
+
+.app-shell-admin .page-head .page-desc,
+.app-shell-admin .page-desc {
+  color: var(--admin-ink-3);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.app-shell-admin .card-title {
+  color: var(--admin-ink-1);
+  font-size: 16px;
+  font-weight: 600;
+  text-shadow: none;
+}
+
+.app-shell-admin .card-header .card-sub,
+.app-shell-admin .text-muted {
+  color: var(--admin-ink-3);
+}
+
+.app-shell-admin .form-label,
+.app-shell-admin label {
+  color: var(--admin-ink-2);
+  font-weight: 500;
+}
+
+.app-shell-admin .sidebar-brand span,
+.app-shell-admin .sidebar-brand {
+  color: var(--admin-ink-1);
+}
+
+.app-shell-admin .sidebar-brand small,
+.app-shell-admin .sidebar-user small,
+.app-shell-admin .sidebar-caption {
+  color: var(--admin-ink-3);
+}
+
+/* 卡片：粉→薰衣草毛玻璃（对齐登录框） */
+.app-shell-admin .card,
+.app-shell-admin .glass-panel,
+.app-shell-admin .stat-card {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 236, 242, 0.72) 0%,
+    rgba(236, 232, 255, 0.58) 52%,
+    rgba(220, 228, 255, 0.52) 100%
+  );
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  border-top-color: rgba(255, 255, 255, 0.65);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  color: var(--admin-ink-2);
+}
+
+.app-shell-admin .card:hover,
+.app-shell-admin .glass-panel:hover,
+.app-shell-admin .stat-card:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 240, 245, 0.82) 0%,
+    rgba(240, 236, 255, 0.68) 52%,
+    rgba(228, 234, 255, 0.62) 100%
+  );
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow: var(--shadow-hover);
+}
+
+.app-shell-admin .card-header {
+  border-bottom-color: rgba(120, 130, 160, 0.16);
+}
+
+.app-shell-admin .stat-card::after,
+.app-shell-admin .stat-card::before {
+  opacity: 0.35;
+}
+
+.app-shell-admin .stat-card .label {
+  color: var(--admin-ink-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.app-shell-admin .stat-card .value {
+  color: var(--admin-ink-1);
+  text-shadow: none;
+  font-weight: 700;
+}
+
+.app-shell-admin .sidebar {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 236, 242, 0.7) 0%,
+    rgba(236, 232, 255, 0.55) 100%
+  );
+  border: var(--glass-border);
+  box-shadow: var(--shadow);
+  color: var(--admin-ink-2);
+}
+
+.app-shell-admin .sidebar .nav-item {
+  color: var(--admin-ink-2);
+}
+
+.app-shell-admin .sidebar .nav-item:hover {
+  color: var(--admin-ink-1);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.app-shell-admin .sidebar .nav-item.active {
+  color: var(--admin-ink-1);
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.72);
+  border-left-color: var(--admin-ink-1);
+  box-shadow: none;
+}
+
+.app-shell-admin .sidebar .nav-item.active i {
+  background: var(--admin-ink-1);
+  opacity: 1;
+  box-shadow: none;
+}
+
+.app-shell-admin .kb-card-heading h3 {
+  color: var(--admin-ink-1);
+}
+
+/* 按钮走主题令牌；浅色壳仅补强幽灵按钮可读性 */
+.app-shell-admin .btn-text {
+  color: var(--color-primary-dark, var(--color-primary));
+}
+
+.app-shell-admin .btn-primary,
+.app-shell-admin .btn:not(.btn-secondary):not(.btn-outline):not(.btn-text):not(.btn-danger) {
+  color: var(--btn-fg-on-fill);
+}
+
+.app-shell-admin .table .cell-primary {
+  color: var(--admin-ink-1);
+}
+
+.app-shell-admin .table .cell-time,
+.app-shell-admin .table .cell-muted {
+  color: var(--admin-ink-3);
+}
+
+.app-shell-admin .table th {
+  color: var(--admin-ink-3);
+  text-align: center;
+}
+
+.app-shell-admin .table td {
+  color: var(--admin-ink-2);
+}
+
+/* ============================================================
  * 管理端：TechStart Dark · 玻璃侧栏 + 统计 / 知识库
  * ============================================================ */
 
@@ -163,6 +370,11 @@
   white-space: nowrap;
   width: 1%;
   vertical-align: middle;
+}
+
+.table th.col-builtin,
+.table th.col-actions {
+  text-align: center;
 }
 
 .table td.col-actions {
@@ -386,7 +598,7 @@
 }
 
 .sidebar .nav-item.active {
-  color: #fff;
+  color: var(--btn-fg-on-fill);
   font-weight: 600;
   border-left-color: var(--color-primary-light);
   background: var(--color-primary-gradient);
@@ -396,9 +608,22 @@
 }
 
 .sidebar .nav-item.active i {
-  background: #fff;
+  background: var(--btn-fg-on-fill);
   opacity: 1;
-  box-shadow: 0 0 8px #fff;
+  box-shadow: none;
+}
+
+/* 管理端浅色壳：激活项不用白字 */
+.app-shell-admin .sidebar .nav-item.active {
+  color: var(--admin-ink-1) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  border-left-color: var(--admin-ink-1) !important;
+  box-shadow: none !important;
+}
+
+.app-shell-admin .sidebar .nav-item.active i {
+  background: var(--admin-ink-1) !important;
+  box-shadow: none !important;
 }
 
 .sidebar-user {
@@ -423,7 +648,7 @@
   height: 32px;
   border-radius: 50%;
   background: var(--color-primary-gradient);
-  color: #fff;
+  color: var(--btn-fg-on-fill);
   font-weight: 600;
   box-shadow: var(--color-glow);
 }
@@ -462,7 +687,7 @@
 .dash-welcome h1 {
   margin: 0 0 6px;
   font-size: clamp(22px, 2.4vw, 28px);
-  color: #fff;
+  color: var(--color-text);
   font-weight: 700;
 }
 
@@ -533,6 +758,16 @@ html[data-theme="light"] .dash-welcome p {
 
 .dash-bento {
   gap: 24px;
+  align-items: stretch;
+}
+
+.page-grid.dash-bento {
+  align-items: stretch;
+}
+
+.page-grid.dash-bento > .card {
+  height: 100%;
+  align-self: stretch;
 }
 
 .dash-bento .dash-chart-card.span-8 {
@@ -549,6 +784,28 @@ html[data-theme="light"] .dash-welcome p {
 
 .dash-chart-card {
   min-height: 220px;
+  height: 100%;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-security-card .dash-security-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.dash-security-actions {
+  margin-top: auto;
+  padding-top: 16px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.dash-security-actions .btn {
+  min-width: 108px;
 }
 
 .bar-chart-labeled {
@@ -872,7 +1129,7 @@ html[data-theme="light"] .dashboard-hero::after {
 .kb-card-heading h3 {
   overflow: hidden;
   margin: 0;
-  color: #fff;
+  color: var(--color-text);
   font-size: 15px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -910,7 +1167,7 @@ html[data-theme="light"] .dashboard-hero::after {
 }
 
 .kb-card:nth-child(3n + 2) .kb-card-cover {
-  background: linear-gradient(115deg, var(--color-primary), var(--color-primary) 58%, #34d399);
+  background: linear-gradient(115deg, var(--color-primary), var(--color-primary) 58%, var(--color-success));
 }
 
 .kb-card-cover span {
@@ -921,7 +1178,7 @@ html[data-theme="light"] .dashboard-hero::after {
   height: 42px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  color: var(--btn-fg-on-fill);
   font-size: 20px;
   font-weight: 600;
 }
@@ -930,7 +1187,7 @@ html[data-theme="light"] .dashboard-hero::after {
   padding: 4px 8px;
   border-radius: var(--radius);
   background: rgba(0, 0, 0, 0.2);
-  color: #fff;
+  color: var(--btn-fg-on-fill);
   font-size: 11px;
   font-style: normal;
 }
@@ -1111,4 +1368,120 @@ html[data-theme="light"] .dashboard-hero::after {
   .stat-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---------- 知识库文档：拖拽上传框（仅外观，未接拖拽逻辑） ---------- */
+.kb-dropzone {
+  margin: 0 0 24px;
+  padding: 28px 24px;
+  border-radius: var(--radius-card, 28px);
+  border: 1.5px dashed color-mix(in srgb, var(--color-primary) 45%, rgba(120, 130, 160, 0.35));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 236, 242, 0.55) 0%,
+    rgba(236, 232, 255, 0.42) 52%,
+    rgba(220, 228, 255, 0.38) 100%
+  );
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  user-select: none;
+}
+
+.kb-dropzone-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.kb-dropzone-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 12%, rgba(255, 255, 255, 0.7));
+  position: relative;
+}
+
+.kb-dropzone-icon::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 3px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  background: var(--color-primary-dark, var(--color-primary));
+  border-radius: 2px;
+}
+
+.kb-dropzone-icon::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  border-top: 3px solid var(--color-primary-dark, var(--color-primary));
+  border-right: 3px solid var(--color-primary-dark, var(--color-primary));
+  box-sizing: border-box;
+}
+
+.kb-dropzone-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--admin-ink-1, var(--color-text));
+}
+
+.kb-dropzone-lead {
+  margin: 0;
+  font-size: 13px;
+  color: var(--admin-ink-3, var(--color-text-secondary));
+}
+
+.kb-dropzone-meta {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--admin-ink-2, var(--color-text-body));
+}
+
+.kb-dropzone-meta li::before {
+  content: "· ";
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+/* ---------- FastAPI / Swagger 嵌入页 ---------- */
+.fastapi-docs-card {
+  min-height: calc(100vh - 180px);
+}
+
+.fastapi-docs-frame {
+  padding: 0 !important;
+  min-height: calc(100vh - 260px);
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.fastapi-docs-iframe {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 260px);
+  min-height: 640px;
+  border: 0;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-bg-deep) 80%, transparent);
 }

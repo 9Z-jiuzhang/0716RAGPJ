@@ -82,7 +82,7 @@
 
 .topnav .nav-item:hover,
 .app-shell:not(.app-shell-admin) .nav-item:hover {
-  color: #fff;
+  color: var(--color-text);
   background: rgba(255, 255, 255, 0.04);
 }
 

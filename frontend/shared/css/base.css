@@ -37,13 +37,13 @@ body {
 
 /* 日间：保持青绿/白色通透底，主色仅作极淡环境光 */
 html[data-theme="light"] body {
-  background-color: #ecfeff;
+  background-color: var(--mesh-canvas, #eef3f3);
   background-image:
     radial-gradient(ellipse 90% 70% at 50% 0%, #ffffff 0%, transparent 55%),
-    radial-gradient(ellipse 55% 45% at 10% 16%, rgba(20, 184, 166, 0.08), transparent 52%),
-    radial-gradient(ellipse 50% 40% at 92% 12%, rgba(20, 184, 166, 0.1), transparent 48%),
-    radial-gradient(ellipse 60% 50% at 82% 88%, rgba(20, 184, 166, 0.08), transparent 55%),
-    linear-gradient(145deg, #f0fdfa 0%, #ffffff 42%, #cffafe 100%);
+    radial-gradient(ellipse 55% 45% at 10% 16%, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 52%),
+    radial-gradient(ellipse 50% 40% at 92% 12%, color-mix(in srgb, var(--color-primary) 14%, transparent), transparent 48%),
+    radial-gradient(ellipse 60% 50% at 82% 88%, color-mix(in srgb, var(--color-primary) 10%, transparent), transparent 55%),
+    linear-gradient(145deg, #f4f7f7 0%, #ffffff 42%, #e8f0f0 100%);
 }
 
 a {
@@ -90,6 +90,117 @@ h6 {
   min-height: 100vh;
   position: relative;
   z-index: 1;
+}
+
+/* ============================================================
+ * 弥散磨砂底图
+ * - 全局首页 = 登录首页（.auth-materio）
+ * - 管理页（.app-shell-admin / .app-shell）
+ * 登录框（.auth-materio-card）样式不在此改动
+ * ============================================================ */
+.mesh-atmosphere {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+body:has(.auth-materio) .mesh-atmosphere,
+body:has(.app-shell) .mesh-atmosphere {
+  display: block;
+}
+
+/* 启用底图时：清掉旧 body 渐变，让 mesh 画布接管 */
+body:has(.auth-materio),
+body:has(.app-shell) {
+  background-color: var(--mesh-canvas);
+  background-image: none;
+}
+
+/* 全局首页：隐藏旧登录页装饰画布（光斑/网格/星点），不碰登录框 */
+body:has(.auth-materio) .auth-materio-canvas {
+  display: none !important;
+}
+
+/* 旧 ambient-orbs 由 JS 注入；主壳下隐藏，避免与新底图叠色 */
+body:has(.app-shell) .ambient-orbs {
+  display: none !important;
+}
+
+.mesh-atmosphere-canvas {
+  position: absolute;
+  inset: 0;
+  background: var(--mesh-canvas);
+}
+
+.mesh-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(88px);
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.mesh-blob-tr {
+  width: min(72vw, 820px);
+  height: min(72vw, 820px);
+  top: -18%;
+  right: -12%;
+  background: var(--mesh-blob-tr);
+  opacity: 0.95;
+  animation: mesh-drift-tr 28s var(--ease-standard, ease-in-out) infinite alternate;
+}
+
+.mesh-blob-bl {
+  width: min(78vw, 900px);
+  height: min(78vw, 900px);
+  bottom: -22%;
+  left: -16%;
+  background: var(--mesh-blob-bl);
+  opacity: 0.92;
+  animation: mesh-drift-bl 34s var(--ease-standard, ease-in-out) infinite alternate;
+}
+
+.mesh-noise {
+  position: absolute;
+  inset: 0;
+  opacity: var(--mesh-noise-opacity, 0.35);
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 180px 180px;
+}
+
+html[data-theme="dark"] .mesh-noise {
+  mix-blend-mode: soft-light;
+  opacity: calc(var(--mesh-noise-opacity, 0.22) + 0.08);
+}
+
+@keyframes mesh-drift-tr {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(-4%, 5%, 0) scale(1.06);
+  }
+}
+
+@keyframes mesh-drift-bl {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(5%, -4%, 0) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mesh-blob-tr,
+  .mesh-blob-bl {
+    animation: none;
+  }
 }
 
 .ambient-orbs {
@@ -238,10 +349,16 @@ h6 {
 }
 
 .theme-toggle:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-btn);
-  border-color: var(--color-primary);
-  color: var(--color-primary);
+  transform: none;
+  box-shadow: var(--glass-inset);
+  border-color: var(--glass-border);
+  color: var(--color-text);
+}
+
+.theme-toggle:active {
+  transform: translateY(1px) scale(0.96);
+  filter: brightness(0.92);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 
 .theme-toggle .icon-sun,
@@ -265,15 +382,15 @@ html[data-theme="light"] .bg-fx-canvas {
 }
 
 html[data-theme="light"] .ambient-orbs i:nth-child(1) {
-  background: #5eead4;
+  background: var(--color-primary-light);
 }
 
 html[data-theme="light"] .ambient-orbs i:nth-child(2) {
-  background: #67e8f9;
+  background: var(--color-info);
 }
 
 html[data-theme="light"] .ambient-orbs i:nth-child(3) {
-  background: #2dd4bf;
+  background: var(--color-primary);
 }
 
 html[data-theme="light"] .ambient-orbs i:nth-child(1),
@@ -315,7 +432,16 @@ html[data-theme="light"] .sidebar .nav-item:hover {
 }
 
 html[data-theme="light"] .sidebar .nav-item.active {
-  color: #fff;
+  color: var(--color-primary-dark);
+  background: var(--color-primary-soft);
+  border-left-color: var(--color-primary-dark);
+  box-shadow: none;
+}
+
+html[data-theme="light"] .sidebar .nav-item.active i {
+  background: var(--color-primary-dark);
+  box-shadow: none;
+  opacity: 1;
 }
 
 html[data-theme="light"] .sidebar-user {
@@ -339,17 +465,33 @@ html[data-theme="light"] .app-shell:not(.app-shell-admin) .nav-item:hover {
 
 html[data-theme="light"] .btn-secondary,
 html[data-theme="light"] .btn-outline {
-  color: var(--color-primary-dark);
-  border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
-  background: rgba(255, 255, 255, 0.65);
+  color: var(--btn-ghost-fg);
+  border-color: var(--btn-ghost-border);
+  background: var(--btn-ghost-bg);
+  background-image: none;
+  box-shadow: none;
 }
 
 html[data-theme="light"] .btn-secondary:hover,
 html[data-theme="light"] .btn-outline:hover {
-  background: var(--color-primary);
-  color: #fff;
-  border-color: transparent;
-  box-shadow: var(--shadow-btn);
+  background: var(--btn-ghost-bg);
+  color: var(--btn-ghost-fg);
+  border-color: var(--btn-ghost-border);
+  box-shadow: none;
+  filter: none;
+  transform: none;
+}
+
+html[data-theme="light"] .btn-text {
+  color: var(--color-primary-dark);
+  background: transparent;
+  background-image: none;
+}
+
+html[data-theme="light"] .btn-text:hover {
+  color: var(--color-primary-dark);
+  background: transparent;
+  transform: none;
 }
 
 html[data-theme="light"] .table td .btn,
@@ -431,4 +573,124 @@ html[data-theme="light"] .loading {
 html[data-theme="light"] .page-desc,
 html[data-theme="light"] .card-sub {
   color: var(--color-text-secondary);
+}
+
+/* 日间硬性：页面正文禁止白色/近白字（主色实心按钮上的反白除外） */
+html[data-theme="light"] body,
+html[data-theme="light"] .app-shell,
+html[data-theme="light"] .app-main,
+html[data-theme="light"] .content,
+html[data-theme="light"] .sidebar,
+html[data-theme="light"] .topnav,
+html[data-theme="light"] .card,
+html[data-theme="light"] .glass-panel,
+html[data-theme="light"] .modal,
+html[data-theme="light"] .auth-materio-card {
+  color: var(--color-text-body);
+}
+
+html[data-theme="light"] h1,
+html[data-theme="light"] h2,
+html[data-theme="light"] h3,
+html[data-theme="light"] h4,
+html[data-theme="light"] .page-head h1,
+html[data-theme="light"] .card-title,
+html[data-theme="light"] .modal-header h3,
+html[data-theme="light"] .modal-title,
+html[data-theme="light"] .kb-card-heading h3,
+html[data-theme="light"] .cell-primary,
+html[data-theme="light"] .topnav-brand,
+html[data-theme="light"] .page-bar-title {
+  color: var(--color-text);
+}
+
+html[data-theme="light"] .topnav .nav-item:hover,
+html[data-theme="light"] .app-shell:not(.app-shell-admin) .nav-item:hover,
+html[data-theme="light"] .topnav .nav-item.active,
+html[data-theme="light"] .app-shell:not(.app-shell-admin) .nav-item.active {
+  color: var(--color-primary-dark);
+  text-shadow: none;
+}
+
+html[data-theme="light"] .btn-secondary,
+html[data-theme="light"] .btn-outline,
+html[data-theme="light"] .btn-text,
+html[data-theme="light"] .table td .btn,
+html[data-theme="light"] .table-actions .btn,
+html[data-theme="light"] .table td .btn-text,
+html[data-theme="light"] .table-actions .btn-text {
+  color: var(--btn-ghost-fg);
+}
+
+html[data-theme="light"] .table td .btn:hover,
+html[data-theme="light"] .table-actions .btn:hover {
+  color: var(--btn-ghost-fg);
+  background: var(--btn-ghost-bg) !important;
+  transform: none;
+  filter: none;
+}
+
+html[data-theme="light"] .msg-row.assistant .msg-bubble {
+  color: var(--color-text-body);
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(120, 130, 160, 0.18);
+}
+
+/* 实心主按钮 / 用户气泡：深灰字（禁止纯白） */
+html[data-theme="light"] .btn,
+html[data-theme="light"] .btn-primary,
+html[data-theme="light"] .auth-materio-submit,
+html[data-theme="light"] .msg-row.user .msg-bubble {
+  color: var(--btn-fg-on-fill);
+}
+
+/* 全局字色铁律：禁止 #fff / 近白字；夜间浅灰、日间深灰 */
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] .btn,
+html[data-theme="dark"] .btn-primary,
+html[data-theme="dark"] .auth-materio-submit,
+html[data-theme="dark"] .msg-row.user .msg-bubble,
+html[data-theme="dark"] .sidebar .nav-item.active,
+html[data-theme="dark"] .avatar-mark,
+html[data-theme="dark"] .kb-card-cover span,
+html[data-theme="dark"] .kb-card-cover em,
+html[data-theme="dark"] .qa-welcome-mark,
+html[data-theme="dark"] .qa-composer .btn,
+html[data-theme="dark"] .landing-enter {
+  color: var(--btn-fg-on-fill) !important;
+}
+
+html[data-theme="light"] h1,
+html[data-theme="light"] h2,
+html[data-theme="light"] h3,
+html[data-theme="light"] .btn,
+html[data-theme="light"] .btn-primary,
+html[data-theme="light"] .btn-secondary,
+html[data-theme="light"] .btn-outline,
+html[data-theme="light"] .btn-text,
+html[data-theme="light"] .auth-materio-submit,
+html[data-theme="light"] .msg-row.user .msg-bubble,
+html[data-theme="light"] .sidebar .nav-item.active,
+html[data-theme="light"] .avatar-mark,
+html[data-theme="light"] .kb-card-cover span,
+html[data-theme="light"] .kb-card-cover em,
+html[data-theme="light"] .qa-welcome-mark,
+html[data-theme="light"] .qa-composer .btn,
+html[data-theme="light"] .landing-enter,
+html[data-theme="light"] .landing-enter-ghost {
+  color: var(--btn-fg-on-fill, var(--color-text)) !important;
+}
+
+html[data-theme="light"] .btn-secondary,
+html[data-theme="light"] .btn-outline,
+html[data-theme="light"] .btn-text,
+html[data-theme="light"] .landing-enter-ghost {
+  color: var(--btn-ghost-fg, var(--color-text)) !important;
 }

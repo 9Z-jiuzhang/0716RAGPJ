@@ -17,16 +17,23 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/css/variables.css?v=fix-score-0721c" />
-  <link rel="stylesheet" href="/assets/css/base.css?v=fix-score-0721c" />
-  <link rel="stylesheet" href="/assets/css/components.css?v=fix-score-0721c" />
-  <link rel="stylesheet" href="/assets/css/layout.css?v=fix-score-0721c" />
-  <link rel="stylesheet" href="/assets/css/motion.css?v=fix-score-0721c" />
+  <link rel="stylesheet" href="/assets/css/variables.css?v=bug-ui-merge-0721e" />
+  <link rel="stylesheet" href="/assets/css/base.css?v=bug-ui-merge-0721e" />
+  <link rel="stylesheet" href="/assets/css/components.css?v=bug-ui-merge-0721e" />
+  <link rel="stylesheet" href="/assets/css/layout.css?v=bug-ui-merge-0721e" />
+  <link rel="stylesheet" href="/assets/css/motion.css?v=bug-ui-merge-0721e" />
   <!-- 使用绝对路径，避免无尾斜杠 URL 下相对路径解析到错误目录 -->
-  <link rel="stylesheet" href="/css/guest.css?v=fix-score-0721c" />
+  <link rel="stylesheet" href="/css/guest.css?v=bug-ui-merge-0721e" />
 </head>
 <body>
+  <!-- 弥散底图：全局首页(=登录首页 .auth-materio) + 问答主壳；不改登录框样式 -->
+  <div class="mesh-atmosphere" aria-hidden="true">
+    <div class="mesh-atmosphere-canvas"></div>
+    <div class="mesh-blob mesh-blob-tr"></div>
+    <div class="mesh-blob mesh-blob-bl"></div>
+    <div class="mesh-noise"></div>
+  </div>
   <div id="app"></div>
-  <script type="module" src="/js/app.js?v=fix-score-0721c"></script>
+  <script type="module" src="/js/app.js?v=bug-ui-merge-0721e"></script>
 </body>
 </html>

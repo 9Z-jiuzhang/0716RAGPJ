@@ -2,7 +2,7 @@
  * TechStart Dark · 组件：玻璃卡片 / 胶囊按钮 / 霓虹表 / 表单
  * ============================================================ */
 
-/* ---------- 按钮 ---------- */
+/* ---------- 按钮（统一 · 随主题 · 无悬停唤醒 · 有按下反馈） ---------- */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -14,23 +14,31 @@
   border-radius: var(--radius-pill);
   background: var(--color-primary);
   background-image: var(--color-primary-gradient);
-  color: #fff;
+  color: var(--btn-fg-on-fill, var(--color-text));
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
   box-shadow: var(--shadow-btn);
-  transition: var(--transition);
+  transition:
+    transform 120ms var(--ease-standard),
+    box-shadow 120ms ease,
+    filter 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
+/* 禁用悬停唤醒：外观保持静止 */
 .btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 28px color-mix(in srgb, var(--color-primary) 55%, transparent),
-    0 0 18px color-mix(in srgb, var(--color-primary) 35%, transparent);
-  filter: brightness(1.06);
+  transform: none;
+  filter: none;
+  box-shadow: var(--shadow-btn);
 }
 
-.btn:active {
-  transform: translateY(0);
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  filter: brightness(0.9);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
 .btn:disabled {
@@ -38,51 +46,84 @@
   cursor: not-allowed;
   filter: none;
   box-shadow: none;
+  transform: none;
 }
 
 .btn-primary {
+  background: var(--color-primary);
   background-image: var(--color-primary-gradient);
-  color: #fff;
+  color: var(--btn-fg-on-fill, var(--color-text));
+  border-color: transparent;
+}
+
+.btn-primary:hover {
+  transform: none;
+  filter: none;
+  box-shadow: var(--shadow-btn);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  filter: brightness(0.9);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
 .btn-secondary,
 .btn-outline {
-  background: transparent;
+  background: var(--btn-ghost-bg);
   background-image: none;
-  color: rgba(255, 255, 255, 0.9);
-  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--btn-ghost-fg);
+  border-color: var(--btn-ghost-border);
   box-shadow: none;
 }
 
 .btn-secondary:hover,
 .btn-outline:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: transparent;
-  border-image: none;
-  color: #fff;
+  background: var(--btn-ghost-bg);
+  background-image: none;
+  border-color: var(--btn-ghost-border);
+  color: var(--btn-ghost-fg);
   filter: none;
-  box-shadow: 0 0 0 1px var(--color-primary), 0 0 16px color-mix(in srgb, var(--color-primary) 40%, transparent);
-  transform: translateY(-2px);
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-secondary:active:not(:disabled),
+.btn-outline:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary-dark, var(--color-primary));
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.1);
+  filter: none;
 }
 
 .btn-danger {
-  background: rgba(248, 113, 113, 0.15);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
   background-image: none;
   color: var(--color-danger);
-  border-color: rgba(248, 113, 113, 0.35);
+  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
   box-shadow: none;
 }
 
 .btn-danger:hover {
-  background: rgba(248, 113, 113, 0.28);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
   filter: none;
-  box-shadow: 0 0 16px rgba(248, 113, 113, 0.3);
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-danger:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  background: color-mix(in srgb, var(--color-danger) 28%, transparent);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.12);
+  filter: none;
 }
 
 .btn-text {
   background: transparent;
   background-image: none;
-  color: var(--color-primary);
+  color: var(--color-primary-dark, var(--color-primary));
   border: 1px solid transparent;
   height: auto;
   padding: 6px 12px;
@@ -91,9 +132,18 @@
 }
 
 .btn-text:hover {
-  background: var(--color-primary-soft);
+  background: transparent;
+  color: var(--color-primary-dark, var(--color-primary));
   filter: none;
   box-shadow: none;
+  transform: none;
+}
+
+.btn-text:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  background: var(--color-primary-soft);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.08);
+  filter: none;
 }
 
 .btn-sm {
@@ -487,7 +537,7 @@ select.form-control {
 
 select.form-control option {
   background: #161b28;
-  color: #fff;
+  color: var(--color-text);
 }
 
 .form-hint {
@@ -537,20 +587,27 @@ select.form-control option {
 
 .table th,
 .table td {
-  min-height: 52px;
+  min-height: 0;
   height: auto;
   padding: 14px 16px;
   border-bottom: 1px solid var(--table-divider);
   border-right: none;
-  text-align: left;
   vertical-align: middle;
   color: var(--color-text-body);
   font-size: 13px;
   line-height: 1.45;
 }
 
+.table td {
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+}
+
 .table th {
-  height: 46px;
+  text-align: center;
+  height: auto;
+  min-height: 46px;
   background: var(--table-head-bg);
   color: var(--color-text-secondary);
   font-weight: 700;
@@ -675,11 +732,11 @@ select.form-control option {
   height: 28px;
   min-height: 28px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--btn-ghost-border);
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: var(--btn-ghost-bg) !important;
   background-image: none !important;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--btn-ghost-fg);
   font-size: 12px;
   font-weight: 500;
   box-shadow: none;
@@ -689,12 +746,21 @@ select.form-control option {
 
 .table td .btn:hover,
 .table-actions .btn:hover {
+  background: var(--btn-ghost-bg) !important;
+  border-color: var(--btn-ghost-border);
+  color: var(--btn-ghost-fg);
+  box-shadow: none;
+  filter: none;
+  transform: none;
+}
+
+.table td .btn:active:not(:disabled),
+.table-actions .btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
   background: var(--color-primary-soft) !important;
   border-color: var(--color-primary);
-  color: #fff;
-  box-shadow: 0 0 14px color-mix(in srgb, var(--color-primary) 40%, transparent);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.1);
   filter: none;
-  transform: translateY(-1px);
 }
 
 .table td .btn-danger,
@@ -733,10 +799,10 @@ select.form-control option {
 }
 
 .badge-success {
-  background: rgba(52, 211, 153, 0.1);
-  color: #34d399;
-  border-color: rgba(52, 211, 153, 0.25);
-  box-shadow: 0 0 10px rgba(52, 211, 153, 0.35);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 28%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-success) 28%, transparent);
 }
 
 .badge-danger {
@@ -900,7 +966,7 @@ select.form-control option:checked {
   margin: 0 0 12px;
   font-size: 18px;
   font-weight: 600;
-  color: #fff;
+  color: var(--color-text);
 }
 
 .modal-body {
