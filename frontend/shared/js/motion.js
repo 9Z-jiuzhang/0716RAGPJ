@@ -144,30 +144,9 @@ function bindRipple() {
   );
 }
 
-/** 卡片鼠标追踪高光 */
+/** 卡片鼠标追踪高光（已关闭） */
 function bindSpotlight() {
-  if (prefersReduced) return;
-  const sel = ".card, .glass-panel, .stat-card, .dash-shortcut, .kb-card";
-  document.addEventListener(
-    "pointermove",
-    (e) => {
-      const el = e.target.closest?.(sel);
-      if (!el) return;
-      let spot = el.querySelector(":scope > .fx-spot");
-      if (!spot) {
-        spot = document.createElement("span");
-        spot.className = "fx-spot";
-        spot.setAttribute("aria-hidden", "true");
-        el.prepend(spot);
-      }
-      const rect = el.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * 100;
-      const y = ((e.clientY - rect.top) / rect.height) * 100;
-      el.style.setProperty("--spot-x", `${x}%`);
-      el.style.setProperty("--spot-y", `${y}%`);
-    },
-    { passive: true }
-  );
+  /* no-op: 去除鼠标周围点亮 */
 }
 
 /**

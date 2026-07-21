@@ -1115,7 +1115,7 @@ schemas["HealthResponse"] = {
                 "type": "object",
                 "properties": {"status": prop("string"), "latency_ms": prop("number")},
             },
-            "description": "各组件连通性：postgres/redis/chroma/langfuse",
+            "description": "各组件连通性：postgres/redis/chroma/langfuse/minio",
         },
     },
 }
@@ -1997,7 +1997,7 @@ paths["/audit/logs/{id}"] = {
 paths["/monitor/health"] = {
     "get": op(
         "系统健康检查",
-        "公开接口。检查 postgres/redis/chroma/langfuse 连通性，整体状态 healthy/degraded/unhealthy。",
+        "公开接口。检查 postgres/redis/chroma/langfuse/minio 连通性，整体状态 healthy/degraded/unhealthy。",
         ["系统监控"],
         public=True,
         responses={**resp("成功", ref("HealthResponse")), **err_resps(500)},

@@ -24,25 +24,79 @@ export function clearDemoFlags() {
 
 clearDemoFlags();
 
+/** 常见英文 HTTP / 框架报错 → 中文 */
+const HTTP_STATUS_ZH = {
+  400: "请求参数有误",
+  401: "未登录或登录已失效",
+  403: "没有权限执行此操作",
+  404: "资源不存在",
+  405: "请求方法不允许",
+  408: "请求超时",
+  409: "资源冲突",
+  413: "上传文件过大",
+  422: "请求数据校验失败",
+  429: "请求过于频繁，请稍后再试",
+  500: "服务器内部错误",
+  501: "服务未实现",
+  502: "网关错误",
+  503: "服务暂时不可用",
+  504: "网关超时",
+};
+
+const ENGLISH_ERROR_ZH = {
+  "Internal Server Error": "服务器内部错误",
+  "Bad Request": "请求参数有误",
+  "Unauthorized": "未授权",
+  "Forbidden": "禁止访问",
+  "Not Found": "资源不存在",
+  "Method Not Allowed": "请求方法不允许",
+  "Request Timeout": "请求超时",
+  Conflict: "资源冲突",
+  "Payload Too Large": "上传文件过大",
+  "Unprocessable Entity": "请求无法处理",
+  "Too Many Requests": "请求过于频繁，请稍后再试",
+  "Bad Gateway": "网关错误",
+  "Service Unavailable": "服务暂时不可用",
+  "Gateway Timeout": "网关超时",
+};
+
+/** 将英文报错文案转为中文（保留业务侧已有中文 detail） */
+function localizeErrorMessage(message, status) {
+  const raw = String(message || "").trim().replace(/\s+/g, " ");
+  if (!raw) return HTTP_STATUS_ZH[status] || `请求失败（HTTP ${status}）`;
+  if (ENGLISH_ERROR_ZH[raw]) return ENGLISH_ERROR_ZH[raw];
+  const lower = raw.toLowerCase();
+  for (const [en, zh] of Object.entries(ENGLISH_ERROR_ZH)) {
+    if (en.toLowerCase() === lower) return zh;
+  }
+  // 纯英文短句（如框架默认 statusText / HTML 正文）按状态码兜底
+  if (/^[A-Za-z][A-Za-z\s.'-]{0,80}$/.test(raw) && HTTP_STATUS_ZH[status]) {
+    return HTTP_STATUS_ZH[status];
+  }
+  return raw;
+}
+
 /** 从响应中提取可读错误信息 */
 async function readErrorMessage(res) {
+  let message = "";
   try {
     const ct = res.headers.get("content-type") || "";
     if (ct.includes("application/json")) {
       const payload = await res.json();
-      if (payload?.message) return payload.message;
-      if (typeof payload?.detail === "string") return payload.detail;
-      if (Array.isArray(payload?.detail)) {
-        return payload.detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
-      }
-      if (payload?.detail) return String(payload.detail);
+      if (payload?.message) message = payload.message;
+      else if (typeof payload?.detail === "string") message = payload.detail;
+      else if (Array.isArray(payload?.detail)) {
+        message = payload.detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
+      } else if (payload?.detail) message = String(payload.detail);
+    } else {
+      const text = await res.text();
+      if (text) message = text.slice(0, 200);
     }
-    const text = await res.text();
-    if (text) return text.slice(0, 200);
   } catch {
     /* ignore */
   }
-  return `请求失败（HTTP ${res.status}）`;
+  if (!message && res.statusText) message = res.statusText;
+  return localizeErrorMessage(message, res.status);
 }
 
 /**
@@ -68,6 +122,8 @@ export async function apiRequest(path, options = {}) {
     headers,
   };
 
+  if (options.signal) init.signal = options.signal;
+
   if (options.body !== undefined) {
     init.body = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
   }
@@ -80,11 +136,23 @@ export async function apiRequest(path, options = {}) {
   let res;
   try {
     res = await fetch(`${API_BASE}${path}`, init);
-  } catch {
+  } catch (e) {
+    if (e?.name === "AbortError" || options.signal?.aborted) {
+      throw new Error("已取消上传");
+    }
     throw new Error("无法连接后端，请确认统一入口（Nginx）与 API 服务已启动");
   }
 
   if (res.status === 401 && !options._retried) {
+    // 登录/注册接口的 401 是凭证错误，不是会话过期
+    const isCredentialAuth = /^\/auth\/(login|register)(\?|$)/.test(String(path));
+    if (isCredentialAuth) {
+      const msg = await readErrorMessage(res);
+      if (/账号或密码错误|用户名或密码错误|Unauthorized|未授权|未登录/i.test(msg)) {
+        throw new Error("用户名或密码错误");
+      }
+      throw new Error(msg || "用户名或密码错误");
+    }
     const ok = await tryRefresh();
     if (ok) return apiRequest(path, { ...options, _retried: true });
     clearAuth();

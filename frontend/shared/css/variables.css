@@ -1,90 +1,115 @@
 /* ============================================================
- * TechStart Pro · 双主题令牌（dark 默认 / light 日间青石）
- * 通过 html[data-theme="light|dark"] 切换
- * 青石主色：#40B395 · 日间主色 / 成功色
+ * 双主题令牌（dark / light）
+ * 日间：淡蓝雾感 + 商务蓝主按钮 #3887F0
+ * 夜间：静谧蓝雾感 + 同族商务蓝主色
+ * 原则：低饱和、轻盈朦胧、日夜和谐无刺眼色
  * ============================================================ */
 
 :root,
 [data-theme="dark"] {
-  --color-primary: #818cf8;
-  --color-primary-light: #a5b4fc;
-  --color-primary-dark: #6366f1;
-  --color-primary-soft: rgba(129, 140, 248, 0.14);
-  --color-primary-selected: rgba(129, 140, 248, 0.3);
-  --color-focus-ring: rgba(129, 140, 248, 0.35);
-  --color-primary-gradient: linear-gradient(135deg, #a5b4fc 0%, #818cf8 100%);
-  --color-glow: 0 0 28px rgba(129, 140, 248, 0.4);
+  /* 3. 品牌主蓝：主按钮 / 图表 / 图标 / hover 统一行动色 */
+  --color-primary: #3887f0;
+  --color-primary-light: #5ba0f5;
+  --color-primary-dark: #2d6fd4;
+  --color-primary-active: #2563c7;
+  --color-primary-soft: rgba(56, 135, 240, 0.16);
+  --color-primary-selected: #1a2c46;
+  --color-focus-ring: rgba(56, 135, 240, 0.36);
+  --color-primary-gradient: linear-gradient(
+    145deg,
+    #5ba0f5 0%,
+    #3887f0 48%,
+    #2d6fd4 100%
+  );
+  --color-glow: 0 0 22px rgba(56, 135, 240, 0.3);
 
-  --color-bg: #0f172a;
-  --color-bg-deep: #020617;
-  --color-bg-tint: rgba(15, 23, 42, 0.55);
-  --color-bg-hover: rgba(255, 255, 255, 0.05);
-  --color-surface: rgba(255, 255, 255, 0.06);
-  --color-surface-solid: rgba(15, 23, 42, 0.78);
+  /* 1. 全局背景：主画布深蓝夜空 / 侧栏极致深炭黑 */
+  --color-bg: #121a28;
+  --color-bg-deep: #121a28;
+  --color-bg-tint: rgba(18, 26, 40, 0.88);
+  --color-bg-hover: rgba(56, 135, 240, 0.12);
+  --color-surface: rgba(56, 135, 240, 0.08);
+  --color-surface-solid: #182230;
 
+  /* 2. 文本：标题浅灰 / 正文次浅 / 辅助灰（禁止纯白字） */
   --color-text: #c5cad3;
-  --color-text-body: #a8b0bd;
-  --color-text-secondary: #8b93a3;
-  --color-border: rgba(255, 255, 255, 0.1);
+  --color-text-body: #aeb4bf;
+  --color-text-secondary: #8a93a6;
+  /* 3/4. 胶囊·面板边框 / 区块分割线 */
+  --color-border: #303f54;
 
-  /* success → 青石 */
-  --color-success: #40b395;
-  --color-warning: #fbbf24;
-  --color-danger: #f87171;
-  --color-info: #6bc9ad;
+  --color-success: #22c55e;
+  --color-warning: #c4a574;
+  --color-danger: #ef4444;
+  --color-info: #3887f0;
+  /* 等宽小字 / 模型名等标识绿（对齐 Engine running 参考色） */
+  --color-code: #00a088;
+  /* 同形胶囊按钮临时金黄描边 */
+  --color-accent-gold: #d4a84b;
+  --color-accent-gold-soft: rgba(212, 168, 75, 0.18);
+  --color-status-gray-bg: rgba(255, 255, 255, 0.08);
 
   --header-height: 64px;
   --sidebar-width: 268px;
 
-  --radius: 16px;
+  --radius: 14px;
   --radius-card: 24px;
   --radius-bubble: 16px;
-  --radius-composer: 24px;
+  --radius-composer: 20px;
   --radius-modal: 24px;
-  --radius-pill: 999px;
+  --radius-pill: 14px;
+  --radius-control: 14px;
 
-  --glass-bg: rgba(15, 23, 42, 0.55);
-  --glass-bg-soft: rgba(255, 255, 255, 0.06);
-  --glass-blur: blur(24px);
-  --glass-border: 1px solid rgba(255, 255, 255, 0.1);
-  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  /* 3. 次要卡片 / 快捷胶囊常态底 */
+  --glass-bg: #1e2a3a;
+  --glass-bg-soft: #243447;
+  --glass-blur: blur(26px) saturate(1.05);
+  --glass-border: 1px solid #303f54;
+  --glass-inset: inset 0 1px 0 rgba(56, 135, 240, 0.06);
 
-  --shadow: 0 8px 32px rgba(0, 0, 0, 0.28), var(--glass-inset);
-  --shadow-hover: 0 12px 40px rgba(129, 140, 248, 0.28), var(--glass-inset);
-  --shadow-modal: 0 20px 56px rgba(0, 0, 0, 0.45), var(--glass-inset);
-  --shadow-btn: 0 4px 22px rgba(129, 140, 248, 0.4);
+  --shadow: 0 12px 36px rgba(0, 0, 0, 0.32), var(--glass-inset);
+  --shadow-hover: 0 14px 40px rgba(0, 0, 0, 0.36), var(--glass-inset);
+  --shadow-modal: 0 22px 56px rgba(0, 0, 0, 0.42), var(--glass-inset);
+  --shadow-btn: 0 4px 16px rgba(56, 135, 240, 0.32);
 
-  --table-head-bg: rgba(30, 41, 59, 0.55);
-  --table-row-hover: rgba(129, 140, 248, 0.14);
-  --table-divider: rgba(255, 255, 255, 0.05);
-  --nav-glass: rgba(15, 23, 42, 0.55);
-  --sidebar-glass: rgba(15, 23, 42, 0.5);
-  --orb-opacity: 0.65;
-  --fx-particle-alpha: 0.55;
+  --table-head-bg: rgba(56, 135, 240, 0.12);
+  --table-row-hover: rgba(56, 135, 240, 0.1);
+  --table-divider: rgba(72, 110, 160, 0.32);
+  --nav-glass: #182230;
+  --sidebar-glass: #12151c;
+  --orb-opacity: 0.45;
+  --fx-particle-alpha: 0.28;
 
-  /* 可交互按钮（随主题）——字色禁止纯白 */
-  --btn-fg-on-fill: #c5cad3;
+  /* 实心主按钮：高对比字色（仅按钮用，正文禁止纯白）；幽灵：正文浅灰 */
+  --btn-fg-on-fill: #e8ecf2;
   --btn-ghost-fg: #c5cad3;
-  --btn-ghost-bg: transparent;
-  --btn-ghost-border: rgba(197, 202, 211, 0.28);
-  --btn-ghost-hover-bg: transparent;
+  --btn-ghost-bg: #1e2a3a;
+  --btn-ghost-border: #303f54;
+  --btn-ghost-hover-bg: rgba(56, 135, 240, 0.14);
   --btn-ghost-hover-fg: #c5cad3;
 
-  /* 弥散底图 */
-  --mesh-canvas: #12131a;
+  /* 夜间弥散底：主画布 + 商务沉稳深蓝 / 黑色双色晕染 */
+  --mesh-canvas: #121a28;
   --mesh-blob-tr: radial-gradient(
     circle,
-    rgba(244, 176, 196, 0.42) 0%,
-    rgba(210, 180, 230, 0.22) 42%,
-    transparent 70%
+    rgba(22, 52, 98, 0.78) 0%,
+    rgba(18, 40, 72, 0.42) 40%,
+    rgba(14, 28, 52, 0.12) 58%,
+    transparent 76%
   );
   --mesh-blob-bl: radial-gradient(
     circle,
-    rgba(90, 130, 220, 0.45) 0%,
-    rgba(120, 85, 200, 0.32) 40%,
-    transparent 72%
+    rgba(0, 0, 0, 0.82) 0%,
+    rgba(4, 8, 16, 0.48) 38%,
+    rgba(8, 14, 24, 0.14) 58%,
+    transparent 76%
   );
-  --mesh-noise-opacity: 0.22;
+  --mesh-noise-opacity: 0.48;
+
+  /* 次要卡片/胶囊：实色深底，无浅色渐变 */
+  --card-glass-grad: #1e2a3a;
+  --color-card: #1e2a3a;
+  --color-card-hover: #243447;
 
   --space-xs: 8px;
   --space-sm: 12px;
@@ -108,76 +133,145 @@
   --font-sans: "Inter", "Space Grotesk", system-ui, -apple-system, "Segoe UI",
     "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* ============================================================
+   * 全局字阶（严格 7 级；组件只许用令牌，禁止散落 px）
+   * L1 Display  --font-size-xl     28px  页标题 / 欢迎主标题
+   * L2 Section  --font-size-lg     19px  分区标题 / 弹窗标题
+   * L3 Sub      --font-size-md     17px  卡片标题 / 品牌字
+   * L4 Body     --font-size-base   15px  正文 / 按钮 / 输入 / 对话气泡
+   * L5 UI       --font-size-sm     14px  导航 / 说明 / 列表项
+   * L6 Caption  --font-size-xs     13px  标签 / 提示 / 表头
+   * L7 Micro    --font-size-2xs    12px  元信息 / 时间戳 / 辅助角标
+   * ============================================================ */
+  --font-size-2xs: 12px;
+  --font-size-xs: 13px;
+  --font-size-sm: 14px;
+  --font-size-base: 15px;
+  --font-size-md: 17px;
+  --font-size-lg: 19px;
+  --font-size-xl: 28px;
+
+  /* 语义别名（与上表同值，按角色选用） */
+  --type-display: var(--font-size-xl);
+  --type-section: var(--font-size-lg);
+  --type-subtitle: var(--font-size-md);
+  --type-body: var(--font-size-base);
+  --type-ui: var(--font-size-sm);
+  --type-caption: var(--font-size-xs);
+  --type-micro: var(--font-size-2xs);
+  /* 卡片字阶（标题 / 副标题 / 正文）— 全站日夜共用 */
+  --card-title-size: var(--font-size-md);
+  --card-title-weight: var(--font-weight-semibold);
+  --card-sub-size: var(--font-size-sm);
+  --card-body-size: var(--font-size-base);
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height-body: 1.55;
+  --line-height-tight: 1.45;
+  --letter-spacing-tight: -0.02em;
+  --letter-spacing-label: 0.06em;
 }
 
-/* ---------- 日间：米白画布 + 青石主色 ---------- */
+/* ---------- 日间：淡蓝雾感 + 商务蓝主色 ---------- */
 [data-theme="light"] {
-  /* 青石（参考色）#40B395 */
-  --color-primary: #40b395;
-  --color-primary-light: #6bc9ad;
-  --color-primary-dark: #2e8f72;
-  --color-primary-soft: rgba(64, 179, 149, 0.14);
-  --color-primary-selected: rgba(64, 179, 149, 0.24);
-  --color-focus-ring: rgba(64, 179, 149, 0.38);
-  --color-primary-gradient: linear-gradient(135deg, #6bc9ad 0%, #40b395 52%, #2e8f72 100%);
-  --color-glow: 0 0 24px rgba(64, 179, 149, 0.35);
+  /* 商务蓝主按钮色板（与夜间同系） */
+  --color-primary: #3887f0;
+  --color-primary-light: #5ba0f5;
+  --color-primary-dark: #2d6fd4;
+  --color-primary-active: #2563c7;
+  --color-primary-soft: rgba(56, 135, 240, 0.14);
+  --color-primary-selected: rgba(56, 135, 240, 0.2);
+  --color-focus-ring: rgba(56, 135, 240, 0.32);
+  --color-primary-gradient: linear-gradient(
+    145deg,
+    #5ba0f5 0%,
+    #3887f0 52%,
+    #2d6fd4 100%
+  );
+  --color-glow: 0 0 18px rgba(56, 135, 240, 0.22);
 
-  --color-bg: #f5f8f7;
-  --color-bg-deep: #eef4f2;
-  --color-bg-tint: rgba(245, 248, 247, 0.8);
-  --color-bg-hover: rgba(64, 179, 149, 0.1);
-  --color-surface: rgba(255, 255, 255, 0.72);
+  --color-bg: #f3f6fa;
+  --color-bg-deep: #f0f3f8;
+  --color-bg-tint: rgba(243, 246, 250, 0.85);
+  --color-bg-hover: rgba(56, 135, 240, 0.08);
+  --color-surface: rgba(255, 255, 255, 0.7);
   --color-surface-solid: rgba(255, 255, 255, 0.92);
 
   --color-text: #2a3142;
   --color-text-body: #4a5568;
-  --color-text-secondary: #6b7280;
-  --color-border: rgba(64, 179, 149, 0.32);
+  --color-text-secondary: #6b7585;
+  --color-border: #b0bfc9;
 
-  --color-success: #40b395;
-  --color-warning: #c48a2a;
-  --color-danger: #e11d48;
-  --color-info: #5bb8a0;
+  --color-success: #16a34a;
+  --color-warning: #b8925a;
+  --color-danger: #dc2626;
+  --color-info: #3887f0;
+  /* 日间：同系青绿，略深以保证浅底可读 */
+  --color-code: #0d8f7a;
+  --color-accent-gold: #c9a227;
+  --color-accent-gold-soft: rgba(201, 162, 39, 0.14);
+  --color-status-gray-bg: rgba(250, 251, 252, 0.98);
 
-  --glass-bg: rgba(255, 255, 255, 0.62);
-  --glass-bg-soft: rgba(255, 255, 255, 0.5);
-  --glass-blur: blur(24px);
-  --glass-border: 1px solid rgba(255, 255, 255, 0.75);
-  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-soft: rgba(248, 252, 255, 0.58);
+  --glass-blur: blur(28px) saturate(1.08);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.7);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 
-  --shadow: 0 10px 30px -10px rgba(46, 143, 114, 0.14), var(--glass-inset);
-  --shadow-hover: 0 14px 36px -8px rgba(46, 143, 114, 0.2), var(--glass-inset);
-  --shadow-modal: 0 20px 50px -12px rgba(46, 143, 114, 0.22), var(--glass-inset);
-  --shadow-btn: 0 6px 22px rgba(64, 179, 149, 0.32);
+  --shadow: 0 16px 40px rgba(70, 90, 120, 0.1), var(--glass-inset);
+  --shadow-hover: 0 18px 44px rgba(70, 90, 120, 0.12), var(--glass-inset);
+  --shadow-modal: 0 24px 52px rgba(70, 90, 120, 0.14), var(--glass-inset);
+  --shadow-btn: 0 4px 14px rgba(56, 135, 240, 0.28);
 
-  --table-head-bg: rgba(64, 179, 149, 0.1);
-  --table-row-hover: rgba(64, 179, 149, 0.1);
-  --table-divider: rgba(64, 179, 149, 0.2);
+  --table-head-bg: rgba(56, 135, 240, 0.08);
+  --table-row-hover: rgba(56, 135, 240, 0.08);
+  --table-divider: rgba(56, 135, 240, 0.16);
   --nav-glass: rgba(255, 255, 255, 0.55);
-  --sidebar-glass: rgba(255, 255, 255, 0.58);
-  --orb-opacity: 0.45;
-  --fx-particle-alpha: 0.28;
+  --sidebar-glass: rgba(250, 252, 255, 0.62);
+  --orb-opacity: 0.4;
+  --fx-particle-alpha: 0.22;
 
-  /* 日间幽灵/实心按钮：深灰字，禁止白字 */
-  --btn-fg-on-fill: #2a3142;
+  --btn-fg-on-fill: #e8ecf2;
   --btn-ghost-fg: #2a3142;
-  --btn-ghost-bg: rgba(255, 255, 255, 0.88);
-  --btn-ghost-border: color-mix(in srgb, var(--color-primary) 42%, transparent);
-  --btn-ghost-hover-bg: rgba(255, 255, 255, 0.88);
+  --btn-ghost-bg: rgba(255, 255, 255, 0.72);
+  --btn-ghost-border: #3887f0;
+  --btn-ghost-hover-bg: rgba(255, 255, 255, 0.86);
   --btn-ghost-hover-fg: #2a3142;
 
-  --mesh-canvas: #f7f6f4;
+  /* 日间弥散底：不规则大面积蓝/金晕染（仅底图） */
+  --mesh-canvas: #f7fafd;
   --mesh-blob-tr: radial-gradient(
-    circle,
-    rgba(248, 190, 205, 0.78) 0%,
-    rgba(220, 195, 235, 0.4) 45%,
-    transparent 72%
+    68% 78% at 42% 48%,
+    rgba(56, 135, 240, 0.58) 0%,
+    rgba(90, 160, 240, 0.36) 28%,
+    rgba(150, 200, 245, 0.16) 52%,
+    transparent 74%
   );
   --mesh-blob-bl: radial-gradient(
-    circle,
-    rgba(95, 140, 230, 0.72) 0%,
-    rgba(130, 95, 210, 0.55) 38%,
-    transparent 72%
+    72% 64% at 58% 55%,
+    rgba(201, 162, 39, 0.4) 0%,
+    rgba(56, 135, 240, 0.28) 32%,
+    rgba(130, 185, 235, 0.12) 56%,
+    transparent 78%
   );
-  --mesh-noise-opacity: 0.38;
+  --mesh-noise-opacity: 0.62;
+
+  /* 淡蓝主色 → 对角浅金点缀（非上下晕染） */
+  --card-glass-grad: linear-gradient(
+    135deg,
+    rgba(224, 238, 250, 0.78) 0%,
+    rgba(216, 230, 248, 0.58) 48%,
+    rgba(240, 228, 198, 0.22) 100%
+  );
+  /* 日间实底回退（下拉 option / 需纯色处） */
+  --color-card: #f7fafc;
+  --color-card-hover: #f0f4f8;
+
+  --radius: 14px;
+  --radius-card: 24px;
+  --radius-pill: 14px;
+  --radius-control: 14px;
 }

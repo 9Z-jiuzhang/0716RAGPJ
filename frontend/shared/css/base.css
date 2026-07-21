@@ -14,9 +14,9 @@ body {
   padding: 0;
   min-height: 100%;
   font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.55;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-body);
   color: var(--color-text-body);
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
@@ -35,15 +35,17 @@ body {
   background-attachment: fixed;
 }
 
-/* 日间：保持青绿/白色通透底，主色仅作极淡环境光 */
+/* 日间：不规则大面积主题晕染（仅底图） */
 html[data-theme="light"] body {
-  background-color: var(--mesh-canvas, #eef3f3);
+  background-color: var(--mesh-canvas, #f7fafd);
   background-image:
-    radial-gradient(ellipse 90% 70% at 50% 0%, #ffffff 0%, transparent 55%),
-    radial-gradient(ellipse 55% 45% at 10% 16%, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 52%),
-    radial-gradient(ellipse 50% 40% at 92% 12%, color-mix(in srgb, var(--color-primary) 14%, transparent), transparent 48%),
-    radial-gradient(ellipse 60% 50% at 82% 88%, color-mix(in srgb, var(--color-primary) 10%, transparent), transparent 55%),
-    linear-gradient(145deg, #f4f7f7 0%, #ffffff 42%, #e8f0f0 100%);
+    radial-gradient(ellipse 78% 58% at 6% 8%, color-mix(in srgb, var(--color-primary) 38%, transparent), transparent 58%),
+    radial-gradient(ellipse 62% 70% at 96% 4%, color-mix(in srgb, var(--color-primary) 34%, transparent), transparent 54%),
+    radial-gradient(ellipse 70% 52% at 88% 78%, color-mix(in srgb, var(--color-accent-gold) 28%, transparent), transparent 60%),
+    radial-gradient(ellipse 58% 68% at 4% 72%, color-mix(in srgb, var(--color-primary) 22%, transparent), transparent 56%),
+    radial-gradient(ellipse 48% 42% at 42% 92%, color-mix(in srgb, var(--color-accent-gold) 16%, transparent), transparent 55%),
+    radial-gradient(ellipse 40% 36% at 58% 28%, color-mix(in srgb, var(--color-primary) 14%, transparent), transparent 50%),
+    linear-gradient(152deg, #e6f0fb 0%, #f8fbff 38%, #fff9ef 72%, #eef3f8 100%);
 }
 
 a {
@@ -53,7 +55,7 @@ a {
 }
 
 a:hover {
-  color: #c4b5fd;
+  color: var(--color-primary-light);
   text-decoration: none;
 }
 
@@ -80,10 +82,47 @@ h4,
 h5,
 h6 {
   margin: 0;
-  font-weight: 600;
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
-  letter-spacing: -0.02em;
-  text-shadow: 0 0 40px rgba(129, 140, 248, 0.35);
+  letter-spacing: var(--letter-spacing-tight);
+  text-shadow: 0 0 28px color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+
+/* 标题层级默认字号（可被页面组件覆盖，但必须仍用令牌） */
+h1 {
+  font-size: var(--type-display);
+  line-height: var(--line-height-tight);
+}
+
+h2 {
+  font-size: var(--type-section);
+  line-height: var(--line-height-tight);
+}
+
+h3 {
+  font-size: var(--type-subtitle);
+  line-height: var(--line-height-tight);
+}
+
+h4 {
+  font-size: var(--type-body);
+  line-height: var(--line-height-tight);
+}
+
+h5,
+h6 {
+  font-size: var(--type-ui);
+  line-height: var(--line-height-tight);
+  font-weight: var(--font-weight-medium);
+}
+
+code,
+kbd,
+samp,
+pre,
+.mono {
+  font-family: var(--font-mono);
 }
 
 #app {
@@ -173,9 +212,144 @@ body:has(.app-shell) .ambient-orbs {
   background-size: 180px 180px;
 }
 
+/* 日间底图噪点：轻微加浓，仅底图层 */
+html[data-theme="light"] .mesh-noise {
+  z-index: 2;
+  opacity: 0.64;
+  mix-blend-mode: multiply;
+  background-size: 110px 110px;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.55' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.32 0 0 0 0 0.33 0 0 0 0 0.36 0 0 0 0.82 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 日间：不规则大块柔化色晕 */
+html[data-theme="light"] .mesh-blob {
+  filter: blur(118px);
+}
+
+html[data-theme="light"] .mesh-blob-tr {
+  width: min(108vw, 1280px);
+  height: min(92vw, 1080px);
+  top: -38%;
+  right: -34%;
+  border-radius: 58% 42% 48% 52% / 44% 56% 40% 60%;
+  opacity: 1;
+  transform: rotate(-12deg) translateZ(0);
+}
+
+html[data-theme="light"] .mesh-blob-bl {
+  width: min(98vw, 1160px);
+  height: min(86vw, 980px);
+  bottom: -36%;
+  left: -30%;
+  border-radius: 42% 58% 55% 45% / 52% 40% 60% 48%;
+  opacity: 1;
+  transform: rotate(18deg) translateZ(0);
+}
+
+/* 日间全屏：多层不规则大面积晕染（仅底图） */
+html[data-theme="light"] .mesh-atmosphere-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 72% 58% at 12% 18%, rgba(56, 135, 240, 0.34), transparent 62%),
+    radial-gradient(ellipse 58% 70% at 88% 12%, rgba(56, 135, 240, 0.3), transparent 58%),
+    radial-gradient(ellipse 64% 50% at 78% 86%, rgba(201, 162, 39, 0.26), transparent 64%),
+    radial-gradient(ellipse 50% 62% at 8% 78%, rgba(90, 160, 235, 0.22), transparent 60%),
+    radial-gradient(ellipse 42% 38% at 48% 48%, rgba(201, 162, 39, 0.1), transparent 55%);
+}
+
+html[data-theme="light"] .mesh-atmosphere-canvas::after {
+  content: "";
+  position: absolute;
+  inset: -8% -6%;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 46% 54% at 64% 24%, rgba(56, 135, 240, 0.16), transparent 58%),
+    radial-gradient(ellipse 52% 40% at 28% 64%, rgba(201, 162, 39, 0.14), transparent 56%);
+  opacity: 0.9;
+}
+
+/* 日间管理端：底图对比减淡，避免工作台过抢眼 */
+html[data-theme="light"]:has(.app-shell-admin) body {
+  background-color: #f5f8fb;
+  background-image:
+    radial-gradient(ellipse 78% 58% at 6% 8%, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 58%),
+    radial-gradient(ellipse 62% 70% at 96% 4%, color-mix(in srgb, var(--color-primary) 11%, transparent), transparent 54%),
+    radial-gradient(ellipse 70% 52% at 88% 78%, color-mix(in srgb, var(--color-accent-gold) 8%, transparent), transparent 60%),
+    radial-gradient(ellipse 58% 68% at 4% 72%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 56%),
+    linear-gradient(152deg, #eef3f8 0%, #f8fafc 45%, #f6f4ef 100%);
+}
+
+html[data-theme="light"]:has(.app-shell-admin) .mesh-blob-tr,
+html[data-theme="light"]:has(.app-shell-admin) .mesh-blob-bl {
+  opacity: 0.38;
+  filter: blur(140px);
+}
+
+html[data-theme="light"]:has(.app-shell-admin) .mesh-atmosphere-canvas::before {
+  background:
+    radial-gradient(ellipse 72% 58% at 12% 18%, rgba(56, 135, 240, 0.12), transparent 62%),
+    radial-gradient(ellipse 58% 70% at 88% 12%, rgba(56, 135, 240, 0.1), transparent 58%),
+    radial-gradient(ellipse 64% 50% at 78% 86%, rgba(201, 162, 39, 0.08), transparent 64%),
+    radial-gradient(ellipse 50% 62% at 8% 78%, rgba(90, 160, 235, 0.08), transparent 60%);
+}
+
+html[data-theme="light"]:has(.app-shell-admin) .mesh-atmosphere-canvas::after {
+  opacity: 0.35;
+}
+
+html[data-theme="light"]:has(.app-shell-admin) .mesh-noise {
+  opacity: 0.4;
+}
+
+/* 夜间：与日间同构的磨砂（大色块柔化 + 胶片颗粒） */
+html[data-theme="dark"] .mesh-blob {
+  filter: blur(140px);
+}
+
+html[data-theme="dark"] .mesh-blob-tr {
+  width: min(95vw, 1100px);
+  height: min(95vw, 1100px);
+  top: -32%;
+  right: -22%;
+  opacity: 1;
+}
+
+html[data-theme="dark"] .mesh-blob-bl {
+  width: min(88vw, 980px);
+  height: min(88vw, 980px);
+  bottom: -28%;
+  left: -22%;
+  opacity: 0.92;
+}
+
+/* 夜间全屏：深蓝 ↔ 黑色对角线柔晕 */
+html[data-theme="dark"] .mesh-atmosphere-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    rgba(28, 62, 112, 0.42) 0%,
+    rgba(18, 34, 58, 0.16) 38%,
+    rgba(8, 12, 20, 0.22) 62%,
+    rgba(0, 0, 0, 0.4) 100%
+  );
+}
+
+/* 夜间底图噪点：同日间磨砂颗粒感（soft-light，仅底图层） */
 html[data-theme="dark"] .mesh-noise {
+  z-index: 2;
+  opacity: 0.5;
   mix-blend-mode: soft-light;
-  opacity: calc(var(--mesh-noise-opacity, 0.22) + 0.08);
+  background-size: 128px 128px;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.4' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.72 0 0 0 0 0.78 0 0 0 0 0.9 0 0 0 0.7 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 @keyframes mesh-drift-tr {
@@ -248,13 +422,25 @@ html[data-theme="dark"] .mesh-noise {
   display: none !important;
 }
 
-/* 滚动条：跟随主色（侧栏 / 内容区 / 全局） */
+/* 滚动条：默认隐藏；滚动中（.is-scrolling）再显示 */
 * {
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+}
+
+*.is-scrolling,
+html.is-scrolling {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-primary) 42%, transparent) transparent;
 }
 
 *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+*.is-scrolling::-webkit-scrollbar,
+html.is-scrolling::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
@@ -264,11 +450,17 @@ html[data-theme="dark"] .mesh-noise {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  background: transparent;
   border-radius: 10px;
 }
 
-*::-webkit-scrollbar-thumb:hover {
+*.is-scrolling::-webkit-scrollbar-thumb,
+html.is-scrolling::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-primary) 42%, transparent);
+}
+
+*.is-scrolling::-webkit-scrollbar-thumb:hover,
+html.is-scrolling::-webkit-scrollbar-thumb:hover {
   background: var(--color-primary);
 }
 
@@ -277,6 +469,14 @@ html[data-theme="dark"] .mesh-noise {
 .app-main,
 .content,
 .table-wrap {
+  scrollbar-color: transparent transparent;
+}
+
+.sidebar.is-scrolling,
+.sidebar-nav.is-scrolling,
+.app-main.is-scrolling,
+.content.is-scrolling,
+.table-wrap.is-scrolling {
   scrollbar-color: color-mix(in srgb, var(--color-primary) 42%, transparent) transparent;
 }
 
@@ -300,7 +500,7 @@ html[data-theme="dark"] .mesh-noise {
   display: block;
   margin-bottom: 8px;
   color: var(--color-text-body);
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 500;
 }
 
@@ -322,12 +522,71 @@ html[data-theme="dark"] .mesh-noise {
   border-radius: var(--radius);
   background: var(--glass-bg);
   color: var(--color-text-body);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .list-plain code {
   color: var(--color-primary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
+}
+
+.health-check-list .health-check-item {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.health-lamp {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-text-secondary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-text-secondary) 18%, transparent);
+}
+
+.health-lamp.is-healthy {
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 22%, transparent);
+  animation: health-lamp-pulse 2.4s ease-in-out infinite;
+}
+
+.health-lamp.is-degraded {
+  background: var(--color-accent-gold, #c9a227);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-gold, #c9a227) 22%, transparent);
+}
+
+.health-lamp.is-unhealthy {
+  background: var(--color-danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger) 22%, transparent);
+}
+
+.health-check-name {
+  font-weight: 600;
+  color: var(--color-text);
+  min-width: 6.5em;
+}
+
+.health-check-meta {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-align: right;
+}
+
+@keyframes health-lamp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .health-lamp.is-healthy {
+    animation: none;
+  }
 }
 
 /* ---------- 主题切换按钮 ---------- */
@@ -364,8 +623,17 @@ html[data-theme="dark"] .mesh-noise {
 .theme-toggle .icon-sun,
 .theme-toggle .icon-moon {
   display: none;
-  font-size: 16px;
-  line-height: 1;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
+  color: inherit;
+}
+
+.theme-toggle .icon-sun svg,
+.theme-toggle .icon-moon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 html[data-theme="dark"] .theme-toggle .icon-sun,
@@ -377,26 +645,31 @@ html[data-theme="light"] .theme-toggle .icon-moon {
   display: block;
 }
 
+html[data-theme="light"] .theme-toggle .icon-moon svg {
+  transform: rotate(-12deg);
+}
+
 html[data-theme="light"] .bg-fx-canvas {
   opacity: 0.22;
 }
 
 html[data-theme="light"] .ambient-orbs i:nth-child(1) {
-  background: var(--color-primary-light);
+  background: #8eb8de;
 }
 
 html[data-theme="light"] .ambient-orbs i:nth-child(2) {
   background: var(--color-info);
 }
 
-html[data-theme="light"] .ambient-orbs i:nth-child(3) {
-  background: var(--color-primary);
+html[data-theme="light"] .ambient-orbs i:nth-child(1),
+html[data-theme="light"] .ambient-orbs i:nth-child(2) {
+  opacity: calc(var(--orb-opacity, 0.65) * 0.85);
 }
 
-html[data-theme="light"] .ambient-orbs i:nth-child(1),
-html[data-theme="light"] .ambient-orbs i:nth-child(2),
+/* 浅金仅作点缀，不抢淡蓝主色 */
 html[data-theme="light"] .ambient-orbs i:nth-child(3) {
-  opacity: calc(var(--orb-opacity, 0.65) * 0.85);
+  background: #d4b87a;
+  opacity: calc(var(--orb-opacity, 0.65) * 0.28);
 }
 
 html[data-theme="light"] .topnav-brand,
@@ -407,7 +680,7 @@ html[data-theme="light"] .page-bar-title {
 html[data-theme="light"] .role-chip {
   background: var(--color-primary-soft);
   color: var(--color-primary-dark);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  border: none;
 }
 
 /* 日间：侧栏 / 顶栏与青绿通透主界面统一 */
@@ -466,7 +739,7 @@ html[data-theme="light"] .app-shell:not(.app-shell-admin) .nav-item:hover {
 html[data-theme="light"] .btn-secondary,
 html[data-theme="light"] .btn-outline {
   color: var(--btn-ghost-fg);
-  border-color: var(--btn-ghost-border);
+  border-color: var(--color-primary);
   background: var(--btn-ghost-bg);
   background-image: none;
   box-shadow: none;
@@ -476,7 +749,7 @@ html[data-theme="light"] .btn-secondary:hover,
 html[data-theme="light"] .btn-outline:hover {
   background: var(--btn-ghost-bg);
   color: var(--btn-ghost-fg);
-  border-color: var(--btn-ghost-border);
+  border-color: var(--color-primary);
   box-shadow: none;
   filter: none;
   transform: none;
@@ -496,19 +769,74 @@ html[data-theme="light"] .btn-text:hover {
 
 html[data-theme="light"] .table td .btn,
 html[data-theme="light"] .table-actions .btn {
-  color: var(--color-primary-dark);
-  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  color: var(--btn-ghost-fg);
+  border-color: var(--color-primary);
   background: rgba(255, 255, 255, 0.7) !important;
 }
 
-html[data-theme="light"] .modal {
-  background: rgba(255, 255, 255, 0.78);
-  color: var(--color-text-body);
+html[data-theme="light"] .form-control,
+html[data-theme="light"] select.form-control,
+html[data-theme="light"] input,
+html[data-theme="light"] textarea {
+  color: var(--color-text) !important;
+  background: rgba(255, 255, 255, 0.88);
+  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+html[data-theme="light"] .form-control::placeholder {
+  color: var(--color-text-secondary) !important;
+}
+
+html[data-theme="light"] .toolbar .form-control,
+html[data-theme="light"] .search-glass {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 32%, transparent);
 }
 
 html[data-theme="light"] .modal-header h3,
 html[data-theme="light"] .modal-title {
   color: var(--color-text);
+}
+
+/* 日间：弹窗 / Toast / 下拉跟随淡蓝毛玻璃卡片 */
+html[data-theme="light"] .modal,
+html[data-theme="light"] .modal-panel,
+html[data-theme="light"] .toast {
+  color: var(--color-text-body);
+  background: linear-gradient(
+    135deg,
+    rgba(224, 238, 250, 0.92) 0%,
+    rgba(216, 230, 248, 0.78) 48%,
+    rgba(240, 228, 198, 0.26) 100%
+  ) !important;
+  background-image: linear-gradient(
+    135deg,
+    rgba(224, 238, 250, 0.92) 0%,
+    rgba(216, 230, 248, 0.78) 48%,
+    rgba(240, 228, 198, 0.26) 100%
+  ) !important;
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+html[data-theme="light"] .modal .form-control,
+html[data-theme="light"] .modal select.form-control,
+html[data-theme="light"] .modal input,
+html[data-theme="light"] .modal textarea {
+  color: var(--color-text) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+
+html[data-theme="light"] .modal label,
+html[data-theme="light"] .modal .form-label,
+html[data-theme="light"] .modal .form-hint,
+html[data-theme="light"] .modal .checkbox-grid label {
+  color: var(--color-text-body);
+}
+
+html[data-theme="light"] .modal .checkbox-grid small {
+  color: var(--color-text-secondary);
 }
 
 html[data-theme="light"] .page-head h1,
@@ -539,8 +867,23 @@ html[data-theme="light"] .stat-card {
 }
 
 html[data-theme="light"] .stat-card:hover {
-  background: rgba(255, 255, 255, 0.9);
-  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  background: rgba(255, 255, 255, 0.78) !important;
+  border: 1px solid rgba(255, 255, 255, 0.92) !important;
+  box-shadow: var(--shadow) !important;
+  transform: translateY(-2px) !important;
+  filter: none !important;
+}
+
+html[data-theme="light"] .card:hover,
+html[data-theme="light"] .glass-panel:hover,
+html[data-theme="light"] .kb-card:hover,
+html[data-theme="light"] .kb-create-card:hover {
+  background: var(--glass-bg) !important;
+  border: var(--glass-border) !important;
+  border-top-color: color-mix(in srgb, var(--color-primary) 48%, transparent) !important;
+  box-shadow: var(--shadow), inset 0 1px 0 color-mix(in srgb, var(--color-primary) 35%, transparent) !important;
+  transform: translateY(-2px) !important;
+  filter: none !important;
 }
 
 html[data-theme="light"] .card,
@@ -558,7 +901,13 @@ html[data-theme="light"] .glass-panel h3 {
   text-shadow: none;
 }
 
-html[data-theme="light"] .table th,
+html[data-theme="light"] .table th {
+  color: var(--color-text) !important;
+  font-weight: var(--font-weight-bold) !important;
+  font-size: var(--font-size-base) !important;
+  text-align: center !important;
+}
+
 html[data-theme="light"] .table td {
   color: var(--color-text-body);
 }
@@ -636,12 +985,12 @@ html[data-theme="light"] .msg-row.assistant .msg-bubble {
   border-color: rgba(120, 130, 160, 0.18);
 }
 
-/* 实心主按钮 / 用户气泡：深灰字（禁止纯白） */
+/* 实心主按钮 / 用户气泡：白字（主色按钮） */
 html[data-theme="light"] .btn,
 html[data-theme="light"] .btn-primary,
 html[data-theme="light"] .auth-materio-submit,
 html[data-theme="light"] .msg-row.user .msg-bubble {
-  color: var(--btn-fg-on-fill);
+  color: #ffffff;
 }
 
 /* 全局字色铁律：禁止 #fff / 近白字；夜间浅灰、日间深灰 */
@@ -653,39 +1002,259 @@ html[data-theme="light"] {
   color-scheme: light;
 }
 
+/* 黑夜：卡片/面板一律不透明深色实底，禁止白/浅色与浅色渐变 */
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .glass-panel,
+html[data-theme="dark"] .stat-card,
+html[data-theme="dark"] .modal,
+html[data-theme="dark"] .modal-panel,
+html[data-theme="dark"] .kb-card,
+html[data-theme="dark"] .msg-row.assistant .msg-bubble,
+html[data-theme="dark"] .qa-composer,
+html[data-theme="dark"] .auth-materio-card,
+html[data-theme="dark"] .auth-card,
+html[data-theme="dark"] .topnav {
+  background: var(--color-card, #1e2a3a) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: var(--color-text-body);
+  border-color: var(--color-border, #303f54);
+}
+
+/* 黑夜：卡片悬停不变亮、不抬升 */
+html[data-theme="dark"] .card:hover,
+html[data-theme="dark"] .glass-panel:hover,
+html[data-theme="dark"] .stat-card:hover,
+html[data-theme="dark"] .kb-card:hover,
+html[data-theme="dark"] .kb-create-card:hover {
+  background: var(--color-card, #1e2a3a) !important;
+  background-image: none !important;
+  border-color: var(--color-border, #303f54) !important;
+  box-shadow: var(--shadow) !important;
+  filter: none !important;
+  transform: translateY(-2px) !important;
+}
+
+html[data-theme="dark"] .auth-materio-card:hover,
+html[data-theme="dark"] .auth-card:hover {
+  transform: none !important;
+}
+
+html[data-theme="dark"] .app-shell:not(.app-shell-admin) .card,
+html[data-theme="dark"] .app-shell:not(.app-shell-admin) .glass-panel,
+html[data-theme="dark"] .app-shell:not(.app-shell-admin) .stat-card {
+  background: var(--color-card, #1e2a3a) !important;
+  background-image: none !important;
+  color: var(--color-text-body);
+}
+
+html[data-theme="dark"] .stat-card::before,
+html[data-theme="dark"] .stat-card::after {
+  opacity: 0 !important;
+  background: none !important;
+  background-image: none !important;
+}
+
+/* 黑夜：主画布实色，去掉旧紫蓝渐变底 */
+html[data-theme="dark"] body {
+  background-color: var(--color-bg-deep, #182230);
+  background-image: none;
+}
+
+html[data-theme="dark"] .sidebar {
+  background: var(--sidebar-glass, #12151c);
+  border-right: 1px solid var(--color-border, #303f54);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-theme="dark"] .sidebar .nav-item.active,
+html[data-theme="dark"] .app-shell-admin .sidebar .nav-item.active {
+  background: var(--color-primary-selected, #1a2c46) !important;
+  color: var(--color-text) !important;
+}
+
+html[data-theme="dark"] .topnav {
+  background: var(--nav-glass, #182230);
+  border-bottom-color: var(--color-border, #303f54);
+}
+
+/* 黑夜：杜绝黑色 / 近黑文字 → 统一正文浅冷灰白 */
+html[data-theme="dark"] body,
+html[data-theme="dark"] .app-shell,
+html[data-theme="dark"] .app-main,
+html[data-theme="dark"] .content,
+html[data-theme="dark"] .sidebar,
+html[data-theme="dark"] .topnav,
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .glass-panel,
+html[data-theme="dark"] .stat-card,
+html[data-theme="dark"] .modal,
+html[data-theme="dark"] .table,
+html[data-theme="dark"] .form-control,
+html[data-theme="dark"] .auth-materio-card,
+html[data-theme="dark"] .app-shell-admin {
+  color: var(--color-text-body);
+}
+
+html[data-theme="dark"] h1,
+html[data-theme="dark"] h2,
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4,
+html[data-theme="dark"] .page-head h1,
+html[data-theme="dark"] .card-title,
+html[data-theme="dark"] .modal-header h3,
+html[data-theme="dark"] .modal-title,
+html[data-theme="dark"] .kb-card-heading h3,
+html[data-theme="dark"] .cell-primary,
+html[data-theme="dark"] .topnav-brand,
+html[data-theme="dark"] .page-bar-title,
+html[data-theme="dark"] .stat-card .value,
+html[data-theme="dark"] .sidebar-brand,
+html[data-theme="dark"] .sidebar-brand span {
+  color: var(--color-text) !important;
+}
+
+html[data-theme="dark"] .text-muted,
+html[data-theme="dark"] .page-desc,
+html[data-theme="dark"] .card-sub,
+html[data-theme="dark"] .stat-card .label,
+html[data-theme="dark"] .form-group label,
+html[data-theme="dark"] label {
+  color: var(--color-text-secondary) !important;
+}
+
+html[data-theme="dark"] .table th {
+  color: var(--color-text-body) !important;
+  background: var(--table-head-bg) !important;
+  border-bottom-color: var(--table-divider) !important;
+  font-weight: var(--font-weight-bold) !important;
+  font-size: var(--font-size-base) !important;
+  text-align: center !important;
+}
+
+html[data-theme="dark"] .table td,
+html[data-theme="dark"] .form-control,
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  color: var(--color-text-body) !important;
+}
+
+html[data-theme="dark"] .form-control {
+  background: rgba(18, 21, 28, 0.55);
+  border-color: var(--color-border, #303f54);
+}
+
 html[data-theme="dark"] .btn,
 html[data-theme="dark"] .btn-primary,
 html[data-theme="dark"] .auth-materio-submit,
 html[data-theme="dark"] .msg-row.user .msg-bubble,
-html[data-theme="dark"] .sidebar .nav-item.active,
 html[data-theme="dark"] .avatar-mark,
-html[data-theme="dark"] .kb-card-cover span,
-html[data-theme="dark"] .kb-card-cover em,
 html[data-theme="dark"] .qa-welcome-mark,
 html[data-theme="dark"] .qa-composer .btn,
 html[data-theme="dark"] .landing-enter {
-  color: var(--btn-fg-on-fill) !important;
+  color: #ffffff !important;
+}
+
+/* 知识库卡片页头：夜间深色表头，字色用浅冷灰 */
+html[data-theme="dark"] .kb-card-cover span,
+html[data-theme="dark"] .kb-card-cover em {
+  color: var(--color-text-body, #e6edf7) !important;
+}
+
+html[data-theme="dark"] .btn-secondary,
+html[data-theme="dark"] .btn-outline,
+html[data-theme="dark"] .btn-text {
+  color: var(--btn-ghost-fg) !important;
+}
+
+html[data-theme="dark"] .btn-danger,
+html[data-theme="dark"] .table td .btn-danger,
+html[data-theme="dark"] .table-actions .btn-danger,
+html[data-theme="dark"] .btn-danger:hover,
+html[data-theme="dark"] .table td .btn-danger:hover,
+html[data-theme="dark"] .table-actions .btn-danger:hover {
+  color: var(--color-danger) !important;
+}
+
+html[data-theme="dark"] .btn-danger,
+html[data-theme="dark"] .table td .btn-danger,
+html[data-theme="dark"] .table-actions .btn-danger {
+  background: transparent !important;
+  border-color: var(--color-danger) !important;
+}
+
+html[data-theme="dark"] .btn-danger:hover,
+html[data-theme="dark"] .table td .btn-danger:hover,
+html[data-theme="dark"] .table-actions .btn-danger:hover {
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent) !important;
+}
+
+html[data-theme="dark"] .badge-danger {
+  color: var(--color-danger) !important;
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent) !important;
+  border: none !important;
+}
+
+html[data-theme="dark"] .btn-success,
+html[data-theme="dark"] .table td .btn-success,
+html[data-theme="dark"] .table-actions .btn-success,
+html[data-theme="dark"] .btn-success:hover,
+html[data-theme="dark"] .table td .btn-success:hover,
+html[data-theme="dark"] .table-actions .btn-success:hover {
+  color: var(--color-success) !important;
+}
+
+html[data-theme="dark"] .btn-success,
+html[data-theme="dark"] .table td .btn-success,
+html[data-theme="dark"] .table-actions .btn-success {
+  background: transparent !important;
+  border-color: var(--color-success) !important;
+}
+
+html[data-theme="dark"] .btn-success:hover,
+html[data-theme="dark"] .table td .btn-success:hover,
+html[data-theme="dark"] .table-actions .btn-success:hover {
+  background: color-mix(in srgb, var(--color-success) 10%, transparent) !important;
+}
+
+html[data-theme="dark"] .badge-success {
+  color: var(--color-success) !important;
+  background: color-mix(in srgb, var(--color-success) 14%, transparent) !important;
+  border: none !important;
+}
+
+html[data-theme="dark"] .sidebar .nav-item.active {
+  color: var(--color-text) !important;
+  background: var(--color-primary-selected, #1a2c46) !important;
+}
+
+html[data-theme="light"] .btn,
+html[data-theme="light"] .btn-primary,
+html[data-theme="light"] .auth-materio-submit,
+html[data-theme="light"] .msg-row.user .msg-bubble,
+html[data-theme="light"] .avatar-mark,
+html[data-theme="light"] .qa-welcome-mark,
+html[data-theme="light"] .qa-composer .btn,
+html[data-theme="light"] .landing-enter {
+  color: #ffffff !important;
+}
+
+html[data-theme="light"] .kb-card-cover span,
+html[data-theme="light"] .kb-card-cover em {
+  color: #3a4452 !important;
 }
 
 html[data-theme="light"] h1,
 html[data-theme="light"] h2,
 html[data-theme="light"] h3,
-html[data-theme="light"] .btn,
-html[data-theme="light"] .btn-primary,
 html[data-theme="light"] .btn-secondary,
 html[data-theme="light"] .btn-outline,
 html[data-theme="light"] .btn-text,
-html[data-theme="light"] .auth-materio-submit,
-html[data-theme="light"] .msg-row.user .msg-bubble,
-html[data-theme="light"] .sidebar .nav-item.active,
-html[data-theme="light"] .avatar-mark,
-html[data-theme="light"] .kb-card-cover span,
-html[data-theme="light"] .kb-card-cover em,
-html[data-theme="light"] .qa-welcome-mark,
-html[data-theme="light"] .qa-composer .btn,
-html[data-theme="light"] .landing-enter,
 html[data-theme="light"] .landing-enter-ghost {
-  color: var(--btn-fg-on-fill, var(--color-text)) !important;
+  color: var(--btn-ghost-fg, var(--color-text)) !important;
 }
 
 html[data-theme="light"] .btn-secondary,
@@ -693,4 +1262,72 @@ html[data-theme="light"] .btn-outline,
 html[data-theme="light"] .btn-text,
 html[data-theme="light"] .landing-enter-ghost {
   color: var(--btn-ghost-fg, var(--color-text)) !important;
+}
+
+/* 删除/停用类红按钮：镂空描边；徽章无边框 */
+html[data-theme="light"] .btn-danger,
+html[data-theme="light"] .table td .btn-danger,
+html[data-theme="light"] .table-actions .btn-danger,
+html[data-theme="light"] .btn-danger:hover,
+html[data-theme="light"] .table td .btn-danger:hover,
+html[data-theme="light"] .table-actions .btn-danger:hover,
+html[data-theme="light"] .btn-danger:active,
+html[data-theme="light"] .table td .btn-danger:active,
+html[data-theme="light"] .table-actions .btn-danger:active {
+  color: var(--color-danger) !important;
+}
+
+html[data-theme="light"] .btn-danger,
+html[data-theme="light"] .table td .btn-danger,
+html[data-theme="light"] .table-actions .btn-danger {
+  background: transparent !important;
+  border-color: var(--color-danger) !important;
+}
+
+html[data-theme="light"] .btn-danger:hover,
+html[data-theme="light"] .table td .btn-danger:hover,
+html[data-theme="light"] .table-actions .btn-danger:hover {
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent) !important;
+}
+
+html[data-theme="light"] .badge-danger {
+  color: var(--color-danger) !important;
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent) !important;
+  border: none !important;
+}
+
+/* 启用类绿按钮：镂空描边；徽章无边框 */
+html[data-theme="light"] .btn-success,
+html[data-theme="light"] .table td .btn-success,
+html[data-theme="light"] .table-actions .btn-success,
+html[data-theme="light"] .btn-success:hover,
+html[data-theme="light"] .table td .btn-success:hover,
+html[data-theme="light"] .table-actions .btn-success:hover,
+html[data-theme="light"] .btn-success:active,
+html[data-theme="light"] .table td .btn-success:active,
+html[data-theme="light"] .table-actions .btn-success:active {
+  color: var(--color-success) !important;
+}
+
+html[data-theme="light"] .btn-success,
+html[data-theme="light"] .table td .btn-success,
+html[data-theme="light"] .table-actions .btn-success {
+  background: transparent !important;
+  border-color: var(--color-success) !important;
+}
+
+html[data-theme="light"] .btn-success:hover,
+html[data-theme="light"] .table td .btn-success:hover,
+html[data-theme="light"] .table-actions .btn-success:hover {
+  background: color-mix(in srgb, var(--color-success) 10%, transparent) !important;
+}
+
+html[data-theme="light"] .badge-success {
+  color: var(--color-success) !important;
+  background: color-mix(in srgb, var(--color-success) 14%, transparent) !important;
+  border: none !important;
+}
+
+html[data-theme="light"] .sidebar .nav-item.active {
+  color: var(--color-text) !important;
 }

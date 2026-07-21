@@ -6,10 +6,10 @@
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=gap-opt-0721s";
-import { api, clearDemoFlags } from "/assets/js/api.js?v=gap-opt-0721s";
+import { api, clearDemoFlags } from "/assets/js/api.js?v=bug-ui-palette-0721ek";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js?v=gap-opt-0721s";
-import { escapeHtml, formatDateTime, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=gap-opt-0721s";
-import { initMotion, runCountUps } from "/assets/js/motion.js?v=gap-opt-0721s";
+import { escapeHtml, formatDateTime, formatDateTimeHtml, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=bug-ui-palette-0721ea";
+import { initMotion, runCountUps } from "/assets/js/motion.js?v=bug-ui-palette-0721ea";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721s";
 
 clearDemoFlags();
@@ -56,13 +56,11 @@ function guardIntentLabel(intent) {
   return GUARD_INTENT_LABELS[key] || key;
 }
 
+/** 管理端置顶菜单（无分组标题） */
+const MENU_TOP = [{ path: "/admin", label: "首页", perm: "system:read" }];
+
 /** 管理端菜单（分组可折叠；按权限码裁剪；前端隐藏不能替代后端鉴权） */
 const MENU_GROUPS = [
-  {
-    id: "workspace",
-    title: "工作台",
-    items: [{ path: "/admin", label: "首页", perm: "system:read" }],
-  },
   {
     id: "org",
     title: "组织与权限",
@@ -79,27 +77,39 @@ const MENU_GROUPS = [
       { path: "/admin/models", label: "大模型管理", perm: "model:read" },
       { path: "/admin/knowledge-bases", label: "知识库管理", perm: "kb:read" },
       { path: "/admin/qa-sessions", label: "会话分析", perm: "system:read" },
-      { path: "/admin/role-caches", label: "角色缓存", perm: "system:read" },
     ],
   },
   {
-    id: "ops",
-    title: "质量与运维",
+    id: "quality",
+    title: "质量评测",
     items: [
       { path: "/admin/ragas", label: "RAGAS 评估", perm: "system:read" },
       { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
-      { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
-      { path: "/admin/guard", label: "LLM Guard 拦截", perm: "system:read" },
-      { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
-      { path: "/admin/fastapi", label: "API 接入指南", perm: "system:read" },
     ],
+  },
+  {
+    id: "ops-security",
+    title: "系统运维与安全",
+    items: [
+      { path: "/admin/role-caches", label: "角色缓存", perm: "system:read" },
+      { path: "/admin/guard", label: "LLM Guard 拦截", perm: "system:read" },
+      { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
+      { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
+    ],
+  },
+  {
+    id: "developer",
+    title: "开发者接入",
+    items: [{ path: "/admin/fastapi", label: "API 接入指南", perm: "system:read" }],
   },
 ];
 
 /** 扁平菜单（路由/兼容用） */
-const MENUS = MENU_GROUPS.flatMap((g) => g.items);
+const MENUS = [...MENU_TOP, ...MENU_GROUPS.flatMap((g) => g.items)];
 
 const SIDEBAR_COLLAPSE_KEY = "admin-sidebar-collapsed";
+/** 侧栏导航滚动位置：整壳重绘后恢复，避免点底部菜单时跳回顶部 */
+let sidebarNavScrollTop = 0;
 
 /** 读取侧栏分组折叠状态（不含当前路由强制展开的覆盖）。 */
 function readSidebarCollapsedMap() {
@@ -158,6 +168,9 @@ function renderShell(title) {
   const displayName = escapeHtml(user.nickname || user.username || "管理员");
   const roleText = `${displayName} · ${getRoleLabel()}`;
 
+  const prevNav = document.querySelector(".app-shell-admin .sidebar-nav");
+  if (prevNav) sidebarNavScrollTop = prevNav.scrollTop;
+
   document.getElementById("app").innerHTML = `
     <div class="ambient-orbs" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="app-shell app-shell-admin">
@@ -169,7 +182,14 @@ function renderShell(title) {
         <nav class="sidebar-nav" aria-label="管理导航分组">
           ${(() => {
             const collapsedMap = readSidebarCollapsedMap();
-            return MENU_GROUPS.map((group) => {
+            const topLinks = MENU_TOP.filter((m) => hasPermission(m.perm))
+              .map((m) => {
+                const active = path === m.path || (m.path !== "/admin" && path.startsWith(m.path));
+                return `<button type="button" class="nav-item ${active ? "active" : ""}" data-go="${m.path}"><i></i>${m.label}</button>`;
+              })
+              .join("");
+            const topHtml = topLinks ? `<div class="sidebar-top">${topLinks}</div>` : "";
+            const groupsHtml = MENU_GROUPS.map((group) => {
               const visibleItems = group.items.filter((m) => hasPermission(m.perm));
               if (!visibleItems.length) return "";
               const hasActive = menuGroupHasActivePath(group, path);
@@ -181,14 +201,15 @@ function renderShell(title) {
                   return `<button type="button" class="nav-item ${active ? "active" : ""}" data-go="${m.path}"><i></i>${m.label}</button>`;
                 })
                 .join("");
-              return `<div class="sidebar-group ${collapsed ? "is-collapsed" : ""}" data-group-id="${escapeHtml(group.id)}">
-                <button type="button" class="sidebar-caption" data-toggle-group="${escapeHtml(group.id)}" aria-expanded="${collapsed ? "false" : "true"}">
-                  <span>${escapeHtml(group.title)}</span>
+              return `<div class="sidebar-group ${collapsed ? "is-collapsed" : ""} ${hasActive ? "has-active" : ""}" data-group-id="${escapeHtml(group.id)}">
+                <button type="button" class="sidebar-caption ${hasActive ? "is-active-parent" : ""}" data-toggle-group="${escapeHtml(group.id)}" aria-expanded="${collapsed ? "false" : "true"}">
+                  <span class="sidebar-caption-label">${escapeHtml(group.title)}</span>
                   <span class="sidebar-caption-chevron" aria-hidden="true"></span>
                 </button>
                 <div class="sidebar-links">${links}</div>
               </div>`;
             }).join("");
+            return topHtml + groupsHtml;
           })()}
         </nav>
         <div class="sidebar-user">
@@ -207,8 +228,8 @@ function renderShell(title) {
             }
             <span class="role-chip">${roleText}</span>
             <button type="button" class="theme-toggle" data-theme-toggle aria-label="切换主题" title="切换主题">
-              <span class="icon-sun" aria-hidden="true">☀</span>
-              <span class="icon-moon" aria-hidden="true">☾</span>
+              <span class="icon-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></span>
+              <span class="icon-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></svg></span>
             </button>
             <a class="btn btn-secondary btn-sm" href="/#/chat">智能对话</a>
             <button type="button" class="btn btn-text" id="btnLogout">退出</button>
@@ -217,6 +238,22 @@ function renderShell(title) {
         <main class="content" id="pageRoot"></main>
       </section>
     </div>`;
+
+  const nextNav = document.querySelector(".app-shell-admin .sidebar-nav");
+  if (nextNav) {
+    const restore = () => {
+      nextNav.scrollTop = sidebarNavScrollTop;
+    };
+    restore();
+    requestAnimationFrame(restore);
+    nextNav.addEventListener(
+      "scroll",
+      () => {
+        sidebarNavScrollTop = nextNav.scrollTop;
+      },
+      { passive: true }
+    );
+  }
 
   document.querySelectorAll("[data-go]").forEach((el) => {
     el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
@@ -277,12 +314,12 @@ function closeAllModals() {
   document.querySelectorAll(".modal-mask, .modal-backdrop").forEach((el) => el.remove());
 }
 
-/** Materio 统一页头：标题 + 说明 + 右侧操作（desc 为纯文本） */
+/** Materio 统一页头：说明文案 + 右侧操作（不再显示一级标题） */
 function pageHead({ title, desc = "", actions = "" }) {
-  return `<header class="page-head">
-    <div>
-      <h1>${escapeHtml(title)}</h1>
-      ${desc ? `<p class="page-desc">${escapeHtml(desc)}</p>` : ""}
+  const line = desc || title || "";
+  return `<header class="page-head"${title ? ` aria-label="${escapeHtml(title)}"` : ""}>
+    <div class="page-head-text">
+      ${line ? `<p class="page-desc">${escapeHtml(line)}</p>` : ""}
     </div>
     ${actions ? `<div class="page-head-actions">${actions}</div>` : ""}
   </header>`;
@@ -391,18 +428,108 @@ function weekLabels(n) {
   return out;
 }
 
+/** 图表右上角时间范围下拉 */
+function chartRangeSelect(id, options, selected) {
+  const opts = options
+    .map(
+      ([value, label]) =>
+        `<option value="${escapeHtml(String(value))}"${String(value) === String(selected) ? " selected" : ""}>${escapeHtml(label)}</option>`
+    )
+    .join("");
+  return `<div class="chart-range"><select id="${escapeHtml(id)}" class="chart-range-select" aria-label="时间范围">${opts}</select></div>`;
+}
+
+function sliceDailyTrend(series, days) {
+  const src = Array.isArray(series) && series.length ? series.map(Number) : [0];
+  const n = Math.max(1, Math.min(Number(days) || 7, src.length));
+  return src.slice(-n);
+}
+
+/** 将小时序列切成固定桶数（默认 4） */
+function bucketHourlyErrors(hourly, hours, buckets = 4) {
+  const src = Array.isArray(hourly) && hourly.length ? hourly.map(Number) : [];
+  const h = Math.max(1, Number(hours) || 24);
+  let slice = src.slice(-h);
+  if (slice.length < h) slice = Array(h - slice.length).fill(0).concat(slice);
+  const out = [];
+  for (let i = 0; i < buckets; i += 1) {
+    const a = Math.floor((i * h) / buckets);
+    const b = Math.floor(((i + 1) * h) / buckets);
+    out.push(slice.slice(a, b).reduce((sum, v) => sum + Number(v || 0), 0));
+  }
+  return out;
+}
+
+function errorRangeLabels(hours, buckets = 4) {
+  const h = Math.max(1, Number(hours) || 24);
+  const labels = [];
+  for (let i = 0; i < buckets; i += 1) {
+    const a = Math.round((i * h) / buckets);
+    const b = Math.round(((i + 1) * h) / buckets);
+    labels.push(`${a}-${b}h`);
+  }
+  return labels;
+}
+
 async function pageDashboard() {
   if (!requirePerm("system:read", "首页")) return;
   const welcome = renderDashboardWelcome();
   document.getElementById("pageRoot").innerHTML = `${welcome}<div class="loading">加载统计数据…</div>`;
   try {
     const s = await api.get("/monitor/stats");
-    const qa = s.qa_trend_7d || [0, 0, 0, 0, 0, 0, 0];
-    const hit = s.hit_rate_trend_7d || [0, 0, 0, 0, 0, 0, 0];
-    const err = s.error_24h || [0, 0, 0, 0];
-    const qaLabels = weekLabels(qa.length);
-    const hitLabels = weekLabels(hit.length);
-    const errLabels = err.length === 4 ? ["0-6h", "6-12h", "12-18h", "18-24h"] : err.map((_, i) => `#${i + 1}`);
+    const qaFull = s.qa_trend_30d?.length ? s.qa_trend_30d : s.qa_trend_7d || [0, 0, 0, 0, 0, 0, 0];
+    const hitFull = s.hit_rate_trend_30d?.length ? s.hit_rate_trend_30d : s.hit_rate_trend_7d || [0, 0, 0, 0, 0, 0, 0];
+    const errHourly =
+      s.error_hourly_48h?.length
+        ? s.error_hourly_48h
+        : (() => {
+            const e24 = s.error_24h || [0, 0, 0, 0];
+            // 兼容旧接口：每段 6 小时拆成 6 个小时点
+            return e24.flatMap((v) => {
+              const n = Number(v) || 0;
+              const base = Math.floor(n / 6);
+              const rem = n % 6;
+              return Array.from({ length: 6 }, (_, i) => base + (i < rem ? 1 : 0));
+            });
+          })();
+
+    const dayOpts = [
+      [3, "近 3 天"],
+      [7, "近 7 天"],
+      [14, "近 14 天"],
+      [30, "近 30 天"],
+    ];
+    const errOpts = [
+      [6, "近 6 小时"],
+      [12, "近 12 小时"],
+      [24, "近 24 小时"],
+      [48, "近 48 小时"],
+    ];
+    let qaDays = 7;
+    let hitDays = 7;
+    let errHours = 24;
+
+    const paintQa = () => {
+      const values = sliceDailyTrend(qaFull, qaDays);
+      const title = document.getElementById("dashQaTitle");
+      const body = document.getElementById("dashQaChart");
+      if (title) title.textContent = `近 ${qaDays} 天问答量`;
+      if (body) body.innerHTML = renderBars(values, { labels: weekLabels(values.length) });
+    };
+    const paintHit = () => {
+      const values = sliceDailyTrend(hitFull, hitDays);
+      const title = document.getElementById("dashHitTitle");
+      const body = document.getElementById("dashHitChart");
+      if (title) title.textContent = `近 ${hitDays} 天命中率`;
+      if (body) body.innerHTML = renderBars(values, { percent: true, labels: weekLabels(values.length) });
+    };
+    const paintErr = () => {
+      const values = bucketHourlyErrors(errHourly, errHours, 4);
+      const title = document.getElementById("dashErrTitle");
+      const body = document.getElementById("dashErrChart");
+      if (title) title.textContent = `近 ${errHours} 小时错误`;
+      if (body) body.innerHTML = renderBars(values, { labels: errorRangeLabels(errHours, 4) });
+    };
 
     document.getElementById("pageRoot").innerHTML = `
       ${welcome}
@@ -417,8 +544,11 @@ async function pageDashboard() {
       </section>
       <section class="dash-section page-grid dash-bento">
         <div class="card dash-chart-card span-8">
-          <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 7 天问答量</h3></div></div>
-          ${renderBars(qa, { labels: qaLabels })}
+          <div class="card-header">
+            <div class="card-header-text"><h3 class="card-title" id="dashQaTitle">近 7 天问答量</h3></div>
+            <div class="card-header-actions">${chartRangeSelect("dashQaRange", dayOpts, qaDays)}</div>
+          </div>
+          <div id="dashQaChart" class="dash-chart-body"></div>
         </div>
         <div class="card dash-chart-card dash-security-card span-4">
           <div class="card-header"><div class="card-header-text"><h3 class="card-title">安全窗口</h3></div></div>
@@ -434,15 +564,38 @@ async function pageDashboard() {
           </div>
         </div>
         <div class="card dash-chart-card span-4">
-          <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 7 天命中率</h3></div></div>
-          ${renderBars(hit, { percent: true, labels: hitLabels })}
+          <div class="card-header">
+            <div class="card-header-text"><h3 class="card-title" id="dashHitTitle">近 7 天命中率</h3></div>
+            <div class="card-header-actions">${chartRangeSelect("dashHitRange", dayOpts, hitDays)}</div>
+          </div>
+          <div id="dashHitChart" class="dash-chart-body"></div>
         </div>
         <div class="card dash-chart-card span-8">
-          <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 24 小时错误</h3></div></div>
-          ${renderBars(err, { labels: errLabels })}
+          <div class="card-header">
+            <div class="card-header-text"><h3 class="card-title" id="dashErrTitle">近 24 小时错误</h3></div>
+            <div class="card-header-actions">${chartRangeSelect("dashErrRange", errOpts, errHours)}</div>
+          </div>
+          <div id="dashErrChart" class="dash-chart-body"></div>
         </div>
       </section>
       ${renderDashboardShortcuts()}`;
+
+    paintQa();
+    paintHit();
+    paintErr();
+
+    document.getElementById("dashQaRange")?.addEventListener("change", (e) => {
+      qaDays = Number(e.target.value) || 7;
+      paintQa();
+    });
+    document.getElementById("dashHitRange")?.addEventListener("change", (e) => {
+      hitDays = Number(e.target.value) || 7;
+      paintHit();
+    });
+    document.getElementById("dashErrRange")?.addEventListener("change", (e) => {
+      errHours = Number(e.target.value) || 24;
+      paintErr();
+    });
 
     document.querySelectorAll("#pageRoot [data-go]").forEach((el) => {
       el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
@@ -579,7 +732,7 @@ async function openCreateUserForm() {
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-close>取消</button>
-        <button type="submit" class="btn btn-primary">${existing ? "保存" : "创建"}</button>
+        <button type="submit" class="btn btn-primary">创建</button>
       </div>
     </form>`;
   document.body.appendChild(mask);
@@ -670,14 +823,14 @@ async function pageUsers() {
                 const targetRank = isFixedSuper ? 100 : maxRoleRankOfUser(u);
                 const canManage = canWrite && !isFixedSuper && targetRank < myRank;
                 const roleCell = isFixedSuper
-                  ? `<span class="badge">超级管理员</span>`
+                  ? `<span class="badge badge-gold">超级管理员</span>`
                   : escapeHtml(roleLabelOf(u));
                 const ops = canWrite
                   ? isFixedSuper
                     ? `<span class="cell-muted">固定超管（不可操作）</span>`
                     : canManage
                       ? `<div class="table-actions">
-                    <button type="button" class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
+                    <button type="button" class="btn ${u.status === "disabled" ? "btn-success" : "btn-danger"} btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
                     <button type="button" class="btn btn-secondary btn-sm" data-role="${escapeHtml(u.id)}">角色</button>
                     <button type="button" class="btn btn-danger btn-sm" data-del-user="${escapeHtml(u.id)}">删除</button>
                   </div>`
@@ -690,8 +843,8 @@ async function pageUsers() {
                   <td class="col-status">${st}</td>
                   <td class="cell-role">${roleCell}</td>
                   <td>${escapeHtml(u.department || "-")}</td>
-                  <td class="col-time"><span class="cell-time">${formatDateTime(u.created_at)}</span></td>
-                  <td class="col-time"><span class="cell-time">${formatDateTime(u.last_login_at)}</span></td>
+                  <td class="col-time">${formatDateTimeHtml(u.created_at)}</td>
+                  <td class="col-time">${formatDateTimeHtml(u.last_login_at)}</td>
                   <td class="col-actions">${ops}</td>
                 </tr>`;
               })
@@ -912,7 +1065,7 @@ async function pageRoles() {
                   <td class="col-name"><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
                   <td class="col-code"><code>${escapeHtml(r.name)}</code></td>
                   <td class="col-desc" title="${escapeHtml(desc)}"><span class="cell-clamp">${escapeHtml(desc)}</span></td>
-                  <td class="col-builtin">${r.is_builtin ? `<span class="badge">内置</span>` : "-"}</td>
+                  <td class="col-builtin">${r.is_builtin ? `<span class="badge badge-info">内置</span>` : "-"}</td>
                   <td>${(r.permissions || []).length}</td>
                   <td class="col-actions">
                     <div class="table-actions">
@@ -1156,7 +1309,7 @@ async function pageDepartments() {
                         <td class="col-desc" title="${escapeHtml(d.description || "")}"><span class="cell-clamp">${escapeHtml(d.description || "-")}</span></td>
                         <td>${escapeHtml(d.member_count ?? 0)}</td>
                         <td>${escapeHtml(d.kb_count ?? 0)}</td>
-                        <td>${d.is_enabled ? `<span class="badge badge-success">启用</span>` : `<span class="badge">停用</span>`}</td>
+                        <td>${d.is_enabled ? `<span class="badge badge-success">启用</span>` : `<span class="badge badge-danger">停用</span>`}</td>
                         <td class="col-actions" style="white-space:nowrap">
                           <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments/${escapeHtml(d.id)}">管理</button>
                           ${
@@ -1645,16 +1798,18 @@ async function pageModels() {
                   <td class="text-muted" style="max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(m.base_url || "")}">${escapeHtml(m.base_url || "-")}</td>
                   <td><code>${escapeHtml(m.api_key_env || "-")}</code>${m.has_api_key ? ' <span class="badge badge-success">已配置</span>' : ""}</td>
                   <td>${escapeHtml(m.priority ?? 100)}</td>
-                  <td>${m.is_enabled ? `<span class="badge badge-success">是</span>` : `<span class="badge">否</span>`}</td>
-                  <td>${m.is_default ? "是" : "否"}</td>
+                  <td>${m.is_enabled ? `<span class="badge badge-success">是</span>` : `<span class="badge badge-danger">否</span>`}</td>
+                  <td>${m.is_default ? "✓" : ""}</td>
                   <td>
-                    ${
-                      canWrite
-                        ? `<button class="btn btn-text btn-sm" data-edit="${escapeHtml(m.id)}">编辑</button>
-                           <button class="btn btn-secondary btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>
-                           ${!m.is_default ? `<button class="btn btn-text btn-sm" data-default="${escapeHtml(m.id)}">设默认</button>` : ""}`
-                        : `<span class="text-muted">—</span>`
-                    }
+                    <div class="table-actions">
+                      ${
+                        canWrite
+                          ? `<button class="btn btn-text btn-sm" data-edit="${escapeHtml(m.id)}">编辑</button>
+                             <button class="btn ${m.is_enabled ? "btn-danger" : "btn-success"} btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>
+                             ${!m.is_default ? `<button class="btn btn-text btn-sm" data-default="${escapeHtml(m.id)}">设默认</button>` : ""}`
+                          : `<span class="text-muted">—</span>`
+                      }
+                    </div>
                   </td>
                 </tr>`
               )
@@ -1777,18 +1932,15 @@ async function renderModelUsage(model, days) {
     const models = data.models || [];
     const rangeLabel = `${(data.range && data.range.days) || days} 天`;
     const noticeHtml = data.notice
-      ? `<div style="background:#fff7e6;border:1px solid #ffe0a3;color:#8a5a00;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px">提示：${escapeHtml(data.notice)}</div>`
+      ? `<div class="usage-notice">提示：${escapeHtml(data.notice)}</div>`
       : "";
 
     const statCard = (label, value) =>
-      `<div style="flex:1;min-width:120px;background:var(--surface-2,#f6f7f9);border-radius:8px;padding:12px 14px">
-         <div class="text-muted" style="font-size:12px">${label}</div>
-         <div style="font-size:20px;font-weight:600;margin-top:4px">${value}</div>
-       </div>`;
+      `<div class="stat-card usage-stat-card"><div class="label">${label}</div><div class="value">${value}</div></div>`;
 
     let html = `
       ${noticeHtml}
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <div class="stat-grid usage-stat-grid">
         ${statCard("总 Token", fmtNum(t.total_tokens))}
         ${statCard("输入 Token", fmtNum(t.input_tokens))}
         ${statCard("输出 Token", fmtNum(t.output_tokens))}
@@ -1988,7 +2140,7 @@ async function pageKbDetail(id) {
             ${hasPermission("kb:vectorize") ? `<button class="btn btn-secondary btn-sm" id="btnRevec">重新向量化</button>` : ""}
           `,
         })}
-        <div class="page-grid">
+        <div class="page-grid kb-detail-top">
           <div class="card span-7">
             <div class="card-header"><div class="card-header-text"><h3 class="card-title">基本信息</h3></div></div>
             <div class="meta-list">
@@ -2001,15 +2153,17 @@ async function pageKbDetail(id) {
           </div>
           <div class="card span-5">
             <div class="card-header"><div class="card-header-text"><h3 class="card-title">概览</h3></div></div>
-            <div class="stat-grid" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
-              <div class="stat-card"><div class="label">文档数</div><div class="value">${k.doc_count ?? 0}</div></div>
-              <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
+            <div class="kb-detail-overview-body">
+              <div class="stat-grid" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
+                <div class="stat-card"><div class="label">文档数</div><div class="value">${k.doc_count ?? 0}</div></div>
+                <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
+              </div>
+              <div class="meta-list">
+                <div class="meta-row"><span class="meta-label">创建</span><span class="meta-value">${formatDateTime(k.created_at)}</span></div>
+                <div class="meta-row"><span class="meta-label">更新</span><span class="meta-value">${formatDateTime(k.updated_at)}</span></div>
+              </div>
+              <p class="page-desc kb-detail-overview-note">知识库可绑定部门；员工仅能上传本部门或授权库。管理员与超管不受部门隔离。</p>
             </div>
-            <div class="meta-list">
-              <div class="meta-row"><span class="meta-label">创建</span><span class="meta-value">${formatDateTime(k.created_at)}</span></div>
-              <div class="meta-row"><span class="meta-label">更新</span><span class="meta-value">${formatDateTime(k.updated_at)}</span></div>
-            </div>
-            <p class="page-desc" style="margin-top:12px">知识库可绑定部门；员工仅能上传本部门或授权库。管理员与超管不受部门隔离。</p>
           </div>
         </div>
         <div id="kbVecProgress" class="card" style="display:none;margin-top:12px">
@@ -2611,7 +2765,37 @@ async function pageKbDetail(id) {
 }
 
 /* ========== 文档管理 ========== */
-const DOC_BUSY_STATUSES = new Set(["parsing", "normalizing", "segmenting", "vectorizing", "pending_segment"]);
+const DOC_BUSY_STATUSES = new Set([
+  "uploaded",
+  "parsing",
+  "processing",
+  "normalizing",
+  "segmenting",
+  "vectorizing",
+  "pending_segment",
+]);
+
+/** 文档流水线状态：中文文案 + 徽章色 */
+const DOC_STATUS_META = {
+  uploaded: { label: "已上传", badge: "badge-info" },
+  parsing: { label: "解析中", badge: "badge-info" },
+  processing: { label: "清洗中", badge: "badge-info" },
+  normalizing: { label: "规范化中", badge: "badge-info" },
+  segmenting: { label: "分段中", badge: "badge-info" },
+  pending_segment: { label: "待分段", badge: "badge-warning" },
+  vectorizing: { label: "向量化中", badge: "badge-info" },
+  ready: { label: "已就绪", badge: "badge-success" },
+  error: { label: "失败", badge: "badge-danger" },
+  archived: { label: "已归档", badge: "" },
+};
+
+function docStatusBadge(status) {
+  const key = String(status || "").toLowerCase();
+  const meta = DOC_STATUS_META[key];
+  const label = meta?.label || (status ? String(status) : "-");
+  const badgeClass = meta?.badge ? `badge ${meta.badge}` : "badge";
+  return `<span class="${badgeClass}">${escapeHtml(label)}</span>`;
+}
 
 async function pageDocuments(kbId) {
   if (!requirePerm("doc:read", "文档管理")) return;
@@ -2621,6 +2805,9 @@ async function pageDocuments(kbId) {
   const canSegment = hasPermission("doc:segment");
   const canUpload = canWrite || hasPermission("kb:upload");
   let refreshTimer = null;
+  const DOC_PAGE_SIZE = 10;
+  let listPage = 1;
+  let isUploading = false;
 
   const formatSize = (n) => {
     const v = Number(n);
@@ -2630,35 +2817,290 @@ async function pageDocuments(kbId) {
     return `${(v / 1024 / 1024).toFixed(1)} MB`;
   };
 
+  /** @type {{ name: string, file?: File, status: "pending"|"uploading"|"success"|"error"|"cancelled", error?: string }[] | null} */
+  let uploadBatch = null;
+  let uploadBatchDone = false;
+  let uploadCancelled = false;
+  /** @type {AbortController | null} */
+  let uploadAbort = null;
+
+  const dropzoneIdleHtml = () => `
+      <div class="kb-dropzone-inner">
+        <span class="kb-dropzone-icon" aria-hidden="true"></span>
+        <p class="kb-dropzone-title">
+          <span class="kb-dropzone-copy-idle">将文件拖拽到此处</span>
+          <span class="kb-dropzone-copy-active">松手即可上传</span>
+        </p>
+        <p class="kb-dropzone-lead">
+          <span class="kb-dropzone-copy-idle">也可点击本区域或上方按钮选择文件（支持多选）</span>
+          <span class="kb-dropzone-copy-active">释放鼠标开始批量上传</span>
+        </p>
+        <ul class="kb-dropzone-meta">
+          <li>支持格式：PDF、DOC、DOCX、TXT、MD</li>
+          <li>单文件最大：100MB</li>
+          <li>一次可批量上传多个文件</li>
+        </ul>
+      </div>`;
+
+  const statusLabel = (item) => {
+    if (item.status === "pending") return "等待中";
+    if (item.status === "uploading") return "上传中…";
+    if (item.status === "success") return "成功";
+    if (item.status === "cancelled") return "已取消";
+    return item.error || "失败";
+  };
+
+  const clearUploadSession = () => {
+    uploadBatch = null;
+    uploadBatchDone = false;
+    uploadCancelled = false;
+    uploadAbort = null;
+  };
+
+  const paintDropzoneBatch = () => {
+    const zone = document.getElementById("kbDropzone");
+    if (!zone || !uploadBatch?.length) return;
+    const total = uploadBatch.length;
+    const ok = uploadBatch.filter((x) => x.status === "success").length;
+    const fail = uploadBatch.filter((x) => x.status === "error").length;
+    const cancelled = uploadBatch.filter((x) => x.status === "cancelled").length;
+    const doneCount = ok + fail + cancelled;
+    const pct = Math.round((doneCount / total) * 100);
+    const busy = !uploadBatchDone;
+    const canResume = uploadBatchDone && cancelled > 0;
+    const canRetry = uploadBatchDone && fail > 0 && cancelled === 0;
+    zone.classList.remove("dragover");
+    zone.classList.toggle("is-uploading", busy);
+    zone.classList.toggle("is-upload-report", uploadBatchDone);
+    zone.setAttribute("aria-busy", busy ? "true" : "false");
+    zone.style.pointerEvents = "";
+    zone.style.cursor = "default";
+    zone.onclick = null;
+
+    let title;
+    let lead;
+    if (busy) {
+      title = `文档上传中 · ${Math.min(doneCount + 1, total)}/${total}`;
+      lead = "正在逐个上传，可随时取消剩余文件";
+    } else if (cancelled) {
+      title = `上传已取消 · 成功 ${ok} · 失败 ${fail} · 取消 ${cancelled}`;
+      lead = "可继续上传剩余文件，或结束本批并选择新文件";
+    } else if (fail) {
+      title = `上传完成 · 成功 ${ok} 个，失败 ${fail} 个`;
+      lead = "可重试失败项，或选择新文件继续上传";
+    } else {
+      title = `上传完成 · 全部成功（${ok} 个）`;
+      lead = "本批已全部成功，可继续选择新文件上传";
+    }
+
+    const actionsHtml = busy
+      ? `<div class="kb-upload-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
+            <div class="kb-upload-progress-bar" style="width:${pct}%"></div>
+          </div>
+          <p class="kb-dropzone-progress-text">${pct}%</p>
+          <div class="kb-dropzone-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnDropzoneCancel">取消上传</button>
+          </div>`
+      : `<div class="kb-dropzone-actions">
+            ${
+              canResume
+                ? `<button type="button" class="btn btn-sm" id="btnDropzoneResume">继续上传剩余（${cancelled}）</button>`
+                : ""
+            }
+            ${
+              canRetry
+                ? `<button type="button" class="btn btn-sm" id="btnDropzoneRetry">重试失败项（${fail}）</button>`
+                : ""
+            }
+            <button type="button" class="btn ${canResume || canRetry ? "btn-secondary" : ""} btn-sm" id="btnDropzoneNew">
+              ${canResume || canRetry ? "上传新文件" : "上传更多"}
+            </button>
+          </div>`;
+
+    zone.innerHTML = `
+      <div class="kb-dropzone-inner kb-dropzone-batch">
+        ${busy ? `<span class="kb-dropzone-spinner" aria-hidden="true"></span>` : ""}
+        <p class="kb-dropzone-title">${escapeHtml(title)}</p>
+        <p class="kb-dropzone-lead">${escapeHtml(lead)}</p>
+        <ul class="kb-upload-file-list" role="list">
+          ${uploadBatch
+            .map(
+              (item) => `<li class="kb-upload-file is-${escapeHtml(item.status)}">
+            <span class="kb-upload-file-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+            <span class="kb-upload-file-status">${escapeHtml(statusLabel(item))}</span>
+          </li>`
+            )
+            .join("")}
+        </ul>
+        ${actionsHtml}
+      </div>`;
+
+    const btnUpload = document.getElementById("btnAdminUpload");
+    if (btnUpload) btnUpload.disabled = busy;
+    const btnPreview = document.getElementById("btnPreviewUpload");
+    if (btnPreview) btnPreview.disabled = busy;
+
+    const btnNew = document.getElementById("btnDropzoneNew");
+    if (btnNew) {
+      btnNew.onclick = (e) => {
+        e.stopPropagation();
+        clearUploadSession();
+        restoreDropzoneIdle();
+      };
+    }
+    const btnResume = document.getElementById("btnDropzoneResume");
+    if (btnResume) {
+      btnResume.onclick = (e) => {
+        e.stopPropagation();
+        resumeUploadBatch("cancelled");
+      };
+    }
+    const btnRetry = document.getElementById("btnDropzoneRetry");
+    if (btnRetry) {
+      btnRetry.onclick = (e) => {
+        e.stopPropagation();
+        resumeUploadBatch("error");
+      };
+    }
+    const btnCancel = document.getElementById("btnDropzoneCancel");
+    if (btnCancel) {
+      btnCancel.onclick = (e) => {
+        e.stopPropagation();
+        if (uploadCancelled || uploadBatchDone) return;
+        uploadCancelled = true;
+        btnCancel.disabled = true;
+        btnCancel.textContent = "正在取消…";
+        try {
+          uploadAbort?.abort();
+        } catch {
+          /* ignore */
+        }
+      };
+    }
+  };
+
+  const restoreDropzoneIdle = () => {
+    const zone = document.getElementById("kbDropzone");
+    if (!zone) return;
+    zone.classList.remove("is-uploading", "is-upload-report", "dragover");
+    zone.removeAttribute("aria-busy");
+    zone.style.pointerEvents = "";
+    zone.style.cursor = "pointer";
+    zone.innerHTML = dropzoneIdleHtml();
+    const btnUpload = document.getElementById("btnAdminUpload");
+    if (btnUpload) btnUpload.disabled = false;
+    const btnPreview = document.getElementById("btnPreviewUpload");
+    if (btnPreview) btnPreview.disabled = false;
+    wireDropzone();
+  };
+
   const doUploadFile = async (file) => {
-    if (!file) return toast("请选择文件", "error");
+    if (!file) throw new Error("请选择文件");
     const fd = new FormData();
     fd.append("file", file);
-    await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
+    await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd, {
+      signal: uploadAbort?.signal,
+    });
+  };
+
+  const markRemainingCancelled = () => {
+    if (!uploadBatch) return;
+    for (const item of uploadBatch) {
+      if (item.status === "pending" || item.status === "uploading") {
+        item.status = "cancelled";
+        item.error = "已取消";
+      }
+    }
+  };
+
+  /** 处理当前批次中 status=pending 的项 */
+  const runPendingUploads = async () => {
+    if (!uploadBatch?.length || isUploading) return;
+    const pendingCount = uploadBatch.filter((x) => x.status === "pending").length;
+    if (!pendingCount) {
+      uploadBatchDone = true;
+      paintDropzoneBatch();
+      return;
+    }
+    isUploading = true;
+    uploadBatchDone = false;
+    uploadCancelled = false;
+    uploadAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
+    paintDropzoneBatch();
+    try {
+      for (let i = 0; i < uploadBatch.length; i++) {
+        const item = uploadBatch[i];
+        if (item.status !== "pending") continue;
+        if (uploadCancelled) {
+          markRemainingCancelled();
+          break;
+        }
+        item.status = "uploading";
+        delete item.error;
+        paintDropzoneBatch();
+        try {
+          await doUploadFile(item.file);
+          if (uploadCancelled) {
+            item.status = "cancelled";
+            item.error = "已取消";
+          } else {
+            item.status = "success";
+          }
+        } catch (e) {
+          if (uploadCancelled || e.message === "已取消上传") {
+            item.status = "cancelled";
+            item.error = "已取消";
+            markRemainingCancelled();
+            break;
+          }
+          item.status = "error";
+          item.error = e.message || "上传失败";
+        }
+        paintDropzoneBatch();
+      }
+      if (uploadCancelled) markRemainingCancelled();
+    } finally {
+      uploadBatchDone = true;
+      isUploading = false;
+      uploadAbort = null;
+      paintDropzoneBatch();
+      listPage = 1;
+      await renderList();
+    }
+  };
+
+  /** 取消后续传 / 失败重试：把目标状态重置为 pending 再跑队列 */
+  const resumeUploadBatch = async (fromStatus) => {
+    if (!uploadBatch?.length || isUploading) return;
+    let reset = 0;
+    for (const item of uploadBatch) {
+      if (item.status !== fromStatus) continue;
+      if (!item.file) {
+        item.status = "error";
+        item.error = "文件已失效，请重新选择上传";
+        continue;
+      }
+      item.status = "pending";
+      delete item.error;
+      reset += 1;
+    }
+    if (!reset) {
+      paintDropzoneBatch();
+      return;
+    }
+    await runPendingUploads();
   };
 
   const doUploadFiles = async (fileList) => {
     const files = Array.from(fileList || []).filter(Boolean);
     if (!files.length) return toast("请选择文件", "error");
-    let ok = 0;
-    const failures = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        await doUploadFile(file);
-        ok += 1;
-      } catch (e) {
-        failures.push(`${file.name}: ${e.message || "上传失败"}`);
-      }
-    }
-    if (ok && !failures.length) {
-      toast(files.length === 1 ? "上传成功" : `已成功上传 ${ok} 个文件`, "success");
-    } else if (ok && failures.length) {
-      toast(`成功 ${ok} 个，失败 ${failures.length} 个：${failures[0]}`, "error");
-    } else {
-      toast(failures[0] || "上传失败", "error");
-    }
-    await renderList();
+    if (isUploading) return;
+    uploadBatch = files.map((f) => ({
+      name: f.name || "未命名文件",
+      file: f,
+      status: "pending",
+    }));
+    await runPendingUploads();
   };
 
   const openDocWorkbench = async (docId, filenameHint) => {
@@ -2917,31 +3359,74 @@ async function pageDocuments(kbId) {
     const zone = document.getElementById("kbDropzone");
     const fileInput = document.getElementById("adminFile");
     if (!zone || !fileInput || !canUpload) return;
-    zone.removeAttribute("aria-hidden");
-    zone.style.cursor = "pointer";
-    zone.onclick = () => fileInput.click();
-    zone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      zone.classList.add("dragover");
-    });
-    zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
-    zone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      zone.classList.remove("dragover");
-      if (e.dataTransfer.files?.length) doUploadFiles(e.dataTransfer.files);
-    });
+
     fileInput.onchange = () => {
+      if (isUploading) {
+        fileInput.value = "";
+        return;
+      }
       if (fileInput.files?.length) {
         doUploadFiles(fileInput.files);
         fileInput.value = "";
       }
     };
+
+    if (uploadBatch?.length && (uploadBatchDone || isUploading)) {
+      paintDropzoneBatch();
+      return;
+    }
+
+    zone.removeAttribute("aria-hidden");
+    zone.removeAttribute("aria-busy");
+    zone.classList.remove("is-uploading", "is-upload-report", "dragover");
+    zone.style.cursor = "pointer";
+    zone.style.pointerEvents = "";
+    let dragDepth = 0;
+    const setDragActive = (on) => {
+      zone.classList.toggle("dragover", on);
+      zone.setAttribute("aria-dropeffect", on ? "copy" : "none");
+    };
+    zone.onclick = () => {
+      if (isUploading) return;
+      fileInput.click();
+    };
+    zone.addEventListener("dragenter", (e) => {
+      if (isUploading) return;
+      e.preventDefault();
+      dragDepth += 1;
+      setDragActive(true);
+    });
+    zone.addEventListener("dragover", (e) => {
+      if (isUploading) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      setDragActive(true);
+    });
+    zone.addEventListener("dragleave", () => {
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDragActive(false);
+    });
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dragDepth = 0;
+      setDragActive(false);
+      if (isUploading) return;
+      if (e.dataTransfer.files?.length) doUploadFiles(e.dataTransfer.files);
+    });
   };
 
   const renderList = async () => {
     try {
-      const data = await api.get(`/knowledge-bases/${kbId}/documents?page=1&page_size=50`);
+      const data = await api.get(
+        `/knowledge-bases/${kbId}/documents?page=${listPage}&page_size=${DOC_PAGE_SIZE}`
+      );
       const items = data.items || [];
+      const total = Number(data.total ?? items.length) || 0;
+      const totalPages = Math.max(1, Math.ceil(total / DOC_PAGE_SIZE) || 1);
+      if (listPage > totalPages) {
+        listPage = totalPages;
+        return renderList();
+      }
       const busy = items.some((d) => DOC_BUSY_STATUSES.has(String(d.status || "")));
       if (refreshTimer) {
         clearTimeout(refreshTimer);
@@ -2952,6 +3437,14 @@ async function pageDocuments(kbId) {
           if (currentPath().includes(`/knowledge-bases/${kbId}/documents`)) renderList();
         }, 4000);
       }
+
+      const pageButtons = Array.from({ length: totalPages }, (_, i) => {
+        const p = i + 1;
+        const active = p === listPage;
+        return `<button type="button" class="btn btn-sm ${active ? "" : "btn-secondary"}" data-goto-page="${p}" ${active ? "aria-current=\"page\"" : ""}>${p}</button>`;
+      }).join("");
+
+      const selectableCount = items.filter((d) => !DOC_BUSY_STATUSES.has(String(d.status || ""))).length;
 
       document.getElementById("pageRoot").innerHTML = `
       ${pageHead({
@@ -2970,17 +3463,7 @@ async function pageDocuments(kbId) {
       })}
       ${
         canUpload
-          ? `<div class="kb-dropzone" id="kbDropzone">
-          <div class="kb-dropzone-inner">
-            <span class="kb-dropzone-icon" aria-hidden="true"></span>
-            <p class="kb-dropzone-title">将文件拖拽到此处</p>
-            <p class="kb-dropzone-lead">也可点击本区域或上方按钮选择文件（支持多选）</p>
-            <ul class="kb-dropzone-meta">
-              <li>支持格式：PDF、DOC、DOCX、TXT、MD</li>
-              <li>单文件最大：100MB</li>
-              <li>一次可批量上传多个文件</li>
-            </ul>
-          </div>
+          ? `<div class="kb-dropzone" id="kbDropzone">${dropzoneIdleHtml()}
         </div>
         <div id="uploadPreviewPanel" class="card" style="display:none;margin-bottom:12px"></div>`
           : ""
@@ -2989,37 +3472,149 @@ async function pageDocuments(kbId) {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">文档列表</h3>
-            <p class="card-sub">分段 / 预处理 / 向量化状态 · 共 ${items.length} 份${busy ? " · 处理中自动刷新" : ""}</p>
+            <p class="card-sub">分段 / 预处理 / 向量化状态 · 共 ${total} 份 · 第 ${listPage}/${totalPages} 页${busy ? " · 处理中自动刷新" : ""}</p>
           </div>
+          ${
+            canWrite
+              ? `<div class="card-header-actions">
+                   <button type="button" class="btn btn-danger btn-sm" id="btnBatchDeleteDocs" disabled>批量删除</button>
+                 </div>`
+              : ""
+          }
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>文件名</th><th>大小</th><th>分段</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
+          <thead><tr>
+            ${canWrite ? `<th class="col-check" style="width:44px"><input type="checkbox" id="docSelectAll" title="全选当前页" aria-label="全选当前页" ${selectableCount ? "" : "disabled"} /></th>` : ""}
+            <th class="col-index" style="width:56px">序号</th>
+            <th>文件名</th><th>大小</th><th>分段</th><th>状态</th><th class="col-time">上传时间</th><th>操作</th>
+          </tr></thead>
           <tbody>
             ${items
-              .map((d) => {
+              .map((d, i) => {
                 const st = String(d.status || "");
                 const isError = st === "error";
                 const isBusy = DOC_BUSY_STATUSES.has(st);
+                const seq = (listPage - 1) * DOC_PAGE_SIZE + i + 1;
                 return `<tr>
+                  ${
+                    canWrite
+                      ? `<td class="col-check"><input type="checkbox" class="doc-row-check" value="${escapeHtml(d.id)}" ${isBusy ? "disabled" : ""} aria-label="选择 ${escapeHtml(d.filename || d.name || "文档")}" /></td>`
+                      : ""
+                  }
+                  <td class="col-index">${seq}</td>
                   <td>${escapeHtml(d.filename || d.name)}</td>
                   <td>${escapeHtml(formatSize(d.file_size ?? d.size))}</td>
                   <td>${escapeHtml(d.chunk_count ?? 0)}</td>
-                  <td><span class="badge ${isError ? "badge-warning" : ""}">${escapeHtml(st || "-")}</span></td>
-                  <td>${formatDateTime(d.created_at)}</td>
+                  <td class="col-status">${docStatusBadge(st)}</td>
+                  <td class="col-time">${formatDateTimeHtml(d.created_at)}</td>
                   <td>
-                    <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">工作台</button>
-                    ${canWrite && isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
-                    ${canWrite && !isBusy ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
+                    <div class="table-actions">
+                      <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">工作台</button>
+                      ${canWrite && isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
+                      ${canWrite && !isBusy ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
+                    </div>
                   </td>
                 </tr>`;
               })
-              .join("") || `<tr><td colspan="6" class="text-muted">暂无文档</td></tr>`}
+              .join("") ||
+              `<tr><td colspan="${canWrite ? 8 : 7}" class="text-muted">暂无文档</td></tr>`}
           </tbody>
         </table></div>
+        ${
+          total > 0
+            ? `<div class="pager pager-center" id="docPager">
+                <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
+                ${pageButtons}
+                <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+              </div>`
+            : ""
+        }
       </div>`;
 
       document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
       wireDropzone();
+
+      const syncBatchDeleteState = () => {
+        const btn = document.getElementById("btnBatchDeleteDocs");
+        const selectAll = document.getElementById("docSelectAll");
+        const checks = Array.from(document.querySelectorAll(".doc-row-check:not(:disabled)"));
+        const selected = checks.filter((c) => c.checked);
+        if (btn) btn.disabled = selected.length === 0;
+        if (selectAll && checks.length) {
+          selectAll.checked = selected.length === checks.length;
+          selectAll.indeterminate = selected.length > 0 && selected.length < checks.length;
+        } else if (selectAll) {
+          selectAll.checked = false;
+          selectAll.indeterminate = false;
+        }
+      };
+
+      const selectAll = document.getElementById("docSelectAll");
+      if (selectAll) {
+        selectAll.onchange = () => {
+          document.querySelectorAll(".doc-row-check:not(:disabled)").forEach((cb) => {
+            cb.checked = selectAll.checked;
+          });
+          syncBatchDeleteState();
+        };
+      }
+      document.querySelectorAll(".doc-row-check").forEach((cb) => {
+        cb.onchange = () => syncBatchDeleteState();
+      });
+
+      const btnBatch = document.getElementById("btnBatchDeleteDocs");
+      if (btnBatch) {
+        btnBatch.onclick = async () => {
+          const ids = Array.from(document.querySelectorAll(".doc-row-check:checked")).map((el) => el.value);
+          if (!ids.length) return toast("请先勾选要删除的文档", "error");
+          const ok = await confirmDialog({
+            title: "批量删除文档",
+            message: `将删除已勾选的 ${ids.length} 份文档及其向量数据，确定？`,
+            confirmText: "批量删除",
+          });
+          if (!ok) return;
+          let success = 0;
+          const failures = [];
+          for (const id of ids) {
+            try {
+              await api.delete(`/knowledge-bases/${kbId}/documents/${id}`);
+              success += 1;
+            } catch (e) {
+              failures.push(e.message || "删除失败");
+            }
+          }
+          if (success && !failures.length) {
+            toast(`已删除 ${success} 份文档`, "success");
+          } else if (success && failures.length) {
+            toast(`成功 ${success} 份，失败 ${failures.length} 份：${failures[0]}`, "error");
+          } else {
+            toast(failures[0] || "批量删除失败", "error");
+          }
+          await renderList();
+        };
+      }
+
+      const pager = document.getElementById("docPager");
+      if (pager) {
+        pager.querySelector("[data-page-prev]")?.addEventListener("click", () => {
+          if (listPage <= 1) return;
+          listPage -= 1;
+          renderList();
+        });
+        pager.querySelector("[data-page-next]")?.addEventListener("click", () => {
+          if (listPage >= totalPages) return;
+          listPage += 1;
+          renderList();
+        });
+        pager.querySelectorAll("[data-goto-page]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const p = Number(btn.getAttribute("data-goto-page"));
+            if (!Number.isFinite(p) || p === listPage) return;
+            listPage = p;
+            renderList();
+          });
+        });
+      }
 
       const btnUpload = document.getElementById("btnAdminUpload");
       if (btnUpload) btnUpload.onclick = () => document.getElementById("adminFile")?.click();
@@ -3103,6 +3698,7 @@ async function pageDocuments(kbId) {
           }
         };
       });
+      syncBatchDeleteState();
     } catch (e) {
       document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
     }
@@ -3141,12 +3737,13 @@ const CONFIG_FIELD_LABELS = {
 };
 
 /** 宽弹窗（快照详情 / 差异预览）；确认时不自动卸载，便于读取表单。 */
-function openWideModal({ title, bodyHtml, actionsHtml }) {
+function openWideModal({ title, bodyHtml, actionsHtml, width = "min(760px,calc(100vw - 24px))", panelClass = "", onReady = null }) {
   return new Promise((resolve) => {
     const mask = document.createElement("div");
     mask.className = "modal-mask";
+    const extra = panelClass ? ` ${panelClass}` : "";
     mask.innerHTML = `
-      <div class="modal" role="dialog" aria-modal="true" style="width:min(760px,calc(100vw - 24px));max-height:85vh;overflow:auto">
+      <div class="modal${extra}" role="dialog" aria-modal="true" style="width:${width};max-height:85vh;overflow:auto">
         <h3 class="modal-title">${escapeHtml(title)}</h3>
         <div class="modal-body">${bodyHtml}</div>
         <div class="modal-actions">${actionsHtml}</div>
@@ -3164,6 +3761,11 @@ function openWideModal({ title, bodyHtml, actionsHtml }) {
       }
     });
     document.body.appendChild(mask);
+    try {
+      onReady?.(mask);
+    } catch (_) {
+      /* ignore mount hooks */
+    }
   });
 }
 
@@ -3212,7 +3814,7 @@ async function pageSnapshots(kbId) {
           items.length
             ? `<div class="table-wrap"><table class="table">
           <thead><tr>
-            <th>快照名称</th><th>触发方式</th><th>文档数</th><th>分段数</th><th>说明</th><th>创建时间</th><th>操作</th>
+            <th>快照名称</th><th>触发方式</th><th>文档数</th><th>分段数</th><th>说明</th><th class="col-time">创建时间</th><th>操作</th>
           </tr></thead>
           <tbody>
             ${items
@@ -3224,7 +3826,7 @@ async function pageSnapshots(kbId) {
                     ? `<button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(s.id)}">差异预览/回退</button>`
                     : "",
                   canWrite && !isProtection
-                    ? `<button class="btn btn-text btn-sm" data-del="${escapeHtml(s.id)}" style="color:var(--color-danger)">删除</button>`
+                    ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(s.id)}">删除</button>`
                     : isProtection
                       ? `<span class="text-muted" title="保护快照不可手动删除">不可删</span>`
                       : "",
@@ -3237,7 +3839,7 @@ async function pageSnapshots(kbId) {
                   <td>${escapeHtml(s.document_count ?? 0)}</td>
                   <td>${escapeHtml(s.total_chunks ?? 0)}</td>
                   <td>${escapeHtml(s.description || "—")}</td>
-                  <td>${formatDateTime(s.created_at)}</td>
+                  <td class="col-time">${formatDateTimeHtml(s.created_at)}</td>
                   <td style="white-space:nowrap">${ops}</td>
                 </tr>`;
               })
@@ -3854,7 +4456,7 @@ async function pageHitTest() {
             </div>
           </div>
           <div class="table-wrap"><table class="table" id="htRunTable">
-            <thead><tr><th>用例</th><th>得分（相关度）</th><th>命中</th><th>策略</th><th>时间</th><th></th></tr></thead>
+            <thead><tr><th>用例</th><th>得分（相关度）</th><th>命中</th><th>策略</th><th class="col-time">时间</th><th></th></tr></thead>
             <tbody>
               ${
                 runs.length
@@ -3865,7 +4467,7 @@ async function pageHitTest() {
                           <td><strong>${pct(r.score)}</strong></td>
                           <td>${escapeHtml(r.hit_count)}/${escapeHtml(r.total_questions)}${r.hit_rate != null ? `（${pct(r.hit_rate)}）` : ""}</td>
                           <td>${escapeHtml(strategyLabel(r.strategy))}</td>
-                          <td>${formatDateTime(r.completed_at || r.created_at)}</td>
+                          <td class="col-time">${formatDateTimeHtml(r.completed_at || r.created_at)}</td>
                           <td style="white-space:nowrap">
                             <button type="button" class="btn btn-secondary btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
                             ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">清除</button>` : ""}
@@ -4400,7 +5002,7 @@ async function pageRagas() {
           <span class="badge">共 ${escapeHtml(runData.total ?? runs.length)} 次</span>
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>知识库</th><th>状态</th><th>样本</th><th>忠实度</th><th>答案相关性</th><th>上下文精确率</th><th>上下文召回率</th><th>完成时间</th><th></th></tr></thead>
+          <thead><tr><th>知识库</th><th>状态</th><th>样本</th><th>忠实度</th><th>答案相关性</th><th>上下文精确率</th><th>上下文召回率</th><th class="col-time">完成时间</th><th></th></tr></thead>
           <tbody>
             ${
               runs.length
@@ -4408,13 +5010,19 @@ async function pageRagas() {
                     .map(
                       (run) => `<tr>
                         <td>${escapeHtml(run.kb_name || run.kb_id)}</td>
-                        <td><span class="badge">${run.status === "completed" ? "已完成" : run.status === "failed" ? "失败" : "运行中"}</span>${run.error_message ? `<div class="text-danger" style="max-width:220px">${escapeHtml(run.error_message)}</div>` : ""}</td>
+                        <td class="col-status"><span class="badge ${
+                          run.status === "completed"
+                            ? "badge-success"
+                            : run.status === "failed"
+                              ? "badge-danger"
+                              : "badge-info"
+                        }">${run.status === "completed" ? "已完成" : run.status === "failed" ? "失败" : "运行中"}</span>${run.error_message ? `<div class="text-danger" style="max-width:220px">${escapeHtml(run.error_message)}</div>` : ""}</td>
                         <td>${escapeHtml(run.sample_count ?? 0)}</td>
                         <td>${ragasScore(run.metric_scores?.faithfulness)}</td>
                         <td>${ragasScore(run.metric_scores?.answer_relevancy)}</td>
                         <td>${ragasScore(run.metric_scores?.context_precision)}</td>
                         <td>${ragasScore(run.metric_scores?.context_recall)}</td>
-                        <td>${formatDateTime(run.completed_at || run.created_at)}</td>
+                        <td class="col-time">${formatDateTimeHtml(run.completed_at || run.created_at)}</td>
                         <td><button type="button" class="btn btn-text btn-sm" data-ragas-detail="${escapeHtml(run.id)}">详细结果</button></td>
                       </tr>`
                     )
@@ -4692,7 +5300,7 @@ async function pageQaSessions() {
           <span class="badge">共 ${escapeHtml(data.total ?? sessions.length)} 个会话</span>
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>会话</th><th>用户</th><th>类型</th><th>消息数</th><th>最后活跃</th><th></th></tr></thead>
+          <thead><tr><th>会话</th><th>用户</th><th>类型</th><th>消息数</th><th class="col-time">最后活跃</th><th></th></tr></thead>
           <tbody>
             ${
               sessions.length
@@ -4703,7 +5311,7 @@ async function pageQaSessions() {
                         <td>${escapeHtml(session.owner || "-")}</td>
                         <td>${session.owner_type === "guest" ? "访客" : "注册用户"}</td>
                         <td>${escapeHtml(session.message_count ?? 0)}</td>
-                        <td>${formatDateTime(session.last_active_at)}</td>
+                        <td class="col-time">${formatDateTimeHtml(session.last_active_at)}</td>
                         <td><button type="button" class="btn btn-text btn-sm" data-session-detail="${escapeHtml(session.id)}">查看处理结果</button></td>
                       </tr>`
                     )
@@ -4773,7 +5381,7 @@ async function pageRoleCaches() {
           </div>
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>缓存知识库</th><th>角色</th><th>缓存数</th><th>检测周期</th><th>文档分析</th><th>历史分析</th><th>状态</th><th></th></tr></thead>
+          <thead><tr><th>缓存知识库</th><th>角色</th><th>缓存数</th><th>检测周期</th><th class="col-time">文档分析</th><th class="col-time">历史分析</th><th>状态</th><th class="col-actions">操作</th></tr></thead>
           <tbody>
             ${
               caches.length
@@ -4788,19 +5396,21 @@ async function pageRoleCaches() {
                             <input class="form-control" style="width:76px" type="number" min="1" max="365" value="${escapeHtml(cache.interval_days)}" data-cache-interval ${canWrite ? "" : "disabled"} /> 天
                           </label>
                         </td>
-                        <td>${cache.last_document_analysis_at ? formatDateTime(cache.last_document_analysis_at) : "尚未执行"}</td>
-                        <td>${cache.last_history_analysis_at ? formatDateTime(cache.last_history_analysis_at) : "尚未执行"}</td>
-                        <td><span class="badge">${cache.enabled ? "已启用" : "已停用"}</span></td>
-                        <td style="white-space:nowrap">
-                          <button type="button" class="btn btn-text btn-sm" data-cache-detail>查看问题</button>
-                          ${
-                            canWrite
-                              ? `<button type="button" class="btn btn-text btn-sm" data-cache-save>保存</button>
-                                 <button type="button" class="btn btn-text btn-sm" data-cache-doc>分析文档</button>
-                                 <button type="button" class="btn btn-text btn-sm" data-cache-history>检测历史</button>
-                                 <button type="button" class="btn btn-text btn-sm" data-cache-toggle>${cache.enabled ? "停用" : "启用"}</button>`
-                              : ""
-                          }
+                        <td class="col-time">${cache.last_document_analysis_at ? formatDateTimeHtml(cache.last_document_analysis_at) : `<span class="cell-time">尚未执行</span>`}</td>
+                        <td class="col-time">${cache.last_history_analysis_at ? formatDateTimeHtml(cache.last_history_analysis_at) : `<span class="cell-time">尚未执行</span>`}</td>
+                        <td class="col-status"><span class="badge ${cache.enabled ? "badge-success" : "badge-danger"}">${cache.enabled ? "已启用" : "已停用"}</span></td>
+                        <td class="col-actions">
+                          <div class="table-actions table-actions-wrap">
+                            <button type="button" class="btn btn-text btn-sm" data-cache-detail>查看问题</button>
+                            ${
+                              canWrite
+                                ? `<button type="button" class="btn btn-text btn-sm" data-cache-save>保存</button>
+                                   <button type="button" class="btn btn-text btn-sm" data-cache-doc>分析文档</button>
+                                   <button type="button" class="btn btn-text btn-sm" data-cache-history>检测历史</button>
+                                   <button type="button" class="btn ${cache.enabled ? "btn-danger" : "btn-success"} btn-sm" data-cache-toggle>${cache.enabled ? "停用" : "启用"}</button>`
+                                : ""
+                            }
+                          </div>
                         </td>
                       </tr>`
                     )
@@ -4875,7 +5485,7 @@ async function openRoleCacheQuestions(roleId, cacheName) {
         <div class="modal-body">
           <p class="text-muted" style="margin-top:0">共 ${escapeHtml(data.total ?? items.length)} 个缓存问题。文档生成与历史高频问题都必须携带知识库来源范围才能被问答链路命中。</p>
           <div class="table-wrap"><table class="table">
-            <thead><tr><th>问题</th><th>答案摘要</th><th>来源</th><th>历史频次</th><th>缓存命中</th><th>更新时间</th></tr></thead>
+            <thead><tr><th>问题</th><th>答案摘要</th><th>来源</th><th>历史频次</th><th>缓存命中</th><th class="col-time">更新时间</th></tr></thead>
             <tbody>
               ${
                 items.length
@@ -4887,7 +5497,7 @@ async function openRoleCacheQuestions(roleId, cacheName) {
                           <td>${item.source === "history_frequent" ? "历史高频" : "文档生成"}</td>
                           <td>${escapeHtml(item.occurrence_count ?? 1)}</td>
                           <td>${escapeHtml(item.hit_count ?? 0)}</td>
-                          <td>${formatDateTime(item.updated_at)}</td>
+                          <td class="col-time">${formatDateTimeHtml(item.updated_at)}</td>
                         </tr>`
                       )
                       .join("")
@@ -4984,79 +5594,367 @@ async function pageAudit() {
   if (!requirePerm("audit:read", "审计日志")) return;
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载审计…</div>`;
 
+  const AUDIT_PAGE_SIZE = 15;
+  let listPage = 1;
+  let auditTotalPages = 1;
+  let filters = { action: "", resource_type: "", result: "" };
+  /** @type {Map<string, object>} */
+  let pageItemMap = new Map();
+
+  /** 解析「1-5、8、11-13」为页码列表（1-based，受 maxPage 约束） */
+  const parsePageSpec = (spec, maxPage) => {
+    const max = Math.max(1, Number(maxPage) || 1);
+    const pages = new Set();
+    const parts = String(spec || "")
+      .split(/[,，、;\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const part of parts) {
+      const range = part.match(/^(\d+)\s*[-~～—–到至]\s*(\d+)$/);
+      if (range) {
+        let a = Number(range[1]);
+        let b = Number(range[2]);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        if (a > b) [a, b] = [b, a];
+        for (let p = a; p <= b; p += 1) {
+          if (p >= 1 && p <= max) pages.add(p);
+        }
+        continue;
+      }
+      const single = part.match(/^(\d+)$/);
+      if (single) {
+        const p = Number(single[1]);
+        if (p >= 1 && p <= max) pages.add(p);
+      }
+    }
+    return Array.from(pages).sort((a, b) => a - b);
+  };
+
   const actionLabel = (code) => AUDIT_ACTION_LABELS[code] || code || "-";
   const resourceLabel = (code) => AUDIT_RESOURCE_LABELS[code] || code || "-";
 
-  const load = async (filters = {}) => {
-    const qs = new URLSearchParams({ page: "1", page_size: "50" });
-    if (filters.action) qs.set("action", filters.action);
-    if (filters.resource_type) qs.set("resource_type", filters.resource_type);
-    if (filters.result) qs.set("result", filters.result);
-    const data = await api.get(`/audit/logs?${qs.toString()}`);
+  const actorName = (a) => a.user_name || (a.user_id ? String(a.user_id).slice(0, 8) + "…" : "系统");
+
+  const csvEscape = (value) => {
+    const s = String(value ?? "");
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const downloadCsv = (filename, header, rows) => {
+    const lines = [header, ...rows].map((cols) => cols.map(csvEscape).join(","));
+    const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const auditToCsvRow = (a) => [
+    actorName(a),
+    actionLabel(a.action),
+    a.action || "",
+    resourceLabel(a.resource_type),
+    a.resource_id || "",
+    a.request_id || "",
+    a.result === "success" ? "成功" : a.result || "失败",
+    formatDateTime(a.created_at),
+    a.ip_address || "",
+    a.error_message || "",
+  ];
+
+  const CSV_HEADER = [
+    "操作者",
+    "动作",
+    "动作代码",
+    "资源",
+    "资源ID",
+    "请求标识",
+    "结果",
+    "时间",
+    "IP",
+    "错误信息",
+  ];
+
+  const fetchAuditPage = async (page, pageSize, filterOverride = null) => {
+    const f = filterOverride === null ? filters : filterOverride;
+    const qs = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+    });
+    if (f.action) qs.set("action", f.action);
+    if (f.resource_type) qs.set("resource_type", f.resource_type);
+    if (f.result) qs.set("result", f.result);
+    return api.get(`/audit/logs?${qs.toString()}`);
+  };
+
+  const fetchAuditAll = async (filterOverride = null) => {
+    const all = [];
+    let page = 1;
+    let total = Infinity;
+    const pageSize = 100;
+    while (all.length < total) {
+      const data = await fetchAuditPage(page, pageSize, filterOverride);
+      const chunk = data.items || [];
+      total = Number(data.total ?? all.length + chunk.length) || 0;
+      all.push(...chunk);
+      if (!chunk.length || all.length >= total || page > 500) break;
+      page += 1;
+    }
+    return all;
+  };
+
+  const fetchAuditPages = async (pageNumbers) => {
+    const all = [];
+    const seen = new Set();
+    for (const p of pageNumbers) {
+      const data = await fetchAuditPage(p, AUDIT_PAGE_SIZE);
+      for (const item of data.items || []) {
+        const id = String(item.id);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        all.push(item);
+      }
+    }
+    return all;
+  };
+
+  const runAuditExport = async (mode, pageSpec = "") => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    try {
+      if (mode === "selected") {
+        const ids = Array.from(document.querySelectorAll(".audit-row-check:checked")).map((el) => el.value);
+        if (!ids.length) return toast("请先勾选要导出的记录", "error");
+        const rows = ids.map((id) => pageItemMap.get(id)).filter(Boolean);
+        if (!rows.length) return toast("未找到可导出的记录", "error");
+        downloadCsv(`audit-selected-${stamp}.csv`, CSV_HEADER, rows.map(auditToCsvRow));
+        toast(`已导出勾选 ${rows.length} 条`, "success");
+        return;
+      }
+      if (mode === "pages") {
+        const pages = parsePageSpec(pageSpec, auditTotalPages);
+        if (!pages.length) {
+          return toast(`请输入有效页码（1-${auditTotalPages}），例如1-5、 8、 11-13`, "error");
+        }
+        toast(`正在导出第 ${pages.join("、")} 页…`);
+        const rows = await fetchAuditPages(pages);
+        if (!rows.length) return toast("指定页没有可导出的记录", "error");
+        downloadCsv(`audit-pages-${stamp}.csv`, CSV_HEADER, rows.map(auditToCsvRow));
+        toast(`已导出 ${pages.length} 页共 ${rows.length} 条`, "success");
+        return;
+      }
+      if (mode === "all") {
+        toast("正在全库导出，请稍候…");
+        const rows = await fetchAuditAll({ action: "", resource_type: "", result: "" });
+        downloadCsv(`audit-all-${stamp}.csv`, CSV_HEADER, rows.map(auditToCsvRow));
+        toast(`已全库导出 ${rows.length} 条`, "success");
+        return;
+      }
+      toast("未知导出方式", "error");
+    } catch (e) {
+      toast(e.message || "导出失败", "error");
+    }
+  };
+
+  const chooseAuditExport = async () => {
+    const selectedCount = document.querySelectorAll(".audit-row-check:checked").length;
+    const result = await openWideModal({
+      title: "导出 CSV",
+      width: "min(400px, calc(100vw - 32px))",
+      panelClass: "audit-export-modal",
+      bodyHtml: `
+        <div class="audit-export-options">
+          <div class="audit-export-pages">
+            <div class="audit-export-section-title">页面</div>
+            <label class="audit-export-option">
+              <input type="radio" name="auditExportMode" value="all" checked />
+              <span class="audit-export-label">全部</span>
+            </label>
+            <div class="audit-export-option audit-export-option-pages">
+              <input type="radio" name="auditExportMode" value="pages" id="auditExportModePages" />
+              <input
+                type="text"
+                id="auditExportPageSpec"
+                class="audit-export-page-input"
+                placeholder="例如1-5、 8、 11-13"
+                value=""
+                autocomplete="off"
+                inputmode="text"
+                aria-label="导出页码"
+              />
+            </div>
+          </div>
+          <label class="audit-export-option${selectedCount ? "" : " is-disabled"}" style="cursor:${selectedCount ? "pointer" : "not-allowed"}">
+            <input type="radio" name="auditExportMode" value="selected" ${selectedCount ? "" : "disabled"} />
+            <span class="audit-export-label">已选数据（${selectedCount} 条）</span>
+          </label>
+        </div>`,
+      actionsHtml: `
+        <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+        <button type="button" class="btn" data-act="ok">开始导出</button>`,
+      onReady: (root) => {
+        const input = root.querySelector("#auditExportPageSpec");
+        const pagesRadio = root.querySelector("#auditExportModePages");
+        const activatePages = () => {
+          if (pagesRadio && !pagesRadio.disabled) pagesRadio.checked = true;
+        };
+        input?.addEventListener("focus", activatePages);
+        input?.addEventListener("input", activatePages);
+        input?.addEventListener("click", activatePages);
+      },
+    });
+    if (!result?.ok) return;
+    const root = result.root;
+    const mode = root.querySelector('input[name="auditExportMode"]:checked')?.value || "all";
+    const pageSpec = root.querySelector("#auditExportPageSpec")?.value?.trim() || "";
+    root.remove();
+    await runAuditExport(mode, pageSpec);
+  };
+
+  const openAuditDetail = async (id) => {
+    try {
+      const d = await api.get(`/audit/logs/${id}`);
+      const detail = d.detail || {};
+      await openWideModal({
+        title: "审计详情",
+        bodyHtml: `
+          <p><span class="text-muted">动作：</span>${escapeHtml(actionLabel(d.action))}
+            <code style="margin-left:8px">${escapeHtml(d.action)}</code></p>
+          <p><span class="text-muted">操作者：</span>${escapeHtml(d.user_name || d.user_id || "系统")}</p>
+          <p><span class="text-muted">资源：</span>${escapeHtml(resourceLabel(d.resource_type))}
+            · ${escapeHtml(d.resource_id || "—")}</p>
+          <p><span class="text-muted">请求标识：</span>${escapeHtml(d.request_id || "—")}</p>
+          <p><span class="text-muted">IP / UA：</span>${escapeHtml(d.ip_address || "—")}
+            · ${escapeHtml((d.user_agent || "—").slice(0, 80))}</p>
+          <p><span class="text-muted">结果：</span>${
+            d.result === "success"
+              ? `<span class="badge badge-success">成功</span>`
+              : `<span class="badge badge-danger">${escapeHtml(d.result || "失败")}</span>`
+          }
+            ${d.error_message ? ` · ${escapeHtml(d.error_message)}` : ""}</p>
+          <p><span class="text-muted">时间：</span>${formatDateTime(d.created_at)}</p>
+          ${
+            detail.before_version || detail.after_version
+              ? `<p><span class="text-muted">索引版本：</span>
+                <code>${escapeHtml(detail.before_version || "—")}</code>
+                → <code>${escapeHtml(detail.after_version || "—")}</code></p>`
+              : ""
+          }
+          <h4 style="margin:12px 0 8px;font-size:14px">变更明细</h4>
+          <pre style="background:var(--color-bg-tint);padding:12px;border-radius:8px;overflow:auto;max-height:240px;font-size:12px">${escapeHtml(
+            JSON.stringify(detail, null, 2) || "{}"
+          )}</pre>`,
+        actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
+      });
+    } catch (e) {
+      toast(e.message || "加载详情失败", "error");
+    }
+  };
+
+  const load = async () => {
+    const data = await fetchAuditPage(listPage, AUDIT_PAGE_SIZE);
     const items = data.items || [];
+    const total = Number(data.total ?? items.length) || 0;
+    const totalPages = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE) || 1);
+    auditTotalPages = totalPages;
+    if (listPage > totalPages) {
+      listPage = totalPages;
+      return load();
+    }
+    pageItemMap = new Map(items.map((a) => [String(a.id), a]));
+
+    const pageButtons = Array.from({ length: totalPages }, (_, i) => {
+      const p = i + 1;
+      const active = p === listPage;
+      return `<button type="button" class="btn btn-sm ${active ? "" : "btn-secondary"}" data-goto-page="${p}" ${active ? 'aria-current="page"' : ""}>${p}</button>`;
+    }).join("");
+
     document.getElementById("pageRoot").innerHTML = `
       ${pageHead({
         title: "审计日志",
-        desc: "记录操作者、时间、对象、请求标识与结果。",
+        desc: "记录操作者、时间、对象、请求标识与结果。可按全部页面 / 指定页码 / 已选数据导出 CSV。",
       })}
       <div class="card panel-fill">
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">操作审计</h3>
-            <p class="card-sub">共 ${escapeHtml(data.total ?? items.length)} 条</p>
+            <p class="card-sub" id="auditListSub">共 ${escapeHtml(total)} 条 · 第 ${listPage}/${totalPages} 页 · 每页 ${AUDIT_PAGE_SIZE} 条 · 已选 0 条</p>
           </div>
           <div class="card-header-actions">
-          <select class="form-control" id="auditAction" style="width:160px;height:32px">
-            <option value="">全部动作</option>
-            <option value="snapshot.">快照相关</option>
-            <option value="doc.">文档相关</option>
-            <option value="kb.">知识库相关</option>
-            <option value="user.">用户相关</option>
-            <option value="role.">角色相关</option>
-          </select>
-          <select class="form-control" id="auditResource" style="width:140px;height:32px">
-            <option value="">全部资源</option>
-            <option value="snapshot">快照</option>
-            <option value="kb">知识库</option>
-            <option value="document">文档</option>
-            <option value="user">用户</option>
-            <option value="role">角色</option>
-          </select>
-          <select class="form-control" id="auditResult" style="width:120px;height:32px">
-            <option value="">全部结果</option>
-            <option value="success">成功</option>
-            <option value="failure">失败</option>
-          </select>
-          <button class="btn btn-secondary btn-sm" id="btnAuditFilter">筛选</button>
+            <select class="form-control" id="auditAction" style="width:160px;height:32px">
+              <option value="">全部动作</option>
+              <option value="snapshot.">快照相关</option>
+              <option value="doc.">文档相关</option>
+              <option value="kb.">知识库相关</option>
+              <option value="user.">用户相关</option>
+              <option value="role.">角色相关</option>
+            </select>
+            <select class="form-control" id="auditResource" style="width:140px;height:32px">
+              <option value="">全部资源</option>
+              <option value="snapshot">快照</option>
+              <option value="kb">知识库</option>
+              <option value="document">文档</option>
+              <option value="user">用户</option>
+              <option value="role">角色</option>
+            </select>
+            <select class="form-control" id="auditResult" style="width:120px;height:32px">
+              <option value="">全部结果</option>
+              <option value="success">成功</option>
+              <option value="failure">失败</option>
+            </select>
+            <button type="button" class="btn btn-sm" id="btnAuditBatchExport">批量导出 CSV</button>
           </div>
         </div>
         <div class="table-wrap"><table class="table">
           <thead><tr>
-            <th>操作者</th><th>动作</th><th>资源</th><th>资源 ID</th><th>请求标识</th><th>结果</th><th>时间</th><th></th>
+            <th class="col-check"><input type="checkbox" id="auditSelectAll" title="全选当前页" aria-label="全选当前页" ${items.length ? "" : "disabled"} /></th>
+            <th class="col-index">序号</th>
+            <th class="col-name">操作者</th>
+            <th style="width:14%">动作</th>
+            <th style="width:10%">资源</th>
+            <th style="width:10%">资源 ID</th>
+            <th style="width:12%">请求标识</th>
+            <th class="col-status">结果</th>
+            <th class="col-time">时间</th>
+            <th class="col-actions" style="width:88px;min-width:88px;max-width:88px"></th>
           </tr></thead>
           <tbody>${
             items.length
               ? items
-                  .map(
-                    (a) => `<tr>
-                <td>${escapeHtml(a.user_name || (a.user_id ? String(a.user_id).slice(0, 8) + "…" : "系统"))}</td>
+                  .map((a, i) => {
+                    const seq = (listPage - 1) * AUDIT_PAGE_SIZE + i + 1;
+                    return `<tr>
+                <td class="col-check"><input type="checkbox" class="audit-row-check" value="${escapeHtml(a.id)}" aria-label="选择第 ${seq} 条" /></td>
+                <td class="col-index">${seq}</td>
+                <td class="col-name">${escapeHtml(actorName(a))}</td>
                 <td title="${escapeHtml(a.action)}">${escapeHtml(actionLabel(a.action))}</td>
                 <td>${escapeHtml(resourceLabel(a.resource_type))}</td>
                 <td class="text-muted">${escapeHtml(a.resource_id ? String(a.resource_id).slice(0, 8) + "…" : "—")}</td>
                 <td class="text-muted">${escapeHtml(a.request_id ? String(a.request_id).slice(0, 10) + "…" : "—")}</td>
-                <td>${
+                <td class="col-status">${
                   a.result === "success"
                     ? `<span class="badge badge-success">成功</span>`
                     : `<span class="badge badge-danger">${escapeHtml(a.result || "失败")}</span>`
                 }</td>
-                <td>${formatDateTime(a.created_at)}</td>
-                <td><button class="btn btn-text btn-sm" data-audit="${escapeHtml(a.id)}">详情</button></td>
-              </tr>`
-                  )
+                <td class="col-time">${formatDateTimeHtml(a.created_at)}</td>
+                <td class="col-actions" style="width:88px;min-width:88px;max-width:88px"><button class="btn btn-text btn-sm" data-audit="${escapeHtml(a.id)}">详情</button></td>
+              </tr>`;
+                  })
                   .join("")
-              : `<tr><td colspan="8" class="text-muted">暂无符合条件的审计记录</td></tr>`
+              : `<tr><td colspan="10" class="text-muted">暂无符合条件的审计记录</td></tr>`
           }</tbody>
         </table></div>
+        ${
+          total > 0
+            ? `<div class="pager pager-center" id="auditPager">
+                <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
+                ${pageButtons}
+                <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+              </div>`
+            : ""
+        }
       </div>`;
 
     const actionEl = document.getElementById("auditAction");
@@ -5066,61 +5964,82 @@ async function pageAudit() {
     if (resourceEl) resourceEl.value = filters.resource_type || "";
     if (resultEl) resultEl.value = filters.result || "";
 
-    const applyFilters = () =>
-      load({
-        action: (actionEl && actionEl.value) || undefined,
-        resource_type: (resourceEl && resourceEl.value) || undefined,
-        result: (resultEl && resultEl.value) || undefined,
-      });
+    const readFilters = () => ({
+      action: (actionEl && actionEl.value) || "",
+      resource_type: (resourceEl && resourceEl.value) || "",
+      result: (resultEl && resultEl.value) || "",
+    });
 
-    const btnFilter = document.getElementById("btnAuditFilter");
-    if (btnFilter) btnFilter.onclick = applyFilters;
-    // 下拉框变更即筛选（避免「点了没反应」）
+    const applyFilters = async () => {
+      filters = readFilters();
+      listPage = 1;
+      try {
+        await load();
+      } catch (e) {
+        toast(e.message || "筛选失败", "error");
+      }
+    };
+
     [actionEl, resourceEl, resultEl].forEach((el) => {
       if (el) el.onchange = applyFilters;
     });
 
-    document.querySelectorAll("[data-audit]").forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute("data-audit");
-        try {
-          const d = await api.get(`/audit/logs/${id}`);
-          const detail = d.detail || {};
-          await openWideModal({
-            title: "审计详情",
-            bodyHtml: `
-              <p><span class="text-muted">动作：</span>${escapeHtml(actionLabel(d.action))}
-                <code style="margin-left:8px">${escapeHtml(d.action)}</code></p>
-              <p><span class="text-muted">操作者：</span>${escapeHtml(d.user_name || d.user_id || "系统")}</p>
-              <p><span class="text-muted">资源：</span>${escapeHtml(resourceLabel(d.resource_type))}
-                · ${escapeHtml(d.resource_id || "—")}</p>
-              <p><span class="text-muted">请求标识：</span>${escapeHtml(d.request_id || "—")}</p>
-              <p><span class="text-muted">IP / UA：</span>${escapeHtml(d.ip_address || "—")}
-                · ${escapeHtml((d.user_agent || "—").slice(0, 80))}</p>
-              <p><span class="text-muted">结果：</span>${
-                d.result === "success"
-                  ? `<span class="badge badge-success">成功</span>`
-                  : `<span class="badge badge-danger">${escapeHtml(d.result || "失败")}</span>`
-              }
-                ${d.error_message ? ` · ${escapeHtml(d.error_message)}` : ""}</p>
-              <p><span class="text-muted">时间：</span>${formatDateTime(d.created_at)}</p>
-              ${
-                detail.before_version || detail.after_version
-                  ? `<p><span class="text-muted">索引版本：</span>
-                    <code>${escapeHtml(detail.before_version || "—")}</code>
-                    → <code>${escapeHtml(detail.after_version || "—")}</code></p>`
-                  : ""
-              }
-              <h4 style="margin:12px 0 8px;font-size:14px">变更明细</h4>
-              <pre style="background:var(--color-bg-tint);padding:12px;border-radius:8px;overflow:auto;max-height:240px;font-size:12px">${escapeHtml(
-                JSON.stringify(detail, null, 2) || "{}"
-              )}</pre>`,
-            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
-          });
-        } catch (e) {
-          toast(e.message || "加载详情失败", "error");
-        }
+    const syncBatchState = () => {
+      const selectAll = document.getElementById("auditSelectAll");
+      const sub = document.getElementById("auditListSub");
+      const checks = Array.from(document.querySelectorAll(".audit-row-check"));
+      const selected = checks.filter((c) => c.checked);
+      if (selectAll && checks.length) {
+        selectAll.checked = selected.length === checks.length;
+        selectAll.indeterminate = selected.length > 0 && selected.length < checks.length;
+      } else if (selectAll) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+      }
+      if (sub) {
+        sub.textContent = `共 ${total} 条 · 第 ${listPage}/${totalPages} 页 · 每页 ${AUDIT_PAGE_SIZE} 条 · 已选 ${selected.length} 条`;
+      }
+    };
+
+    const selectAll = document.getElementById("auditSelectAll");
+    if (selectAll) {
+      selectAll.onchange = () => {
+        document.querySelectorAll(".audit-row-check").forEach((cb) => {
+          cb.checked = selectAll.checked;
+        });
+        syncBatchState();
       };
+    }
+    document.querySelectorAll(".audit-row-check").forEach((cb) => {
+      cb.onchange = () => syncBatchState();
+    });
+
+    document.getElementById("btnAuditBatchExport")?.addEventListener("click", chooseAuditExport);
+
+    const pager = document.getElementById("auditPager");
+    if (pager) {
+      pager.querySelector("[data-page-prev]")?.addEventListener("click", async () => {
+        if (listPage <= 1) return;
+        listPage -= 1;
+        await load();
+      });
+      pager.querySelector("[data-page-next]")?.addEventListener("click", async () => {
+        if (listPage >= totalPages) return;
+        listPage += 1;
+        await load();
+      });
+      pager.querySelectorAll("[data-goto-page]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const p = Number(btn.getAttribute("data-goto-page"));
+          if (!Number.isFinite(p) || p === listPage) return;
+          listPage = p;
+          await load();
+        });
+      });
+    }
+
+    document.querySelectorAll("[data-audit]").forEach((btn) => {
+      btn.onclick = () => openAuditDetail(btn.getAttribute("data-audit"));
     });
   };
 
@@ -5132,8 +6051,91 @@ async function pageAudit() {
 }
 
 /* ========== 系统监控（Grafana 嵌入） ========== */
+let monitorHealthTimer = null;
+
 async function pageMonitor() {
   if (!requirePerm("system:read", "系统监控")) return;
+  if (monitorHealthTimer) {
+    clearInterval(monitorHealthTimer);
+    monitorHealthTimer = null;
+  }
+
+  const HEALTH_LABELS = {
+    postgres: "PostgreSQL",
+    redis: "Redis",
+    chroma: "Chroma",
+    langfuse: "Langfuse",
+    minio: "MinIO",
+  };
+
+  const healthLampClass = (status) => {
+    const s = String(status || "").toLowerCase();
+    if (s === "healthy" || s === "ok") return "is-healthy";
+    if (s === "degraded") return "is-degraded";
+    return "is-unhealthy";
+  };
+
+  const renderHealthChecks = (health) => {
+    const badge = document.getElementById("monitorHealthBadge");
+    const uptime = document.getElementById("monitorHealthUptime");
+    const list = document.getElementById("monitorHealthList");
+    if (!list) return;
+    const status = health?.status || "unknown";
+    if (badge) {
+      const lamp = healthLampClass(status);
+      badge.className = `monitor-live-badge ${lamp}`;
+      badge.innerHTML = `<span class="health-lamp ${lamp}" aria-hidden="true"></span><span>实时刷新中</span>`;
+      badge.title = `整体状态：${status}`;
+    }
+    if (uptime) {
+      uptime.textContent =
+        health?.uptime_seconds != null ? `Uptime ${health.uptime_seconds}s · 每 10 秒自动刷新` : "组件状态一览 · 每 10 秒自动刷新";
+    }
+    const entries = Object.entries(health?.checks || {});
+    list.innerHTML = entries.length
+      ? entries
+          .map(([k, v]) => {
+            const st = typeof v === "object" ? v.status : v;
+            const latency =
+              typeof v === "object" && v.latency_ms != null
+                ? `延迟（${v.latency_ms}ms）`
+                : st && String(st).toLowerCase() !== "healthy"
+                  ? escapeHtml(String(st))
+                  : "";
+            const label = HEALTH_LABELS[k] || k;
+            return `<li class="health-check-item">
+              <span class="health-lamp ${healthLampClass(st)}" title="${escapeHtml(String(st))}" aria-hidden="true"></span>
+              <span class="health-check-name">${escapeHtml(label)}</span>
+              <span class="health-check-meta">${latency}</span>
+            </li>`;
+          })
+          .join("")
+      : `<li class="text-muted">无组件检查数据</li>`;
+  };
+
+  const refreshHealth = async () => {
+    if (!currentPath().includes("/admin/monitor")) {
+      if (monitorHealthTimer) {
+        clearInterval(monitorHealthTimer);
+        monitorHealthTimer = null;
+      }
+      return;
+    }
+    try {
+      const health = await api.get("/monitor/health");
+      renderHealthChecks(health);
+    } catch {
+      const list = document.getElementById("monitorHealthList");
+      if (list) {
+        list.innerHTML = `<li class="health-check-item">
+          <span class="health-lamp is-unhealthy" aria-hidden="true"></span>
+          <span class="health-check-name">健康检查</span>
+          <span class="health-check-meta text-danger">刷新失败</span>
+        </li>`;
+      }
+    }
+  };
+
   let health = { status: "unknown", checks: {} };
   let stats = null;
   try {
@@ -5146,13 +6148,6 @@ async function pageMonitor() {
   } catch (e) {
     stats = { error: e.message };
   }
-  const checksHtml = Object.entries(health.checks || {})
-    .map(([k, v]) => {
-      const status = typeof v === "object" ? v.status : v;
-      const latency = typeof v === "object" && v.latency_ms != null ? ` (${v.latency_ms}ms)` : "";
-      return `<li><code>${escapeHtml(k)}</code> = ${escapeHtml(String(status))}${escapeHtml(latency)}</li>`;
-    })
-    .join("");
   const statsHtml =
     stats && !stats.error
       ? `<ul class="list-plain">
@@ -5170,20 +6165,24 @@ async function pageMonitor() {
       title: "系统监控",
       desc: "健康检查、运行统计与 Grafana 面板。",
     })}
-    <div class="page-grid">
-    <div class="card span-6">
+    <div class="page-grid monitor-page-grid">
+    <div class="card span-6 monitor-equal-card">
       <div class="card-header">
         <div class="card-header-text"><h3 class="card-title">健康检查</h3></div>
-        <span class="badge ${health.status === "ok" || health.status === "healthy" ? "badge-success" : ""}">${escapeHtml(health.status)}</span>
+        <span class="monitor-live-badge is-healthy" id="monitorHealthBadge" title="整体状态加载中">
+          <span class="health-lamp is-healthy" aria-hidden="true"></span><span>实时刷新中</span>
+        </span>
       </div>
-      <p class="page-desc" style="margin-bottom:12px">${health.uptime_seconds != null ? `Uptime ${health.uptime_seconds}s` : "组件状态一览"}</p>
-      <ul class="list-plain">${checksHtml || "<li class='text-muted'>无组件检查数据</li>"}</ul>
+      <p class="page-desc" id="monitorHealthUptime" style="margin-bottom:12px">${
+        health.uptime_seconds != null ? `Uptime ${health.uptime_seconds}s · 每 10 秒自动刷新` : "组件状态一览 · 每 10 秒自动刷新"
+      }</p>
+      <ul class="list-plain health-check-list" id="monitorHealthList"></ul>
     </div>
-    <div class="card span-6">
+    <div class="card span-6 monitor-equal-card">
       <div class="card-header">
         <div class="card-header-text"><h3 class="card-title">系统统计</h3></div>
       </div>
-      ${statsHtml}
+      <div class="monitor-stats-body">${statsHtml}</div>
     </div>
     <div class="card span-12">
       <div class="card-header">
@@ -5208,6 +6207,9 @@ async function pageMonitor() {
       </div>
     </div>
     </div>`;
+
+  renderHealthChecks(health);
+  monitorHealthTimer = setInterval(refreshHealth, 10000);
 }
 
 /* ========== LLM Guard 拦截详情 ========== */
@@ -5247,7 +6249,7 @@ async function pageGuardEvents() {
         </div>
         <div class="table-wrap"><table class="table">
           <thead><tr>
-            <th>时间</th><th>账号</th><th>来源 IP</th><th>意图</th><th>原因码</th><th>检测层</th><th>置信度</th><th>摘要</th><th></th>
+            <th class="col-time">时间</th><th>账号</th><th>来源 IP</th><th>意图</th><th>原因码</th><th>检测层</th><th>置信度</th><th>摘要</th><th></th>
           </tr></thead>
           <tbody>
             ${
@@ -5262,7 +6264,7 @@ async function pageGuardEvents() {
                             ? `<span class="cell-muted">已注册</span>`
                             : `<span class="cell-muted">—</span>`;
                       return `<tr>
-                        <td>${formatDateTime(event.created_at)}</td>
+                        <td class="col-time">${formatDateTimeHtml(event.created_at)}</td>
                         <td><strong>${escapeHtml(event.actor_label || "访客")}</strong></td>
                         <td><code>${escapeHtml(event.client_ip || "-")}</code></td>
                         <td>${escapeHtml(guardIntentLabel(event.intent))}</td>

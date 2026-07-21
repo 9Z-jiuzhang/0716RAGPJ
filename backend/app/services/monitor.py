@@ -69,6 +69,12 @@ class MonitorService:
         if lf_status in ("unhealthy", "degraded") and overall == "healthy":
             overall = "degraded"
 
+        # MinIO 对象存储
+        minio_status, minio_latency = self._check_minio()
+        checks["minio"] = HealthCheckItem(status=minio_status, latency_ms=minio_latency)
+        if minio_status == "unhealthy" and overall == "healthy":
+            overall = "degraded"
+
         return HealthResponse(
             status=overall,
             version=settings.APP_VERSION,
@@ -98,6 +104,19 @@ class MonitorService:
             return ("healthy" if ok else "unhealthy"), latency
         except Exception:
             logger.warning("chroma health check failed", exc_info=True)
+            return "unhealthy", None
+
+    def _check_minio(self) -> tuple[str, float | None]:
+        """探测 MinIO 连通性与鉴权（list_buckets）。"""
+        try:
+            from app.services.storage import get_minio_client
+
+            t0 = time.perf_counter()
+            get_minio_client().list_buckets()
+            latency = round((time.perf_counter() - t0) * 1000, 2)
+            return "healthy", latency
+        except Exception:
+            logger.warning("minio health check failed", exc_info=True)
             return "unhealthy", None
 
     async def stats(self) -> SystemStatsResponse:
@@ -147,14 +166,27 @@ class MonitorService:
         active_sessions.set(sessions)
 
         guard_stats = await self._guard_stats()
+        qa_30 = await self._qa_trend(30)
+        hit_30 = await self._hit_rate_trend(30)
+        err_hourly = await self._error_hourly(48)
+        # 近 24h 拆成 4 段（每段 6h），兼容旧前端
+        err_24 = []
+        last_24 = err_hourly[-24:] if len(err_hourly) >= 24 else ([0] * (24 - len(err_hourly)) + err_hourly)
+        for i in range(4):
+            chunk = last_24[i * 6 : (i + 1) * 6]
+            err_24.append(sum(chunk))
         return SystemStatsResponse(
             user_count=user_count,
             kb_count=kb_count,
             doc_count=document_count,
             active_sessions=sessions,
             task_queue_size=queue_size,
-            qa_trend_7d=await self._qa_trend_7d(),
-            hit_rate_trend_7d=await self._hit_rate_trend_7d(),
+            qa_trend_7d=qa_30[-7:] if len(qa_30) >= 7 else qa_30,
+            hit_rate_trend_7d=hit_30[-7:] if len(hit_30) >= 7 else hit_30,
+            qa_trend_30d=qa_30,
+            hit_rate_trend_30d=hit_30,
+            error_24h=err_24,
+            error_hourly_48h=err_hourly,
             guard_blocked_24h=guard_stats["blocked_24h"],
             guard_blocked_7d=guard_stats["blocked_7d"],
             guard_recent_events=guard_stats["recent_events"],
@@ -292,12 +324,17 @@ class MonitorService:
 
     async def _qa_trend_7d(self) -> list[int]:
         """近 7 天每日用户提问数（含今天，按日升序）。"""
+        return await self._qa_trend(7)
+
+    async def _qa_trend(self, days: int = 7) -> list[int]:
+        """近 N 天每日用户提问数（含今天，按日升序）。"""
         from datetime import datetime, timedelta, timezone
 
         from app.models.qa import QAMessage
 
+        days = max(1, min(int(days), 90))
         today = datetime.now(timezone.utc).date()
-        start = today - timedelta(days=6)
+        start = today - timedelta(days=days - 1)
         try:
             rows = (
                 await self.db.execute(
@@ -314,22 +351,27 @@ class MonitorService:
             ).all()
             counts = {str(r.d): int(r.c) for r in rows}
         except Exception:
-            logger.warning("qa_trend_7d query failed", exc_info=True)
+            logger.warning("qa_trend query failed", exc_info=True)
             counts = {}
         out: list[int] = []
-        for i in range(7):
+        for i in range(days):
             day = start + timedelta(days=i)
             out.append(counts.get(str(day), 0))
         return out
 
     async def _hit_rate_trend_7d(self) -> list[float]:
         """近 7 天每日命中率（completed runs 的 hit_count/total_questions）。"""
+        return await self._hit_rate_trend(7)
+
+    async def _hit_rate_trend(self, days: int = 7) -> list[float]:
+        """近 N 天每日命中率（completed runs 的 hit_count/total_questions）。"""
         from datetime import datetime, timedelta, timezone
 
         from app.models.hit_tests import TestRuns
 
+        days = max(1, min(int(days), 90))
         today = datetime.now(timezone.utc).date()
-        start = today - timedelta(days=6)
+        start = today - timedelta(days=days - 1)
         try:
             rows = (
                 await self.db.execute(
@@ -348,10 +390,64 @@ class MonitorService:
             ).all()
             rates = {str(r.d): (float(r.hits) / float(r.total) if int(r.total) > 0 else 0.0) for r in rows}
         except Exception:
-            logger.warning("hit_rate_trend_7d query failed", exc_info=True)
+            logger.warning("hit_rate_trend query failed", exc_info=True)
             rates = {}
         out: list[float] = []
-        for i in range(7):
+        for i in range(days):
             day = start + timedelta(days=i)
             out.append(round(rates.get(str(day), 0.0), 4))
+        return out
+
+    async def _error_hourly(self, hours: int = 48) -> list[int]:
+        """近 N 小时每小时错误量：文档失败 + 向量化失败（旧→新）。"""
+        from datetime import datetime, timedelta, timezone
+
+        hours = max(1, min(int(hours), 168))
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=hours - 1)
+        counts: dict[str, int] = {}
+
+        def _hour_key(dt: datetime) -> str:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H")
+
+        try:
+            doc_rows = (
+                await self.db.execute(
+                    select(Document.updated_at).where(
+                        Document.status == "failed",
+                        Document.updated_at >= start,
+                    )
+                )
+            ).all()
+            for (ts,) in doc_rows:
+                if ts is None:
+                    continue
+                key = _hour_key(ts)
+                counts[key] = counts.get(key, 0) + 1
+        except Exception:
+            logger.warning("error_hourly document query failed", exc_info=True)
+
+        try:
+            task_rows = (
+                await self.db.execute(
+                    select(VectorizeTask.updated_at).where(
+                        VectorizeTask.status == "failed",
+                        VectorizeTask.updated_at >= start,
+                    )
+                )
+            ).all()
+            for (ts,) in task_rows:
+                if ts is None:
+                    continue
+                key = _hour_key(ts)
+                counts[key] = counts.get(key, 0) + 1
+        except Exception:
+            logger.warning("error_hourly vectorize query failed", exc_info=True)
+
+        out: list[int] = []
+        for i in range(hours):
+            slot = start + timedelta(hours=i)
+            out.append(counts.get(slot.strftime("%Y-%m-%dT%H"), 0))
         return out

@@ -318,7 +318,7 @@ data: {"content":"……"}
 
 | 接口 | 鉴权 | 功能解说 |
 |------|------|----------|
-| `GET /monitor/health` | 公开或低门槛 | 检查 postgres / redis / chroma / langfuse 等组件是否 healthy |
+| `GET /monitor/health` | 公开或低门槛 | 检查 postgres / redis / chroma / langfuse / minio 等组件是否 healthy |
 | `GET /monitor/stats` | `system:read` | 用户数、问答趋势、Guard 阻拦统计等，偏管理端仪表盘 |
 | `GET /monitor/guard-events` | `system:read` | LLM Guard 拦截明细（账号、IP、意图），偏安全运营 |
 

@@ -167,42 +167,9 @@
   box-shadow: 0 0 15px color-mix(in srgb, var(--color-primary) 40%, transparent), 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-/* ---------- 玻璃卡片：鼠标追踪高光（.fx-spot 由 JS 注入，避免与伪元素冲突） ---------- */
-.card,
-.glass-panel,
-.stat-card,
-.dash-shortcut,
-.kb-card {
-  position: relative;
-  overflow: hidden;
-  transition:
-    border-color var(--duration-micro) var(--ease-standard),
-    background var(--duration-micro) var(--ease-standard),
-    box-shadow var(--duration-micro) var(--ease-standard),
-    transform var(--duration-micro) var(--ease-standard);
-}
-
+/* ---------- 玻璃卡片：鼠标追踪高光已关闭 ---------- */
 .fx-spot {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(
-    280px circle at var(--spot-x, 50%) var(--spot-y, 50%),
-    rgba(255, 255, 255, 0.12),
-    transparent 42%
-  );
-  opacity: 0;
-  transition: opacity var(--duration-micro) var(--ease-standard);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.card:hover > .fx-spot,
-.glass-panel:hover > .fx-spot,
-.stat-card:hover > .fx-spot,
-.dash-shortcut:hover > .fx-spot,
-.kb-card:hover > .fx-spot {
-  opacity: 1;
+  display: none !important;
 }
 
 /* ---------- 图表生长 ---------- */
@@ -233,6 +200,7 @@
     transform var(--duration-micro) var(--ease-spring),
     background var(--duration-micro) var(--ease-standard),
     opacity var(--duration-micro) var(--ease-standard),
+    visibility var(--duration-micro) var(--ease-standard),
     box-shadow var(--duration-micro) var(--ease-standard);
 }
 
@@ -240,6 +208,7 @@
   transform: scale(1.15);
   background: var(--color-primary);
   opacity: 1;
+  visibility: visible;
   box-shadow: 0 0 10px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
@@ -261,15 +230,15 @@
   position: absolute;
   left: 12%;
   right: 12%;
-  bottom: -4px;
+  bottom: 0;
   height: 2px;
-  border-radius: 2px;
+  border-radius: 2px 2px 0 0;
   background: var(--color-primary-gradient);
   transform: scaleX(0);
   transform-origin: center;
   transition: transform var(--duration-micro) var(--ease-standard);
-  opacity: 0.9;
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 40%, transparent);
+  opacity: 0.95;
+  box-shadow: none;
 }
 
 .topnav-links .nav-item:hover::after,

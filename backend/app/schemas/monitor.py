@@ -23,6 +23,16 @@ class SystemStatsResponse(BaseModel):
     task_queue_size: int = 0
     qa_trend_7d: list[int] = Field(default_factory=lambda: [0] * 7, description="近7天每日问答量")
     hit_rate_trend_7d: list[float] = Field(default_factory=lambda: [0.0] * 7, description="近7天每日命中率 0-1")
+    qa_trend_30d: list[int] = Field(default_factory=lambda: [0] * 30, description="近30天每日问答量")
+    hit_rate_trend_30d: list[float] = Field(default_factory=lambda: [0.0] * 30, description="近30天每日命中率 0-1")
+    error_24h: list[int] = Field(
+        default_factory=lambda: [0] * 4,
+        description="近24小时错误量（4 个等宽时段，旧→新）",
+    )
+    error_hourly_48h: list[int] = Field(
+        default_factory=lambda: [0] * 48,
+        description="近48小时每小时错误量（文档失败+向量化失败，旧→新）",
+    )
     guard_blocked_24h: int = Field(default=0, description="最近 24 小时被 Guard 阻拦次数")
     guard_blocked_7d: int = Field(default=0, description="最近 7 天被 Guard 阻拦次数")
     guard_recent_events: list[dict[str, object]] = Field(

@@ -27,6 +27,27 @@ export function formatDateTime(value) {
   return d.toLocaleString("zh-CN", { hour12: false });
 }
 
+/** 拆成「日期 / 时间」两行的表格单元格 HTML */
+export function formatDateTimeHtml(value) {
+  if (!value) return `<span class="cell-time">-</span>`;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    return `<span class="cell-time">${escapeHtml(String(value))}</span>`;
+  }
+  const date = d.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const time = d.toLocaleTimeString("zh-CN", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  return `<span class="cell-time cell-time-stack"><span class="cell-time-date">${escapeHtml(date)}</span><span class="cell-time-clock">${escapeHtml(time)}</span></span>`;
+}
+
 /** 生成 UUID（会话/请求兜底用） */
 export function uuid() {
   // 优先使用浏览器原生随机 UUID
