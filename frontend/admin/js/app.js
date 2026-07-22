@@ -829,10 +829,14 @@ async function pageUsers() {
                   ? isFixedSuper
                     ? `<span class="cell-muted">固定超管（不可操作）</span>`
                     : canManage
-                      ? `<div class="table-actions">
-                    <button type="button" class="btn ${u.status === "disabled" ? "btn-success" : "btn-danger"} btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
-                    <button type="button" class="btn btn-secondary btn-sm" data-role="${escapeHtml(u.id)}">角色</button>
-                    <button type="button" class="btn btn-danger btn-sm" data-del-user="${escapeHtml(u.id)}">删除</button>
+                      ? `<div class="table-actions table-actions-stack">
+                    <div class="table-actions-row">
+                      <button type="button" class="btn btn-secondary btn-sm" data-role="${escapeHtml(u.id)}">角色</button>
+                    </div>
+                    <div class="table-actions-row">
+                      <button type="button" class="btn ${u.status === "disabled" ? "btn-success" : "btn-danger"} btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
+                      <button type="button" class="btn btn-danger btn-sm" data-del-user="${escapeHtml(u.id)}">删除</button>
+                    </div>
                   </div>`
                       : `<span class="cell-muted">权限不足</span>`
                   : `<span class="cell-muted">—</span>`;
@@ -1310,14 +1314,20 @@ async function pageDepartments() {
                         <td>${escapeHtml(d.member_count ?? 0)}</td>
                         <td>${escapeHtml(d.kb_count ?? 0)}</td>
                         <td>${d.is_enabled ? `<span class="badge badge-success">启用</span>` : `<span class="badge badge-danger">停用</span>`}</td>
-                        <td class="col-actions" style="white-space:nowrap">
-                          <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments/${escapeHtml(d.id)}">管理</button>
-                          ${
-                            canWrite
-                              ? `<button type="button" class="btn btn-secondary btn-sm" data-edit="${escapeHtml(d.id)}">编辑</button>
-                                 ${String(d.code).toUpperCase() === "GUEST" ? "" : `<button type="button" class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>`}`
-                              : ""
-                          }
+                        <td class="col-actions">
+                          <div class="table-actions table-actions-stack">
+                            <div class="table-actions-row">
+                              <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments/${escapeHtml(d.id)}">管理</button>
+                              ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" data-edit="${escapeHtml(d.id)}">编辑</button>` : ""}
+                            </div>
+                            ${
+                              canWrite && String(d.code).toUpperCase() !== "GUEST"
+                                ? `<div class="table-actions-row">
+                              <button type="button" class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>
+                            </div>`
+                                : ""
+                            }
+                          </div>
                         </td>
                       </tr>`
                     )
@@ -1689,9 +1699,6 @@ function openModelForm({ title, model = null, onSave }) {
           <input class="form-control" name="api_key_env" value="${escapeHtml(m.api_key_env || "")}" placeholder="如 LLM_API_KEY（密钥写在 .env）" />
           <label class="form-label" style="margin-top:10px">优先级（数值越小越优先）</label>
           <input class="form-control" name="priority" type="number" min="0" max="10000" value="${escapeHtml(String(m.priority ?? 100))}" />
-          <label style="display:flex;gap:8px;align-items:center;margin-top:12px">
-            <input type="checkbox" name="is_default" ${m.is_default ? "checked" : ""} /> 设为同类型默认
-          </label>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-close>取消</button>
@@ -1750,7 +1757,6 @@ function openModelForm({ title, model = null, onSave }) {
       base_url: String(form.get("base_url") || "").trim() || null,
       api_key_env: String(form.get("api_key_env") || "").trim() || null,
       priority: Number(form.get("priority") || 100),
-      is_default: form.get("is_default") === "on",
       is_enabled: true,
     };
     try {
@@ -1805,8 +1811,7 @@ async function pageModels() {
                       ${
                         canWrite
                           ? `<button class="btn btn-text btn-sm" data-edit="${escapeHtml(m.id)}">编辑</button>
-                             <button class="btn ${m.is_enabled ? "btn-danger" : "btn-success"} btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>
-                             ${!m.is_default ? `<button class="btn btn-text btn-sm" data-default="${escapeHtml(m.id)}">设默认</button>` : ""}`
+                             <button class="btn ${m.is_enabled ? "btn-danger" : "btn-success"} btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>`
                           : `<span class="text-muted">—</span>`
                       }
                     </div>
@@ -1874,7 +1879,6 @@ async function pageModels() {
           onSave: async (payload) => {
             const { model_type, ...rest } = payload;
             await api.put(`/models/${model.id}`, rest);
-            if (payload.is_default) await api.put(`/models/${model.id}/default`, { is_default: true });
             toast("模型已更新", "success");
           },
         });
@@ -1891,18 +1895,6 @@ async function pageModels() {
           pageModels();
         } catch (e) {
           toast(e.message || "更新失败", "error");
-        }
-      };
-    });
-
-    document.querySelectorAll("[data-default]").forEach((btn) => {
-      btn.onclick = async () => {
-        try {
-          await api.put(`/models/${btn.getAttribute("data-default")}/default`, { is_default: true });
-          toast("已设为默认", "success");
-          pageModels();
-        } catch (e) {
-          toast(e.message || "设置失败", "error");
         }
       };
     });
@@ -5404,9 +5396,8 @@ async function pageRoleCaches() {
                             <button type="button" class="btn btn-text btn-sm" data-cache-detail>查看问题</button>
                             ${
                               canWrite
-                                ? `<button type="button" class="btn btn-text btn-sm" data-cache-save>保存</button>
+                                ? `<button type="button" class="btn btn-text btn-sm" data-cache-save>保存设置</button>
                                    <button type="button" class="btn btn-text btn-sm" data-cache-doc>分析文档</button>
-                                   <button type="button" class="btn btn-text btn-sm" data-cache-history>检测历史</button>
                                    <button type="button" class="btn ${cache.enabled ? "btn-danger" : "btn-success"} btn-sm" data-cache-toggle>${cache.enabled ? "停用" : "启用"}</button>`
                                 : ""
                             }
@@ -5424,7 +5415,8 @@ async function pageRoleCaches() {
     root.querySelectorAll("[data-role-cache-row]").forEach((row) => {
       const roleId = row.getAttribute("data-role-cache-row");
       const current = caches.find((item) => item.role_id === roleId) || {};
-      row.querySelector("[data-cache-detail]").onclick = () => openRoleCacheQuestions(roleId, current.name);
+      row.querySelector("[data-cache-detail]").onclick = () =>
+        openRoleCacheQuestions(roleId, current.name, { canWrite });
       if (!canWrite) return;
 
       const save = async (patch) => {
@@ -5452,7 +5444,6 @@ async function pageRoleCaches() {
         }
       };
       row.querySelector("[data-cache-doc]").onclick = () => runRoleCacheAnalysis(roleId, "documents");
-      row.querySelector("[data-cache-history]").onclick = () => runRoleCacheAnalysis(roleId, "history");
     });
   } catch (error) {
     root.innerHTML = `<div class="card empty-state">加载角色缓存失败：${escapeHtml(error.message)}</div>`;
@@ -5461,7 +5452,7 @@ async function pageRoleCaches() {
 
 /** 管理员手动触发文档或历史分析；请求完成后自动刷新统计。 */
 async function runRoleCacheAnalysis(roleId, type) {
-  const label = type === "documents" ? "文档分析" : "历史高频检测";
+  const label = type === "documents" ? "文档分析" : "检测文档";
   toast(`${label}已开始，请等待模型处理完成`);
   try {
     const result = await api.post(`/role-caches/${roleId}/analyze-${type}`, {});
@@ -5473,7 +5464,8 @@ async function runRoleCacheAnalysis(roleId, type) {
 }
 
 /** 弹窗查看角色缓存中的问题、来源及实际命中次数。 */
-async function openRoleCacheQuestions(roleId, cacheName) {
+async function openRoleCacheQuestions(roleId, cacheName, options = {}) {
+  const canWrite = Boolean(options.canWrite);
   try {
     const data = await api.get(`/role-caches/${roleId}/questions?page=1&page_size=100`);
     const items = data.items || [];
@@ -5481,7 +5473,14 @@ async function openRoleCacheQuestions(roleId, cacheName) {
     mask.className = "modal-mask";
     mask.innerHTML = `
       <div class="modal" role="dialog" aria-modal="true" style="width:min(1000px,calc(100vw - 24px));max-height:90vh;overflow:auto">
-        <div class="modal-header"><h3>${escapeHtml(cacheName || "缓存问题明细")}</h3></div>
+        <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <h3 style="margin:0">${escapeHtml(cacheName || "缓存问题明细")}</h3>
+          ${
+            canWrite
+              ? `<button type="button" class="btn btn-secondary btn-sm" data-cache-detect-doc>检测文档</button>`
+              : ""
+          }
+        </div>
         <div class="modal-body">
           <p class="text-muted" style="margin-top:0">共 ${escapeHtml(data.total ?? items.length)} 个缓存问题。文档生成与历史高频问题都必须携带知识库来源范围才能被问答链路命中。</p>
           <div class="table-wrap"><table class="table">
@@ -5510,6 +5509,17 @@ async function openRoleCacheQuestions(roleId, cacheName) {
       </div>`;
     document.body.appendChild(mask);
     mask.querySelector("[data-close]").onclick = () => mask.remove();
+    const detectBtn = mask.querySelector("[data-cache-detect-doc]");
+    if (detectBtn) {
+      detectBtn.onclick = async () => {
+        detectBtn.disabled = true;
+        try {
+          await runRoleCacheAnalysis(roleId, "history");
+        } finally {
+          detectBtn.disabled = false;
+        }
+      };
+    }
     mask.addEventListener("click", (event) => {
       if (event.target === mask) mask.remove();
     });

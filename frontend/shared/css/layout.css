@@ -167,6 +167,7 @@
   margin: 0 auto;
   box-sizing: border-box;
   min-height: 0;
+  min-width: 0;
   background: transparent;
 }
 
@@ -182,7 +183,9 @@
   gap: var(--page-gap);
   flex: 1;
   min-height: 0;
+  min-width: 0;
   width: 100%;
+  max-width: 100%;
   justify-content: flex-start;
   align-items: stretch;
 }

@@ -7,10 +7,10 @@
   <script>
     (function () {
       try {
-        var t = localStorage.getItem("kb-theme") || "dark";
-        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+        var t = localStorage.getItem("kb-theme") || "light";
+        document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
       } catch (e) {
-        document.documentElement.setAttribute("data-theme", "dark");
+        document.documentElement.setAttribute("data-theme", "light");
       }
     })();
   </script>

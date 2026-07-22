@@ -485,7 +485,7 @@
 .auth-materio-points li:hover {
   border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
   color: var(--color-text);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 /* 舞台艺术：占约 75% 宽，但避开左上文案安全区 */
@@ -1559,7 +1559,7 @@ html[data-theme="light"] .qa-sidebar.is-collapsed {
 }
 
 .qa-sidebar-new:hover {
-  transform: translateY(-1px);
+  transform: none;
   filter: brightness(1.06);
   box-shadow: 0 6px 16px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }

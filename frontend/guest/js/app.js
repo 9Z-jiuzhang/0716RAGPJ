@@ -310,8 +310,8 @@ function pageChat() {
           ? `当前为<strong>${getRoleLabel()}</strong>：可使用问答；完整管理请进入管理端。`
           : "当前为<strong>注册用户</strong>：可问答与查看本人历史；上传需员工权限。";
 
-  // 进入智能对话默认折叠历史侧栏
-  const sidebarCollapsed = true;
+  // 进入智能对话默认展开历史侧栏
+  const sidebarCollapsed = false;
   document.getElementById("pageRoot").innerHTML = `
     <div class="qa-layout ${role === "guest" || !isLoggedIn() ? "qa-layout-guest" : ""}${sidebarCollapsed ? "" : " is-sidebar-open"}" id="qaLayout">
       <aside class="qa-sidebar${sidebarCollapsed ? " is-collapsed" : ""}" id="qaSidebar" aria-label="历史对话">
@@ -377,7 +377,8 @@ function pageChat() {
   document.getElementById("btnNewChat")?.addEventListener("click", () => startNewChat());
   document.getElementById("btnOpenFavorites")?.addEventListener("click", () => navigate("/favorites"));
   bindSidebarCollapse();
-  applySidebarCollapsed(true);
+  // 每次进入问答页强制展开历史侧栏（覆盖 localStorage 折叠记忆）
+  applySidebarCollapsed(false);
   bindHistoryScrollLoad();
   bindScrollToBottom();
   loadChatSidebar();
@@ -529,11 +530,11 @@ function sortSessionsWithPins(items) {
 function isSidebarCollapsed() {
   try {
     const v = localStorage.getItem(SIDEBAR_COLLAPSE_KEY);
-    // 未设置时默认折叠；仅显式存 "0" 时展开
-    if (v === null || v === "") return true;
+    // 未设置时默认展开；仅显式存 "1" 时折叠
+    if (v === null || v === "") return false;
     return v === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 

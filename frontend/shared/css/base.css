@@ -23,6 +23,17 @@ body {
   transition: var(--theme-transition);
 }
 
+/* 方案 C：预留滚动条槽，避免滚动条出现/消失时整页右缘内缩抖动 */
+html {
+  scrollbar-gutter: stable;
+}
+
+@supports not (scrollbar-gutter: stable) {
+  html {
+    overflow-y: scroll;
+  }
+}
+
 /* 通透深空：底色不变，主色仅作环境光点缀 */
 body {
   background-color: var(--color-bg-deep);
@@ -422,9 +433,9 @@ html[data-theme="dark"] .mesh-noise {
   display: none !important;
 }
 
-/* 滚动条：默认隐藏；滚动中（.is-scrolling）再显示 */
+/* 滚动条：始终占位（防 0→6px 抖动）；默认滑块透明，滚动中（.is-scrolling）再显色 */
 * {
-  scrollbar-width: none;
+  scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
@@ -435,8 +446,8 @@ html.is-scrolling {
 }
 
 *::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+  width: 6px;
+  height: 6px;
 }
 
 *.is-scrolling::-webkit-scrollbar,
@@ -870,7 +881,7 @@ html[data-theme="light"] .stat-card:hover {
   background: rgba(255, 255, 255, 0.78) !important;
   border: 1px solid rgba(255, 255, 255, 0.92) !important;
   box-shadow: var(--shadow) !important;
-  transform: translateY(-2px) !important;
+  transform: none !important;
   filter: none !important;
 }
 
@@ -882,7 +893,7 @@ html[data-theme="light"] .kb-create-card:hover {
   border: var(--glass-border) !important;
   border-top-color: color-mix(in srgb, var(--color-primary) 48%, transparent) !important;
   box-shadow: var(--shadow), inset 0 1px 0 color-mix(in srgb, var(--color-primary) 35%, transparent) !important;
-  transform: translateY(-2px) !important;
+  transform: none !important;
   filter: none !important;
 }
 
@@ -1033,7 +1044,7 @@ html[data-theme="dark"] .kb-create-card:hover {
   border-color: var(--color-border, #303f54) !important;
   box-shadow: var(--shadow) !important;
   filter: none !important;
-  transform: translateY(-2px) !important;
+  transform: none !important;
 }
 
 html[data-theme="dark"] .auth-materio-card:hover,

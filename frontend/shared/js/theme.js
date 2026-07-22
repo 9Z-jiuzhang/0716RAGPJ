@@ -14,7 +14,7 @@ export function getTheme() {
   } catch {
     /* ignore */
   }
-  return "dark";
+  return "light";
 }
 
 export function applyTheme(theme) {
