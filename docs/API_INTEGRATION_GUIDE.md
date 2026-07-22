@@ -339,6 +339,7 @@ data: {"content":"……"}
 | `/knowledge-bases/.../documents` | 文档上传、分段、清洗、chunk 启停 |
 | `/knowledge-bases/.../snapshots` | 索引快照创建与回退 |
 | `/hit-tests` | 检索命中率用例与运行记录 |
+| `/qa/admin/sessions` | 管理端跨用户会话与预处理审计（见 `API.md` §10.3） |
 | `/ragas` | RAGAS 质量评估运行 |
 | `/role-caches` | 按角色缓存高频问题 |
 | `/query-processing` | Query 预处理策略配置 |

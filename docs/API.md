@@ -454,6 +454,15 @@ Authorization: Bearer <access_token>
 | DELETE | `/qa/sessions/{session_id}` | 需登录 | 软删除并清理 Redis 缓存 |
 | POST | `/qa/feedback` | 需登录 | `message_id`、`rating`(useful\|useless)、`comment?`(≤500) |
 
+### 10.3 管理员会话分析
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/qa/admin/sessions` | `system:read` | 跨用户会话列表（分页）；项含 `owner`、`owner_type`(guest\|user)、`message_count`、`last_active_at` 等 |
+| GET | `/qa/admin/sessions/{session_id}` | `system:read` | 会话详情 + 消息列表（含 `retrieval_meta.query_processing` 等预处理审计字段） |
+
+> 上述管理端会话路径已在运行时提供；当前未写入 `openapi.json`（与 Query/角色缓存/RAGAS 同属扩展契约待补项）。
+
 - **会话项**：`id`、`title`、`kb_names[]`、`message_count`、`created_at`、`updated_at`。
 - **消息项**：`id`、`role`、`content`、`citations`、`token_count`、`created_at`、`request_id`、`strategy`、`latency_ms`。
 - **会话生命周期**（`QASession.status`）：
@@ -606,6 +615,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.0 | 2026-07-22 | 补充管理员会话分析 `/qa/admin/sessions*`；核对监控统计字段与登录文案 |
 | 2.1.0 | 2026-07-22 | `/monitor/stats` 补充 30 天趋势与 48h 错误分桶；登录失败文案对齐「用户名或密码错误」 |
 | 2.1.0 | 2026-07-21 | 对齐本机入口 `18080`；补充改密、Guard 事件、SSE Guard/预处理事件、命中率 `score`、Query/角色缓存/RAGAS 索引；重生成 openapi（61 paths） |
 | 2.1.0 | 2026-07-19 | 补充会话闲置过期（active→expired）、访客不自动复用会话、`active_sessions` 定义；对齐 Langfuse 云端配置说明 |
