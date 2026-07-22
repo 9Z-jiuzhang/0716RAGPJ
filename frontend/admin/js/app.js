@@ -4201,85 +4201,112 @@ async function pageHitTest() {
   const strategyLabel = (s) =>
     ({ vector: "向量", fulltext: "全文", hybrid: "混合" }[s] || s || "-");
 
-  const openRunDetail = async (runId) => {
-    try {
-      const detail = await api.get(`/hit-tests/runs/${runId}`);
-      const summary = detail.summary || detail;
-      const results = detail.results || [];
-      const mask = document.createElement("div");
-      mask.className = "modal-mask";
-      mask.innerHTML = `
-        <div class="modal" role="dialog" style="width:min(900px,calc(100vw - 24px));max-height:90vh;overflow:auto">
-          <h3 class="modal-title">运行详情</h3>
-          <div class="modal-body">
-            <p class="text-muted" style="margin-top:0">
-              策略 ${escapeHtml(strategyLabel(summary.strategy))}
-              · TopK ${escapeHtml(summary.top_k)}
-              · 命中 ${escapeHtml(summary.hit_count)}/${escapeHtml(summary.total_questions)}
-              · 命中率 ${pct(summary.hit_rate ?? summary.recall_at_k)}
-              · 得分（相关度）${pct(summary.score)}
-              · MRR ${summary.mrr != null ? Number(summary.mrr).toFixed(3) : "-"}
-              · 均耗时 ${summary.avg_elapsed_ms != null ? Math.round(summary.avg_elapsed_ms) + "ms" : "-"}
-            </p>
-            <div class="table-wrap"><table class="table">
-              <thead><tr><th>问题</th><th>命中</th><th>排名</th><th>命中片段相关度</th><th>耗时</th><th>召回摘要</th></tr></thead>
-              <tbody>
-                ${
-                  results.length
-                    ? results
-                        .map((r) => {
-                          const chunks = r.actual_chunks || [];
-                          const tip = chunks
-                            .slice(0, 2)
-                            .map((c) => `${c.doc_name || c.doc_id || ""}#${c.chunk_index ?? ""}`)
-                            .join("；");
-                          return `<tr>
-                            <td style="max-width:220px">${escapeHtml(r.question)}</td>
-                            <td>${r.is_hit ? `<span class="badge badge-success">是</span>` : `<span class="badge badge-danger">否</span>`}</td>
-                            <td>${escapeHtml(r.hit_rank ?? "-")}</td>
-                            <td>${pct(r.score)}</td>
-                            <td>${escapeHtml(r.elapsed_ms != null ? r.elapsed_ms + "ms" : "-")}</td>
-                            <td class="text-muted" style="max-width:240px;font-size:12px">${escapeHtml(tip || "无召回")}</td>
-                          </tr>`;
-                        })
-                        .join("")
-                    : `<tr><td colspan="6" class="text-muted">无明细</td></tr>`
-                }
-              </tbody>
-            </table></div>
-          </div>
-          <div class="modal-actions">
-            <a class="btn btn-secondary" href="/api/v1/hit-tests/runs/${escapeHtml(runId)}/export" id="btnExportCsv" target="_blank" rel="noopener">导出 CSV</a>
-            <button type="button" class="btn btn-secondary" data-close>关闭</button>
-          </div>
-        </div>`;
-      document.body.appendChild(mask);
-      mask.querySelector("[data-close]").onclick = () => mask.remove();
-      mask.addEventListener("click", (e) => {
-        if (e.target === mask) mask.remove();
+  const HT_DETAIL_RUN_KEY = "htLastDetailRunId";
+
+  const loadRunDetail = async (runId) => {
+    const detail = await api.get(`/hit-tests/runs/${runId}`);
+    return {
+      runId: String(runId),
+      summary: detail.summary || detail,
+      results: detail.results || [],
+    };
+  };
+
+  const exportRunCsv = async (runId) => {
+    const { getAccessToken } = await import("/assets/js/auth.js?v=gap-opt-0721s");
+    const res = await fetch(`/api/v1/hit-tests/runs/${runId}/export`, {
+      headers: { Authorization: `Bearer ${getAccessToken()}` },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `hit_test_run_${runId}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const formatRunSummaryLine = (summary) =>
+    `策略 ${escapeHtml(strategyLabel(summary.strategy))} · TopK ${escapeHtml(summary.top_k)} · 命中 ${escapeHtml(summary.hit_count)}/${escapeHtml(summary.total_questions)} · 命中率 ${pct(summary.hit_rate ?? summary.recall_at_k)} · 得分（相关度）${pct(summary.score)} · MRR ${summary.mrr != null ? Number(summary.mrr).toFixed(3) : "-"} · 均耗时 ${summary.avg_elapsed_ms != null ? Math.round(summary.avg_elapsed_ms) + "ms" : "-"}`;
+
+  const recallTipOf = (chunks) =>
+    (chunks || [])
+      .slice(0, 2)
+      .map((c) => `${c.doc_name || c.doc_id || ""}#${c.chunk_index ?? ""}`)
+      .join("；");
+
+  const answerPreviewOf = (chunks) => {
+    const first = (chunks || [])[0];
+    if (!first) return "";
+    return String(first.content || first.text || "").trim();
+  };
+
+  const renderRunDetailCard = ({ runId, summary, results }) => {
+    const card = document.getElementById("htRunDetailCard");
+    if (!card) return;
+    const sub = document.getElementById("htRunDetailSub");
+    const actions = document.getElementById("htRunDetailActions");
+    const body = document.getElementById("htRunDetailBody");
+    if (sub) sub.innerHTML = formatRunSummaryLine(summary || {});
+    if (actions) {
+      actions.innerHTML = `<button type="button" class="btn btn-secondary btn-sm" id="btnHtExportCsv">导出 CSV</button>`;
+      actions.querySelector("#btnHtExportCsv")?.addEventListener("click", async () => {
+        try {
+          await exportRunCsv(runId);
+        } catch (err) {
+          toast(err.message || "导出失败", "error");
+        }
       });
-      // 带 token 下载 CSV（a[href] 无法带 Authorization）
-      const exportBtn = mask.querySelector("#btnExportCsv");
-      if (exportBtn) {
-        exportBtn.addEventListener("click", async (e) => {
-          e.preventDefault();
-          try {
-            const { getAccessToken } = await import("/assets/js/auth.js?v=gap-opt-0721s");
-            const res = await fetch(`/api/v1/hit-tests/runs/${runId}/export`, {
-              headers: { Authorization: `Bearer ${getAccessToken()}` },
-            });
-            if (!res.ok) throw new Error(await res.text());
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `hit_test_run_${runId}.csv`;
-            a.click();
-            URL.revokeObjectURL(url);
-          } catch (err) {
-            toast(err.message || "导出失败", "error");
-          }
-        });
+    }
+    if (!body) return;
+    const rows = (results || []).length
+      ? results
+          .map((r) => {
+            const chunks = r.actual_chunks || [];
+            const tip = recallTipOf(chunks);
+            const answer = answerPreviewOf(chunks);
+            return `<tr>
+              <td class="col-status ht-hit-cell">${r.is_hit ? `<span class="badge badge-success">是</span>` : `<span class="badge badge-danger">否</span>`}</td>
+              <td class="ht-q-cell">
+                <div class="ht-qa-block">
+                  <div class="ht-qa-label">问题：</div>
+                  <div class="ht-qa-question">${escapeHtml(r.question || "-")}</div>
+                  <div class="ht-qa-label">详情：</div>
+                  <div class="ht-qa-detail${answer ? "" : " text-muted"}">${escapeHtml(answer || "—")}</div>
+                </div>
+              </td>
+              <td>${pct(r.score)}</td>
+              <td>${escapeHtml(r.elapsed_ms != null ? `${r.elapsed_ms}ms` : "-")}</td>
+              <td class="text-muted ht-recall-cell">${escapeHtml(tip || "无召回")}</td>
+            </tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="5" class="text-muted">无明细</td></tr>`;
+    body.innerHTML = `<div class="table-wrap ht-detail-table-wrap"><table class="table table-fit ht-detail-table">
+      <thead><tr>
+        <th class="col-status">命中</th>
+        <th class="ht-q-col">问题 / 回答</th>
+        <th>命中片段相关度</th>
+        <th>耗时</th>
+        <th>召回详情</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  };
+
+  const showRunDetailOnCard = async (runId, { scroll = true } = {}) => {
+    if (!runId) return;
+    try {
+      const payload = await loadRunDetail(runId);
+      try {
+        sessionStorage.setItem(HT_DETAIL_RUN_KEY, String(runId));
+      } catch {
+        /* ignore */
+      }
+      renderRunDetailCard(payload);
+      if (scroll) {
+        document.getElementById("htRunDetailCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     } catch (e) {
       toast(e.message || "加载详情失败", "error");
@@ -4362,7 +4389,7 @@ async function pageHitTest() {
   try {
     const [casesData, runsData, kbData] = await Promise.all([
       api.get("/hit-tests/cases?page=1&page_size=50"),
-      api.get("/hit-tests/runs?page=1&page_size=30"),
+      api.get("/hit-tests/runs?page=1&page_size=100"),
       api.get("/knowledge-bases?page=1&page_size=50"),
     ]);
     // 兼容 data 解包异常或直接返回数组
@@ -4476,7 +4503,6 @@ async function pageHitTest() {
           ${
             canWrite
               ? `<button type="button" class="btn" id="btnRunTest">执行测试</button>
-                 <button type="button" class="btn btn-secondary" id="btnCompare">多策略对比</button>
                  <button type="button" class="btn btn-secondary" id="btnClearCase">清除已选</button>`
               : `<span class="text-muted">需要 test:write 才能执行</span>`
           }
@@ -4527,6 +4553,13 @@ async function pageHitTest() {
               }
             </tbody>
           </table></div>
+          ${
+            canWrite
+              ? `<div class="ht-case-card-footer">
+                   <button type="button" class="btn btn-secondary btn-sm" id="btnCompare">多策略对比</button>
+                 </div>`
+              : ""
+          }
         </div>
         <div class="card span-6 panel-fill">
           <div class="card-header">
@@ -4540,31 +4573,23 @@ async function pageHitTest() {
             </div>
           </div>
           <div class="table-wrap"><table class="table" id="htRunTable">
-            <thead><tr><th>用例</th><th>得分（相关度）</th><th>命中</th><th>策略</th><th class="col-time">时间</th><th class="col-actions">操作</th></tr></thead>
-            <tbody>
-              ${
-                runs.length
-                  ? runs
-                      .map((r) => {
-                        return `<tr data-run-row="${escapeHtml(String(r.id))}">
-                          <td style="max-width:140px">${escapeHtml(caseNameOf(r.case_id))}</td>
-                          <td><strong>${pct(r.score)}</strong></td>
-                          <td>${escapeHtml(r.hit_count)}/${escapeHtml(r.total_questions)}${r.hit_rate != null ? `（${pct(r.hit_rate)}）` : ""}</td>
-                          <td>${escapeHtml(strategyLabel(r.strategy))}</td>
-                          <td class="col-time">${formatDateTimeHtml(r.completed_at || r.created_at)}</td>
-                          <td class="col-actions">
-                            <div class="table-actions">
-                              <button type="button" class="btn btn-secondary btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
-                              ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">清除</button>` : ""}
-                            </div>
-                          </td>
-                        </tr>`;
-                      })
-                      .join("")
-                  : `<tr><td colspan="6" class="text-muted">暂无运行记录</td></tr>`
-              }
-            </tbody>
+            <thead><tr><th>用例</th><th>相关性</th><th>命中</th><th>策略</th><th class="col-time">时间</th><th class="col-actions">操作</th></tr></thead>
+            <tbody id="htRunTableBody"></tbody>
           </table></div>
+          <div class="pager pager-stack" id="htRunPager" hidden></div>
+        </div>
+
+        <div class="card span-12" id="htRunDetailCard">
+          <div class="card-header">
+            <div class="card-header-text">
+              <h3 class="card-title">运行详情</h3>
+              <p class="card-sub" id="htRunDetailSub">执行测试或点击运行记录「详情」后在此查看</p>
+            </div>
+            <div class="card-header-actions" id="htRunDetailActions"></div>
+          </div>
+          <div id="htRunDetailBody">
+            <div class="empty-state text-muted" style="padding:24px 8px">尚未查看运行详情</div>
+          </div>
         </div>
       </div>`;
 
@@ -4706,12 +4731,80 @@ async function pageHitTest() {
     const btnNew = document.getElementById("btnNewCase");
     if (btnNew) btnNew.onclick = () => openCreateCase(docsByKb);
 
+    const HT_RUN_PAGE_SIZE = 5;
+    let runListPage = 1;
+
+    const renderRunsPage = () => {
+      const tbody = document.getElementById("htRunTableBody");
+      const pager = document.getElementById("htRunPager");
+      if (!tbody) return;
+      const total = runs.length;
+      const totalPages = Math.max(1, Math.ceil(total / HT_RUN_PAGE_SIZE) || 1);
+      if (runListPage > totalPages) runListPage = totalPages;
+      if (runListPage < 1) runListPage = 1;
+      const start = (runListPage - 1) * HT_RUN_PAGE_SIZE;
+      const pageItems = runs.slice(start, start + HT_RUN_PAGE_SIZE);
+
+      if (!total) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-muted">暂无运行记录</td></tr>`;
+        if (pager) {
+          pager.hidden = true;
+          pager.innerHTML = "";
+        }
+        return;
+      }
+
+      tbody.innerHTML = pageItems
+        .map(
+          (r) => `<tr data-run-row="${escapeHtml(String(r.id))}">
+            <td style="max-width:140px">${escapeHtml(caseNameOf(r.case_id))}</td>
+            <td><strong>${pct(r.score)}</strong></td>
+            <td>${escapeHtml(r.hit_count)}/${escapeHtml(r.total_questions)}${r.hit_rate != null ? `（${pct(r.hit_rate)}）` : ""}</td>
+            <td>${escapeHtml(strategyLabel(r.strategy))}</td>
+            <td class="col-time">${formatDateTimeHtml(r.completed_at || r.created_at)}</td>
+            <td class="col-actions">
+              <div class="table-actions table-actions-col">
+                <button type="button" class="btn btn-secondary btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
+                ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">清除</button>` : ""}
+              </div>
+            </td>
+          </tr>`
+        )
+        .join("");
+
+      if (!pager) return;
+      if (totalPages <= 1) {
+        pager.hidden = true;
+        pager.innerHTML = "";
+        return;
+      }
+      const { buttons, jump } = renderCompactPagerParts(runListPage, totalPages);
+      pager.hidden = false;
+      pager.innerHTML = `
+        <div class="pager-row">
+          <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${runListPage <= 1 ? "disabled" : ""}>上一页</button>
+          ${buttons}
+          <button type="button" class="btn btn-secondary btn-sm" data-page-next ${runListPage >= totalPages ? "disabled" : ""}>下一页</button>
+        </div>
+        <div class="pager-row pager-row-jump">${jump}</div>`;
+      bindCompactPager(pager, {
+        page: runListPage,
+        totalPages,
+        onGo: (p) => {
+          runListPage = p;
+          renderRunsPage();
+        },
+      });
+    };
+
+    renderRunsPage();
+
     const runTable = document.getElementById("htRunTable");
     if (runTable) {
       runTable.addEventListener("click", (e) => {
         const detailBtn = e.target.closest("[data-run]");
         if (detailBtn) {
-          openRunDetail(detailBtn.getAttribute("data-run"));
+          showRunDetailOnCard(detailBtn.getAttribute("data-run"), { scroll: true });
           return;
         }
         const delBtn = e.target.closest("[data-del-run]");
@@ -4775,15 +4868,17 @@ async function pageHitTest() {
         const prev = btnRun.textContent;
         try {
           const base = buildBasePayload();
+          let lastRunId = null;
           if (selectedCaseIds.length) {
             const summaries = [];
             for (let i = 0; i < selectedCaseIds.length; i += 1) {
               const caseId = selectedCaseIds[i];
               btnRun.textContent = `执行中 ${i + 1}/${selectedCaseIds.length}…`;
               const run = await api.post("/hit-tests/runs", { ...base, case_id: caseId });
-            summaries.push(
-              `${caseNameOf(caseId)} ${run.hit_count}/${run.total_questions}（相关度 ${pct(run.score)}）`
-            );
+              lastRunId = run?.id || lastRunId;
+              summaries.push(
+                `${caseNameOf(caseId)} ${run.hit_count}/${run.total_questions}（相关度 ${pct(run.score)}）`
+              );
             }
             toast(`已完成 ${summaries.length} 个用例：${summaries.join("；")}`, "success");
           } else {
@@ -4796,10 +4891,18 @@ async function pageHitTest() {
             }
             btnRun.textContent = "执行中…";
             const run = await api.post("/hit-tests/runs", { ...base, questions });
+            lastRunId = run?.id || null;
             toast(
               `临时问题完成：命中 ${run.hit_count}/${run.total_questions}（相关度 ${pct(run.score)}）`,
               "success"
             );
+          }
+          if (lastRunId) {
+            try {
+              sessionStorage.setItem(HT_DETAIL_RUN_KEY, String(lastRunId));
+            } catch {
+              /* ignore */
+            }
           }
           pageHitTest();
         } catch (e) {
@@ -4871,6 +4974,26 @@ async function pageHitTest() {
           btnCompare.textContent = "多策略对比";
         }
       };
+    }
+
+    // 恢复上次查看 / 刚执行完的运行详情
+    let pendingDetailId = null;
+    try {
+      pendingDetailId = sessionStorage.getItem(HT_DETAIL_RUN_KEY);
+    } catch {
+      pendingDetailId = null;
+    }
+    if (pendingDetailId) {
+      const exists = runs.some((r) => String(r.id) === String(pendingDetailId));
+      if (exists) {
+        showRunDetailOnCard(pendingDetailId, { scroll: false });
+      } else {
+        try {
+          sessionStorage.removeItem(HT_DETAIL_RUN_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
     }
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
