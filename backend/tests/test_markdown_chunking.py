@@ -1,6 +1,21 @@
-"""Markdown 结构化切分专项测试。"""
+"""文件类型默认分段与 Markdown 结构化切分测试。"""
 
-from app.services.chunking import adapt_rules_for_file_type, split_text
+from app.services.chunking import (
+    adapt_rules_for_file_type,
+    recommended_split_mode_for_file_type,
+    split_text,
+)
+
+
+def test_recommended_split_mode_by_file_type() -> None:
+    """各支持类型应映射到最合适的默认分段方式。"""
+    assert recommended_split_mode_for_file_type("md") == "markdown"
+    assert recommended_split_mode_for_file_type(".MD") == "markdown"
+    assert recommended_split_mode_for_file_type("txt") == "paragraph"
+    assert recommended_split_mode_for_file_type("pdf") == "paragraph"
+    assert recommended_split_mode_for_file_type("doc") == "paragraph"
+    assert recommended_split_mode_for_file_type("docx") == "paragraph"
+    assert recommended_split_mode_for_file_type("unknown") == "fixed"
 
 
 def test_markdown_file_uses_markdown_mode_by_default() -> None:
@@ -11,6 +26,16 @@ def test_markdown_file_uses_markdown_mode_by_default() -> None:
     )
 
     assert rules["split_mode"] == "markdown"
+
+
+def test_office_and_text_files_use_paragraph_by_default() -> None:
+    """TXT / PDF / Word 在仍为 fixed 时自动改为按段落切分。"""
+    for file_type in ("txt", "pdf", "doc", "docx", ".PDF"):
+        rules = adapt_rules_for_file_type(
+            {"chunk_size": 500, "chunk_overlap": 50, "split_mode": "fixed"},
+            file_type,
+        )
+        assert rules["split_mode"] == "paragraph", file_type
 
 
 def test_markdown_split_keeps_heading_hierarchy() -> None:
@@ -71,3 +96,12 @@ def test_explicit_non_default_mode_is_preserved() -> None:
     )
 
     assert rules["split_mode"] == "heading"
+
+
+def test_explicit_sliding_on_pdf_is_preserved() -> None:
+    """用户在重分段中显式选择 sliding 时，PDF 也不应被改回 paragraph。"""
+    rules = adapt_rules_for_file_type(
+        {"chunk_size": 300, "chunk_overlap": 40, "split_mode": "sliding"},
+        "pdf",
+    )
+    assert rules["split_mode"] == "sliding"

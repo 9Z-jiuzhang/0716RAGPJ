@@ -189,6 +189,8 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
     await db.flush()
     record_metric("segment", "start")
     rules = adapt_rules_for_file_type(merge_rules(doc.segment_rules, None), doc.file_type)
+    # 写回适配后的规则，避免界面仍显示 fixed 而实际按类型推荐模式切分。
+    doc.segment_rules = dict(rules)
     previews = split_text(doc.normalized_text or "", rules)
     chunks = [
         DocumentChunk(

@@ -3710,7 +3710,7 @@ async function pageDocuments(kbId) {
           fd.append("file", f);
           fd.append("chunk_size", "500");
           fd.append("chunk_overlap", "50");
-          fd.append("split_mode", "fixed");
+          // 不传 split_mode：由后端按文件类型自动选择默认分段方式
           try {
             const preview = await api.upload(`/knowledge-bases/${kbId}/documents/segment-preview-file`, fd);
             const panel = document.getElementById("uploadPreviewPanel");

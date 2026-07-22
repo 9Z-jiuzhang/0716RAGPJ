@@ -45,16 +45,34 @@ def merge_rules(base: dict[str, Any] | None, patch: dict[str, Any] | None) -> di
     return rules
 
 
-def adapt_rules_for_file_type(rules: dict[str, Any] | None, file_type: str | None) -> dict[str, Any]:
-    """按文件类型补充默认规则，当前对 Markdown 自动启用结构化切分。
+# 按扩展名推荐的默认分段模式（仅在规则仍为通用 fixed 时自动应用）。
+_FILE_TYPE_DEFAULT_SPLIT_MODE: dict[str, str] = {
+    "md": SplitMode.MARKDOWN.value,
+    "markdown": SplitMode.MARKDOWN.value,
+    "txt": SplitMode.PARAGRAPH.value,
+    "pdf": SplitMode.PARAGRAPH.value,
+    "doc": SplitMode.PARAGRAPH.value,
+    "docx": SplitMode.PARAGRAPH.value,
+}
 
-    历史版本把所有文档默认存为 ``fixed``。为了让旧 Markdown 文档在再次预览或
-    重分段时也能获益，``md`` 遇到默认 fixed 会升级为 markdown；其他显式模式保持不变。
+
+def recommended_split_mode_for_file_type(file_type: str | None) -> str:
+    """返回该文件类型最合适的默认分段模式；未知类型回退 fixed。"""
+    normalized = (file_type or "").strip().lower().lstrip(".")
+    return _FILE_TYPE_DEFAULT_SPLIT_MODE.get(normalized, SplitMode.FIXED.value)
+
+
+def adapt_rules_for_file_type(rules: dict[str, Any] | None, file_type: str | None) -> dict[str, Any]:
+    """按文件类型自动选择默认分段方式。
+
+    - 仅当当前 ``split_mode`` 仍是通用默认 ``fixed`` 时升级为类型推荐模式；
+    - 管理员在预览/重分段中显式选择的 heading / paragraph / markdown / sliding 等保持不变；
+    - 上传、入库前预览、重分段与重向量化流水线均调用本函数，保证行为一致。
     """
     adapted = merge_rules(None, rules)
-    normalized_type = (file_type or "").strip().lower().lstrip(".")
-    if normalized_type in {"md", "markdown"} and adapted.get("split_mode") == SplitMode.FIXED.value:
-        adapted["split_mode"] = SplitMode.MARKDOWN.value
+    current = str(adapted.get("split_mode") or SplitMode.FIXED.value).strip().lower()
+    if current == SplitMode.FIXED.value:
+        adapted["split_mode"] = recommended_split_mode_for_file_type(file_type)
     return adapted
 
 
