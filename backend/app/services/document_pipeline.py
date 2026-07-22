@@ -48,48 +48,27 @@ async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = 
             async with SessionLocal() as err_db:
                 doc = await doc_repo.get_document_by_id(err_db, document_id)
                 if doc:
-                    kb_id = doc.kb_id
-                    file_path = doc.file_path
                     filename = doc.filename
                     creator_id = doc.creator_id
                     err_msg = str(exc)[:2000]
+                    try:
+                        apply_status(doc, DocumentStatus.ERROR.value, err_msg)
+                    except Exception:
+                        doc.status = DocumentStatus.ERROR.value
+                        doc.error_message = err_msg
                     await write_audit(
                         err_db,
                         user_id=creator_id,
                         action="doc.pipeline_error",
                         resource_type="document",
                         resource_id=str(document_id),
-                        detail={"filename": filename, "cleanup": "delete"},
-                        result="failure",
-                        error_message=err_msg,
-                    )
-                    # 方案 A：流水线失败不保留列表记录，清理库内文档与对象存储
-                    try:
-                        vector_store.delete_document_vectors(kb_id, document_id)
-                    except Exception:
-                        logger.exception("pipeline cleanup vectors failed doc=%s", document_id)
-                    await err_db.delete(doc)
-                    await write_audit(
-                        err_db,
-                        user_id=creator_id,
-                        action="doc.upload_failed_cleaned",
-                        resource_type="document",
-                        resource_id=str(document_id),
-                        detail={
-                            "filename": filename,
-                            "cleared": ["db", "chunks", "chroma", "minio"],
-                        },
+                        detail={"filename": filename, "status": "error"},
                         result="failure",
                         error_message=err_msg,
                     )
                     await err_db.commit()
-                    try:
-                        if file_path:
-                            storage.delete_object(file_path)
-                    except Exception:
-                        logger.exception("pipeline cleanup storage failed doc=%s path=%s", document_id, file_path)
                 record_metric("pipeline", "error")
-            logger.exception("pipeline failed doc=%s (cleaned from list)", document_id)
+            logger.exception("pipeline failed doc=%s (kept as error for retry)", document_id)
 
 
 async def run_resegment_pipeline(

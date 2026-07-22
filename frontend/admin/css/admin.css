@@ -1128,6 +1128,37 @@ html[data-theme="light"] .dash-welcome p {
   flex: 1 1 auto;
 }
 
+.monitor-stats-list > li {
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  text-align: left;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+}
+
+.monitor-stats-list .monitor-stat-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.monitor-stats-list .monitor-stat-value {
+  flex: 0 0 auto;
+  margin-left: auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--admin-ink-1, var(--color-text));
+  white-space: nowrap;
+}
+
 .monitor-live-badge {
   display: inline-flex;
   align-items: center;
@@ -2048,7 +2079,78 @@ html[data-theme="dark"] .kb-card-actions .btn.kb-card-btn-del:active:not(:disabl
   }
 }
 
-/* 副标题按钮：知识库管理 / 文档详情 / 文档上传 / 历史快照（及 FastAPI 页签）共用 */
+/* 工作区页签胶囊：未选中也要有可点击感；选中用主色加粗区分 */
+.kb-ws-tabs .kb-ws-tab {
+  border: 1px solid color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+  border-radius: var(--radius-pill, 999px);
+  padding: 7px 16px;
+  background: var(--btn-ghost-bg, #fff);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.25;
+  cursor: pointer;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-primary) 14%, transparent);
+  box-sizing: border-box;
+  transition:
+    transform 120ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.kb-ws-tabs .kb-ws-tab:hover {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--btn-ghost-bg, #fff));
+  color: var(--color-primary-dark, var(--color-primary));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  transform: translateY(-1px);
+}
+
+.kb-ws-tabs .kb-ws-tab:active {
+  border-color: var(--color-primary-dark, var(--color-primary));
+  background: color-mix(in srgb, var(--color-primary) 18%, var(--btn-ghost-bg, #fff));
+  color: var(--color-primary-dark, var(--color-primary));
+  box-shadow: inset 0 1px 4px color-mix(in srgb, var(--color-primary) 22%, transparent);
+  transform: translateY(1px) scale(0.98);
+}
+
+.kb-ws-tabs .kb-ws-tab.is-active {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 20%, var(--btn-ghost-bg, #fff));
+  color: var(--color-primary-dark, var(--color-primary));
+  font-weight: 700;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+
+.kb-ws-tabs .kb-ws-tab.is-active:hover {
+  background: color-mix(in srgb, var(--color-primary) 26%, var(--btn-ghost-bg, #fff));
+  transform: none;
+}
+
+html[data-theme="dark"] .kb-ws-tabs .kb-ws-tab {
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-card, #1e2a3a));
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border));
+  color: var(--color-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="dark"] .kb-ws-tabs .kb-ws-tab:hover {
+  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-card, #1e2a3a));
+  border-color: var(--color-primary);
+  color: var(--color-primary-light, var(--color-primary));
+}
+
+html[data-theme="dark"] .kb-ws-tabs .kb-ws-tab:active,
+html[data-theme="dark"] .kb-ws-tabs .kb-ws-tab.is-active {
+  background: color-mix(in srgb, var(--color-primary) 24%, var(--color-card, #1e2a3a));
+  border-color: var(--color-primary);
+  color: var(--color-primary-light, var(--color-primary));
+}
+
+/* 副标题按钮兜底：工作区外若仍有 .kb-ws-tab（兼容） */
 .kb-ws-tab {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill, 999px);
@@ -2483,6 +2585,14 @@ html[data-theme="light"] .kb-upload-file {
   color: var(--color-primary);
 }
 
+.kb-upload-file.is-processing {
+  border-color: color-mix(in srgb, var(--color-primary, #3887f0) 35%, transparent);
+}
+
+.kb-upload-file.is-processing .kb-upload-file-status {
+  color: var(--color-primary, #3887f0);
+}
+
 .kb-upload-file.is-success {
   border-color: color-mix(in srgb, var(--color-success, #22c55e) 35%, transparent);
 }
@@ -2497,7 +2607,7 @@ html[data-theme="light"] .kb-upload-file {
 
 .kb-upload-file.is-error .kb-upload-file-status {
   color: var(--color-danger, #ef4444);
-  max-width: 46%;
+  max-width: 52%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2691,7 +2801,8 @@ html[data-theme="light"] .kb-upload-file {
 
 .table-models th,
 .table-models td {
-  overflow: hidden;
+  /* collapse + overflow:hidden 会吃掉部分行线，只剩操作列一段「断横线」 */
+  overflow: visible;
   vertical-align: middle;
   max-width: 0;
   text-align: center;
@@ -2770,6 +2881,15 @@ html[data-theme="light"] .kb-upload-file {
   max-width: none;
   overflow: visible;
   text-align: center;
+  display: table-cell;
+}
+
+.table-models td.col-actions > .cell-muted,
+.table-models td.col-actions > .text-muted {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-inline: auto;
 }
 
 /* 操作：上下两行；按钮保持 sm 固有尺寸，不拉满格子 */

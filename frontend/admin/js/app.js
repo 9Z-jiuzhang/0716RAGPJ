@@ -211,6 +211,8 @@ const MENU_GROUPS = [
 const MENUS = [...MENU_TOP, ...MENU_GROUPS.flatMap((g) => g.items)];
 
 const SIDEBAR_COLLAPSE_KEY = "admin-sidebar-collapsed";
+/** 首次进入（无本地记忆）时默认展开的分组 */
+const SIDEBAR_DEFAULT_EXPANDED = new Set(["org", "knowledge", "quality"]);
 /** 侧栏导航滚动位置：整壳重绘后恢复，避免点底部菜单时跳回顶部 */
 let sidebarNavScrollTop = 0;
 
@@ -231,6 +233,11 @@ function writeSidebarCollapsedMap(map) {
   } catch {
     /* ignore quota / private mode */
   }
+}
+
+/** 无本地记忆时：默认展开组织与权限 / 知识资产 / 质量评测，其余折叠。 */
+function isSidebarGroupCollapsedDefault(groupId) {
+  return !SIDEBAR_DEFAULT_EXPANDED.has(groupId);
 }
 
 /** 当前路径是否落在该分组的任一可见菜单下。 */
@@ -296,8 +303,12 @@ function renderShell(title) {
               const visibleItems = group.items.filter((m) => hasPermission(m.perm));
               if (!visibleItems.length) return "";
               const hasActive = menuGroupHasActivePath(group, path);
-              // 含当前页的分组始终展开；其余遵循用户折叠记忆。
-              const collapsed = hasActive ? false : Boolean(collapsedMap[group.id]);
+              // 含当前页的分组始终展开；有本地记忆则遵循；否则用首次默认展开集。
+              const collapsed = hasActive
+                ? false
+                : Object.prototype.hasOwnProperty.call(collapsedMap, group.id)
+                  ? Boolean(collapsedMap[group.id])
+                  : isSidebarGroupCollapsedDefault(group.id);
               const links = visibleItems
                 .map((m) => {
                   const active = path === m.path || (m.path !== "/admin" && path.startsWith(m.path));
@@ -1969,7 +1980,7 @@ async function pageModels() {
                         <button class="btn ${m.is_enabled ? "btn-danger" : "btn-success"} btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>
                       </div>
                     </div>`
-                        : `<span class="text-muted">—</span>`
+                        : `<span class="cell-muted">—</span>`
                     }
                   </td>
                 </tr>`
@@ -3126,7 +3137,7 @@ async function pageDocuments(kbId, opts = {}) {
     return `${(v / 1024 / 1024).toFixed(1)} MB`;
   };
 
-  /** @type {{ name: string, file?: File, status: "pending"|"uploading"|"success"|"error"|"cancelled", error?: string }[] | null} */
+  /** @type {{ name: string, file?: File, docId?: string, pipeStatus?: string, status: "pending"|"uploading"|"processing"|"ready"|"upload_error"|"error"|"cancelled", error?: string }[] | null} */
   let uploadBatch = null;
   let uploadBatchDone = false;
   let uploadCancelled = false;
@@ -3158,9 +3169,94 @@ async function pageDocuments(kbId, opts = {}) {
   const statusLabel = (item) => {
     if (item.status === "pending") return "等待中";
     if (item.status === "uploading") return "上传中…";
-    if (item.status === "success") return "成功";
+    if (item.status === "processing") {
+      const pipe = String(item.pipeStatus || "").toLowerCase();
+      const meta = DOC_STATUS_META[pipe];
+      return meta?.label ? `处理中 · ${meta.label}` : "处理中…";
+    }
+    if (item.status === "ready") return "已就绪";
     if (item.status === "cancelled") return "已取消";
+    if (item.status === "upload_error") return item.error ? `上传失败：${item.error}` : "上传失败";
+    if (item.status === "error") return item.error ? `处理失败：${item.error}` : "处理失败";
     return item.error || "失败";
+  };
+
+  const uploadRowClass = (status) => {
+    if (status === "ready") return "is-success";
+    if (status === "processing") return "is-processing";
+    if (status === "upload_error" || status === "error") return "is-error";
+    if (status === "uploading") return "is-uploading";
+    if (status === "cancelled") return "is-cancelled";
+    if (status === "pending") return "is-pending";
+    return `is-${status}`;
+  };
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const PIPE_POLL_MS = 1800;
+  const PIPE_POLL_MAX_MS = 180000;
+  let listRefreshAt = 0;
+
+  const refreshListThrottled = async () => {
+    const now = Date.now();
+    if (now - listRefreshAt < 2500) return;
+    listRefreshAt = now;
+    try {
+      await renderList();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  /** 轮询文档至 ready / error；超时也标为处理失败 */
+  const waitForPipeline = async (item) => {
+    if (!item?.docId) {
+      item.status = "error";
+      item.error = "缺少文档 ID，无法跟踪处理状态";
+      return;
+    }
+    item.status = "processing";
+    const started = Date.now();
+    while (Date.now() - started < PIPE_POLL_MAX_MS) {
+      if (uploadCancelled) {
+        item.status = "cancelled";
+        item.error = "已取消";
+        return;
+      }
+      try {
+        const doc = await api.get(`/knowledge-bases/${kbId}/documents/${item.docId}`);
+        const st = String(doc?.status || "").toLowerCase();
+        item.pipeStatus = st;
+        if (st === "ready") {
+          item.status = "ready";
+          delete item.error;
+          return;
+        }
+        if (st === "error") {
+          item.status = "error";
+          item.error = String(doc?.error_message || "处理失败").slice(0, 120);
+          return;
+        }
+        if (!DOC_BUSY_STATUSES.has(st) && st && st !== "uploaded") {
+          // 未知终态：按失败处理，避免死循环
+          item.status = "error";
+          item.error = `未知状态：${st}`;
+          return;
+        }
+      } catch (e) {
+        if (String(e.message || "").includes("不存在") || String(e.message || "").includes("404")) {
+          item.status = "error";
+          item.error = "文档已不存在或已被删除";
+          return;
+        }
+        // 瞬时错误继续轮询
+      }
+      paintDropzoneBatch();
+      await refreshListThrottled();
+      await sleep(PIPE_POLL_MS);
+    }
+    item.status = "error";
+    item.error = "处理超时，请在文档列表查看或重试";
   };
 
   const extOfName = (name) => {
@@ -3300,17 +3396,22 @@ async function pageDocuments(kbId, opts = {}) {
     const zone = document.getElementById("kbDropzone");
     if (!zone || !uploadBatch?.length) return;
     const total = uploadBatch.length;
-    const ok = uploadBatch.filter((x) => x.status === "success").length;
-    const fail = uploadBatch.filter((x) => x.status === "error").length;
+    const ready = uploadBatch.filter((x) => x.status === "ready").length;
+    const pipeFail = uploadBatch.filter((x) => x.status === "error").length;
+    const uploadFail = uploadBatch.filter((x) => x.status === "upload_error").length;
+    const fail = pipeFail + uploadFail;
     const cancelled = uploadBatch.filter((x) => x.status === "cancelled").length;
-    const doneCount = ok + fail + cancelled;
+    const processing = uploadBatch.filter((x) => x.status === "processing" || x.status === "uploading").length;
+    const pending = uploadBatch.filter((x) => x.status === "pending").length;
+    const terminal = ready + fail + cancelled;
+    const doneCount = terminal;
     const pct = Math.round((doneCount / total) * 100);
-    const busy = !uploadBatchDone;
+    const busy = !uploadBatchDone || processing > 0 || pending > 0;
     const canResume = uploadBatchDone && cancelled > 0;
     const canRetry = uploadBatchDone && fail > 0 && cancelled === 0;
     zone.classList.remove("dragover");
     zone.classList.toggle("is-uploading", busy);
-    zone.classList.toggle("is-upload-report", uploadBatchDone);
+    zone.classList.toggle("is-upload-report", uploadBatchDone && !busy);
     zone.setAttribute("aria-busy", busy ? "true" : "false");
     zone.style.pointerEvents = "";
     zone.style.cursor = "default";
@@ -3318,18 +3419,22 @@ async function pageDocuments(kbId, opts = {}) {
 
     let title;
     let lead;
-    if (busy) {
-      title = `文档上传中 · ${Math.min(doneCount + 1, total)}/${total}`;
-      lead = "正在逐个上传，可随时取消剩余文件";
+    if (busy && (pending > 0 || uploadBatch.some((x) => x.status === "uploading"))) {
+      const step = Math.min(uploadBatch.filter((x) => x.status !== "pending").length + 1, total);
+      title = `文档上传中 · ${Math.min(step, total)}/${total}`;
+      lead = "正在逐个上传；上传后仍会解析与向量化，可随时取消剩余文件";
+    } else if (busy && processing > 0) {
+      title = `处理中 · ${ready + fail}/${total}`;
+      lead = "文件已接收，正在解析 / 分段 / 向量化，请稍候";
     } else if (cancelled) {
-      title = `上传已取消 · 成功 ${ok} · 失败 ${fail} · 取消 ${cancelled}`;
-      lead = "可继续上传剩余文件，或结束本批并选择新文件";
+      title = `已结束 · 就绪 ${ready} · 失败 ${fail} · 取消 ${cancelled}`;
+      lead = "可继续上传剩余文件；处理失败项会留在文档列表，可点重试";
     } else if (fail) {
-      title = `上传完成 · 成功 ${ok} 个，失败 ${fail} 个`;
-      lead = "可在本区重试失败项；失败文件不会留在文档列表";
+      title = `已结束 · 就绪 ${ready} 个，失败 ${fail} 个`;
+      lead = "上传失败可在本区重试；处理失败会留在下方列表，也可点列表「重试」";
     } else {
-      title = `上传完成 · 全部成功（${ok} 个）`;
-      lead = "本批已全部成功，可继续选择新文件或文件夹上传";
+      title = `全部就绪（${ready} 个）`;
+      lead = "本批已全部处理完成，可继续选择新文件或文件夹上传";
     }
 
     const actionsHtml = busy
@@ -3364,9 +3469,9 @@ async function pageDocuments(kbId, opts = {}) {
         <ul class="kb-upload-file-list" role="list">
           ${uploadBatch
             .map(
-              (item) => `<li class="kb-upload-file is-${escapeHtml(item.status)}">
+              (item) => `<li class="kb-upload-file ${uploadRowClass(item.status)}">
             <span class="kb-upload-file-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
-            <span class="kb-upload-file-status">${escapeHtml(statusLabel(item))}</span>
+            <span class="kb-upload-file-status" title="${escapeHtml(statusLabel(item))}">${escapeHtml(statusLabel(item))}</span>
           </li>`
             )
             .join("")}
@@ -3398,7 +3503,7 @@ async function pageDocuments(kbId, opts = {}) {
     if (btnRetry) {
       btnRetry.onclick = (e) => {
         e.stopPropagation();
-        resumeUploadBatch("error");
+        retryFailedUploadItems();
       };
     }
     const btnCancel = document.getElementById("btnDropzoneCancel");
@@ -3437,28 +3542,45 @@ async function pageDocuments(kbId, opts = {}) {
     if (!file) throw new Error("请选择文件");
     const fd = new FormData();
     fd.append("file", file);
-    await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd, {
+    const doc = await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd, {
       signal: uploadAbort?.signal,
     });
+    return doc;
   };
 
   const markRemainingCancelled = () => {
     if (!uploadBatch) return;
     for (const item of uploadBatch) {
-      if (item.status === "pending" || item.status === "uploading") {
+      if (item.status === "pending" || item.status === "uploading" || item.status === "processing") {
         item.status = "cancelled";
         item.error = "已取消";
       }
     }
   };
 
-  /** 处理当前批次中 status=pending 的项 */
+  /** 处理当前批次中 status=pending 的项，并轮询至 ready/error */
   const runPendingUploads = async () => {
     if (!uploadBatch?.length || isUploading) return;
     const pendingCount = uploadBatch.filter((x) => x.status === "pending").length;
     if (!pendingCount) {
-      uploadBatchDone = true;
-      paintDropzoneBatch();
+      const needPoll = uploadBatch.filter((x) => x.status === "processing" && x.docId);
+      if (needPoll.length) {
+        isUploading = true;
+        uploadBatchDone = false;
+        paintDropzoneBatch();
+        try {
+          await Promise.all(needPoll.map((item) => waitForPipeline(item)));
+        } finally {
+          uploadBatchDone = true;
+          isUploading = false;
+          paintDropzoneBatch();
+          listPage = 1;
+          await renderList();
+        }
+      } else {
+        uploadBatchDone = true;
+        paintDropzoneBatch();
+      }
       return;
     }
     isUploading = true;
@@ -3476,14 +3598,18 @@ async function pageDocuments(kbId, opts = {}) {
         }
         item.status = "uploading";
         delete item.error;
+        delete item.pipeStatus;
         paintDropzoneBatch();
         try {
-          await doUploadFile(item.file);
+          const doc = await doUploadFile(item.file);
           if (uploadCancelled) {
             item.status = "cancelled";
             item.error = "已取消";
           } else {
-            item.status = "success";
+            item.docId = doc?.id ? String(doc.id) : "";
+            item.pipeStatus = String(doc?.status || "uploaded").toLowerCase();
+            item.status = "processing";
+            delete item.error;
           }
         } catch (e) {
           if (uploadCancelled || e.message === "已取消上传") {
@@ -3492,12 +3618,17 @@ async function pageDocuments(kbId, opts = {}) {
             markRemainingCancelled();
             break;
           }
-          item.status = "error";
+          item.status = "upload_error";
           item.error = e.message || "上传失败";
         }
         paintDropzoneBatch();
       }
       if (uploadCancelled) markRemainingCancelled();
+      else {
+        const toPoll = uploadBatch.filter((x) => x.status === "processing" && x.docId);
+        paintDropzoneBatch();
+        await Promise.all(toPoll.map((item) => waitForPipeline(item)));
+      }
     } finally {
       uploadBatchDone = true;
       isUploading = false;
@@ -3508,19 +3639,21 @@ async function pageDocuments(kbId, opts = {}) {
     }
   };
 
-  /** 取消后续传 / 失败重试：把目标状态重置为 pending 再跑队列 */
+  /** 取消后续传：把目标状态重置为 pending 再跑队列 */
   const resumeUploadBatch = async (fromStatus) => {
     if (!uploadBatch?.length || isUploading) return;
     let reset = 0;
     for (const item of uploadBatch) {
       if (item.status !== fromStatus) continue;
       if (!item.file) {
-        item.status = "error";
+        item.status = "upload_error";
         item.error = "文件已失效，请重新选择上传";
         continue;
       }
       item.status = "pending";
       delete item.error;
+      delete item.docId;
+      delete item.pipeStatus;
       reset += 1;
     }
     if (!reset) {
@@ -3528,6 +3661,68 @@ async function pageDocuments(kbId, opts = {}) {
       return;
     }
     await runPendingUploads();
+  };
+
+  /** 失败重试：上传失败重新传文件；处理失败调 retry API 再轮询 */
+  const retryFailedUploadItems = async () => {
+    if (!uploadBatch?.length || isUploading) return;
+    const uploadFails = uploadBatch.filter((x) => x.status === "upload_error");
+    const pipeFails = uploadBatch.filter((x) => x.status === "error");
+    if (!uploadFails.length && !pipeFails.length) return;
+
+    uploadCancelled = false;
+    for (const item of uploadFails) {
+      if (!item.file) {
+        item.status = "upload_error";
+        item.error = "文件已失效，请重新选择上传";
+        continue;
+      }
+      item.status = "pending";
+      delete item.error;
+      delete item.docId;
+      delete item.pipeStatus;
+    }
+
+    const hadPending = uploadBatch.some((x) => x.status === "pending");
+    if (hadPending) {
+      await runPendingUploads();
+    }
+
+    const stillPipe = uploadBatch.filter((x) => x.status === "error" && x.docId);
+    if (!stillPipe.length || uploadCancelled) {
+      paintDropzoneBatch();
+      return;
+    }
+
+    isUploading = true;
+    uploadBatchDone = false;
+    paintDropzoneBatch();
+    try {
+      for (const item of stillPipe) {
+        if (uploadCancelled) {
+          item.status = "cancelled";
+          item.error = "已取消";
+          continue;
+        }
+        item.status = "processing";
+        delete item.error;
+        paintDropzoneBatch();
+        try {
+          await api.post(`/knowledge-bases/${kbId}/documents/${item.docId}/retry`, {});
+          await waitForPipeline(item);
+        } catch (e) {
+          item.status = "error";
+          item.error = e.message || "重试失败";
+        }
+        paintDropzoneBatch();
+      }
+    } finally {
+      uploadBatchDone = true;
+      isUploading = false;
+      paintDropzoneBatch();
+      listPage = 1;
+      await renderList();
+    }
   };
 
   const doUploadFiles = async (fileListOrCollected) => {
@@ -3936,7 +4131,7 @@ async function pageDocuments(kbId, opts = {}) {
       mountEl().innerHTML = `
       ${pageHead({
         title: "文档管理",
-        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown；可拖拽文件/文件夹。失败可在上传区重试，不会留在文档列表。",
+        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown；可拖拽文件/文件夹。上传后仍会解析与向量化；处理失败会留在列表并可重试。",
         actions: docActions,
       })}
       ${
@@ -3991,7 +4186,11 @@ async function pageDocuments(kbId, opts = {}) {
                   <td class="col-name"><span class="cell-primary">${escapeHtml(d.filename || d.name)}</span></td>
                   <td class="col-size">${escapeHtml(formatSize(d.file_size ?? d.size))}</td>
                   <td class="col-num">${escapeHtml(d.chunk_count ?? 0)}</td>
-                  <td class="col-status">${docStatusBadge(st)}</td>
+                  <td class="col-status">${docStatusBadge(st)}${
+                    isError && d.error_message
+                      ? `<div class="text-danger" style="font-size:12px;margin-top:4px;line-height:1.35;max-width:9.5rem;margin-inline:auto;word-break:break-word">${escapeHtml(String(d.error_message).slice(0, 100))}</div>`
+                      : ""
+                  }</td>
                   <td class="col-actions">
                     <div class="table-actions">
                       <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">文档处理</button>
@@ -4611,8 +4810,9 @@ async function pageHitTest() {
   const recallTipOf = (chunks) =>
     (chunks || [])
       .slice(0, 2)
-      .map((c) => `${c.doc_name || c.doc_id || ""}#${c.chunk_index ?? ""}`)
-      .join("；");
+      .map((c) => escapeHtml(`${c.doc_name || c.doc_id || ""}#${c.chunk_index ?? ""}`))
+      .filter(Boolean)
+      .join("；<br />");
 
   const answerPreviewOf = (chunks) => {
     const first = (chunks || [])[0];
@@ -4644,6 +4844,9 @@ async function pageHitTest() {
             const chunks = r.actual_chunks || [];
             const tip = recallTipOf(chunks);
             const answer = answerPreviewOf(chunks);
+            const hitRatio = r.is_hit ? "1/1" : "0/1";
+            const hitPct = r.score != null ? pct(r.score) : "—";
+            const strategyText = strategyLabel(r.strategy || summary?.strategy);
             return `<tr>
               <td class="col-status ht-hit-cell">${r.is_hit ? `<span class="badge badge-success">是</span>` : `<span class="badge badge-danger">否</span>`}</td>
               <td class="ht-q-cell">
@@ -4654,20 +4857,35 @@ async function pageHitTest() {
                   <div class="ht-qa-detail${answer ? "" : " text-muted"}">${escapeHtml(answer || "—")}</div>
                 </div>
               </td>
-              <td>${pct(r.score)}</td>
-              <td>${escapeHtml(r.elapsed_ms != null ? `${r.elapsed_ms}ms` : "-")}</td>
-              <td class="text-muted ht-recall-cell">${escapeHtml(tip || "无召回")}</td>
+              <td class="ht-frag-cell">
+                <div class="ht-frag-stack">
+                  <span class="ht-frag-ratio">${escapeHtml(hitRatio)}</span>
+                  <span class="ht-frag-pct">${escapeHtml(hitPct)}</span>
+                </div>
+              </td>
+              <td class="ht-strategy-cell">${escapeHtml(strategyText)}</td>
+              <td class="ht-elapsed-cell">${escapeHtml(r.elapsed_ms != null ? `${r.elapsed_ms}ms` : "-")}</td>
+              <td class="text-muted ht-recall-cell">${tip || "无召回"}</td>
             </tr>`;
           })
           .join("")
-      : `<tr><td colspan="5" class="text-muted">无明细</td></tr>`;
+      : `<tr><td colspan="6" class="text-muted">无明细</td></tr>`;
     body.innerHTML = `<div class="table-wrap ht-detail-table-wrap"><table class="table table-fit ht-detail-table">
+      <colgroup>
+        <col class="ht-detail-col-hit" />
+        <col class="ht-detail-col-qa" />
+        <col class="ht-detail-col-frag" />
+        <col class="ht-detail-col-strategy" />
+        <col class="ht-detail-col-elapsed" />
+        <col class="ht-detail-col-recall" />
+      </colgroup>
       <thead><tr>
         <th class="col-status">命中</th>
         <th class="ht-q-col">问题 / 回答</th>
-        <th>命中片段相关度</th>
-        <th>耗时</th>
-        <th>召回详情</th>
+        <th class="ht-frag-col">命中片段</th>
+        <th class="ht-strategy-col">策略</th>
+        <th class="ht-elapsed-col">耗时</th>
+        <th class="ht-recall-col">召回详情</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
@@ -4822,7 +5040,6 @@ async function pageHitTest() {
       ${pageHead({
         title: "命中率测试",
         desc: "多选用例按序执行；也可填写临时问题做检索冒烟。配置期望文档后可计算真实命中率。",
-        actions: canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnNewCase">新建用例</button>` : "",
       })}
       <div class="page-grid">
       <div class="card span-12">
@@ -4890,17 +5107,22 @@ async function pageHitTest() {
       <div class="card span-6 panel-fill">
           <div class="card-header">
             <div class="card-header-text"><h3 class="card-title">测试用例</h3></div>
-            <div class="card-header-actions">
-            ${
-              cases.length
-                ? `<button type="button" class="btn btn-secondary btn-sm" id="btnSelectAllCases">全选</button>
-                   <button type="button" class="btn btn-secondary btn-sm" id="btnInvertCases">反选</button>`
-                : ""
-            }
-            </div>
           </div>
-          <div class="table-wrap"><table class="table" id="htCaseTable">
-            <thead><tr><th style="width:96px">选用</th><th>名称</th><th>题数</th><th>说明</th><th class="col-actions">操作</th></tr></thead>
+          <div class="table-wrap"><table class="table table-ht-cases" id="htCaseTable">
+            <colgroup>
+              <col class="ht-cases-col-check" />
+              <col class="ht-cases-col-name" />
+              <col class="ht-cases-col-num" />
+              <col class="ht-cases-col-desc" />
+              <col class="ht-cases-col-actions" />
+            </colgroup>
+            <thead><tr>
+              <th class="col-check"><input type="checkbox" id="htCaseSelectAll" title="全选" aria-label="全选用例" ${cases.length ? "" : "disabled"} /></th>
+              <th class="col-name">名称</th>
+              <th class="col-num">题数</th>
+              <th class="col-desc">说明</th>
+              <th class="col-actions">操作</th>
+            </tr></thead>
             <tbody>
               ${
                 cases.length
@@ -4908,32 +5130,37 @@ async function pageHitTest() {
                       .map((c) => {
                         const cid = String(c.id);
                         return `<tr class="ht-case-row" data-case-row="${escapeHtml(cid)}">
-                          <td>
-                            <label class="ht-pick" data-pick-wrap="${escapeHtml(cid)}">
-                              <input type="checkbox" value="${escapeHtml(cid)}" data-pick-case="${escapeHtml(cid)}" />
-                              <span data-pick-label>选用</span>
-                            </label>
+                          <td class="col-check">
+                            <input type="checkbox" value="${escapeHtml(cid)}" data-pick-case="${escapeHtml(cid)}" aria-label="选用用例" />
                           </td>
-                          <td>${escapeHtml(c.name)}</td>
-                          <td>${escapeHtml(c.question_count)}</td>
-                          <td class="text-muted" style="max-width:180px">${escapeHtml(c.description || "-")}</td>
+                          <td class="col-name">${escapeHtml(c.name)}</td>
+                          <td class="col-num">${escapeHtml(c.question_count)}</td>
+                          <td class="col-desc">${escapeHtml(c.description || "-")}</td>
                           <td class="col-actions">
-                            <div class="table-actions">
-                              <button type="button" class="btn btn-secondary btn-sm" data-view-case="${escapeHtml(cid)}">查看</button>
-                              ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" data-edit-case="${escapeHtml(cid)}">编辑</button>` : ""}
-                              ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-case="${escapeHtml(cid)}">删除</button>` : ""}
-                            </div>
+                            ${
+                              canWrite
+                                ? `<div class="table-actions table-actions-stack ht-case-actions">
+                              <div class="table-actions-row">
+                                <button type="button" class="btn btn-secondary btn-sm" data-edit-case="${escapeHtml(cid)}">编辑</button>
+                              </div>
+                              <div class="table-actions-row">
+                                <button type="button" class="btn btn-danger btn-sm" data-del-case="${escapeHtml(cid)}">清除</button>
+                              </div>
+                            </div>`
+                                : `<span class="cell-muted">—</span>`
+                            }
                           </td>
                         </tr>`;
                       })
                       .join("")
-                  : `<tr><td colspan="5" class="text-muted">暂无用例，请点右上角「新建用例」</td></tr>`
+                  : `<tr><td colspan="5" class="text-muted">暂无用例${canWrite ? "，请点击下方「新建用例」" : ""}</td></tr>`
               }
             </tbody>
           </table></div>
           ${
             canWrite
               ? `<div class="ht-case-card-footer">
+                   <button type="button" class="btn btn-sm" id="btnNewCase">新建用例</button>
                    <button type="button" class="btn btn-secondary btn-sm" id="btnCompare">多策略对比</button>
                  </div>`
               : ""
@@ -4950,8 +5177,23 @@ async function pageHitTest() {
             }
             </div>
           </div>
-          <div class="table-wrap"><table class="table" id="htRunTable">
-            <thead><tr><th>用例</th><th>相关性</th><th>命中</th><th>策略</th><th class="col-time">时间</th><th class="col-actions">操作</th></tr></thead>
+          <div class="table-wrap"><table class="table table-ht-runs" id="htRunTable">
+            <colgroup>
+              <col class="ht-runs-col-case" />
+              <col class="ht-runs-col-score" />
+              <col class="ht-runs-col-hit" />
+              <col class="ht-runs-col-strategy" />
+              <col class="ht-runs-col-time" />
+              <col class="ht-runs-col-actions" />
+            </colgroup>
+            <thead><tr>
+              <th class="col-name">用例</th>
+              <th class="col-score">相关性</th>
+              <th class="col-hit">命中</th>
+              <th class="col-strategy">策略</th>
+              <th class="col-time">时间</th>
+              <th class="col-actions">操作</th>
+            </tr></thead>
             <tbody id="htRunTableBody"></tbody>
           </table></div>
           <div class="pager pager-stack" id="htRunPager" hidden></div>
@@ -4988,15 +5230,16 @@ async function pageHitTest() {
         tr.classList.toggle("is-selected", on);
       });
       document.querySelectorAll("[data-pick-case]").forEach((input) => {
-        const on = selected.has(input.value);
-        input.checked = on;
-        const wrap = input.closest(".ht-pick");
-        if (wrap) {
-          wrap.classList.toggle("is-on", on);
-          const label = wrap.querySelector("[data-pick-label]");
-          if (label) label.textContent = on ? "已选" : "选用";
-        }
+        input.checked = selected.has(input.value);
       });
+      const selectAll = document.getElementById("htCaseSelectAll");
+      if (selectAll) {
+        const total = cases.length;
+        const n = selectedCaseIds.filter((id) => cases.some((c) => String(c.id) === id)).length;
+        selectAll.checked = total > 0 && n === total;
+        selectAll.indeterminate = n > 0 && n < total;
+        selectAll.disabled = total === 0;
+      }
       const picked = selectedCaseIds
         .map((id) => cases.find((c) => String(c.id) === id))
         .filter(Boolean);
@@ -5038,20 +5281,6 @@ async function pageHitTest() {
         setCaseSelected(input.value, !!input.checked);
       });
       caseTable.addEventListener("click", (e) => {
-        const viewBtn = e.target.closest("[data-view-case]");
-        if (viewBtn) {
-          const c = cases.find((x) => String(x.id) === viewBtn.getAttribute("data-view-case"));
-          if (!c) return;
-          const qs = (c.questions || [])
-            .map((q, i) => `${i + 1}. ${q.question}${q.expected_doc_ids?.length ? " 〔有期望文档〕" : ""}`)
-            .join("\n");
-          openWideModal({
-            title: c.name,
-            bodyHtml: `<pre style="white-space:pre-wrap;font-size:13px;margin:0">${escapeHtml(qs || "无问题")}</pre>`,
-            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
-          });
-          return;
-        }
         const editBtn = e.target.closest("[data-edit-case]");
         if (editBtn) {
           const c = cases.find((x) => String(x.id) === String(editBtn.getAttribute("data-edit-case")));
@@ -5062,18 +5291,18 @@ async function pageHitTest() {
         if (delBtn) {
           (async () => {
             const ok = await confirmDialog({
-              title: "删除用例",
-              message: "确定删除该测试用例？",
-              confirmText: "删除",
+              title: "清除用例",
+              message: "确定清除该测试用例？",
+              confirmText: "清除",
               danger: true,
             });
             if (!ok) return;
             try {
               await api.delete(`/hit-tests/cases/${delBtn.getAttribute("data-del-case")}`);
-              toast("已删除", "success");
+              toast("已清除", "success");
               pageHitTest();
             } catch (err) {
-              toast(err.message || "删除失败", "error");
+              toast(err.message || "清除失败", "error");
             }
           })();
         }
@@ -5082,20 +5311,12 @@ async function pageHitTest() {
 
     syncSelectionUi({ persist: false });
 
-    const btnSelectAll = document.getElementById("btnSelectAllCases");
-    if (btnSelectAll) {
-      btnSelectAll.onclick = () => {
-        selectedCaseIds = cases.map((c) => String(c.id));
+    const htCaseSelectAll = document.getElementById("htCaseSelectAll");
+    if (htCaseSelectAll) {
+      htCaseSelectAll.addEventListener("change", () => {
+        selectedCaseIds = htCaseSelectAll.checked ? cases.map((c) => String(c.id)) : [];
         syncSelectionUi();
-      };
-    }
-    const btnInvert = document.getElementById("btnInvertCases");
-    if (btnInvert) {
-      btnInvert.onclick = () => {
-        const cur = new Set(selectedCaseIds);
-        selectedCaseIds = cases.map((c) => String(c.id)).filter((id) => !cur.has(id));
-        syncSelectionUi();
-      };
+      });
     }
 
     const btnClear = document.getElementById("btnClearCase");
@@ -5135,13 +5356,18 @@ async function pageHitTest() {
       tbody.innerHTML = pageItems
         .map(
           (r) => `<tr data-run-row="${escapeHtml(String(r.id))}">
-            <td style="max-width:140px">${escapeHtml(caseNameOf(r.case_id))}</td>
-            <td><strong>${pct(r.score)}</strong></td>
-            <td>${escapeHtml(r.hit_count)}/${escapeHtml(r.total_questions)}${r.hit_rate != null ? `（${pct(r.hit_rate)}）` : ""}</td>
-            <td>${escapeHtml(strategyLabel(r.strategy))}</td>
+            <td class="col-name">${escapeHtml(caseNameOf(r.case_id))}</td>
+            <td class="col-score"><strong>${pct(r.score)}</strong></td>
+            <td class="col-hit">
+              <div class="ht-run-hit-stack">
+                <span class="ht-run-hit-ratio">${escapeHtml(r.hit_count)}/${escapeHtml(r.total_questions)}</span>
+                <span class="ht-run-hit-pct">${r.hit_rate != null ? escapeHtml(pct(r.hit_rate)) : "—"}</span>
+              </div>
+            </td>
+            <td class="col-strategy">${escapeHtml(strategyLabel(r.strategy))}</td>
             <td class="col-time">${formatDateTimeHtml(r.completed_at || r.created_at)}</td>
             <td class="col-actions">
-              <div class="table-actions table-actions-col">
+              <div class="table-actions table-actions-col ht-run-actions">
                 <button type="button" class="btn btn-secondary btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
                 ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">清除</button>` : ""}
               </div>
@@ -6090,10 +6316,10 @@ async function openRoleCacheQuestions(roleId, cacheName, options = {}) {
     mask.innerHTML = `
       <div class="modal" role="dialog" aria-modal="true" style="width:min(1000px,calc(100vw - 24px));max-height:90vh;overflow:auto">
         <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-          <h3 style="margin:0">${escapeHtml(cacheName || "缓存问题明细")}</h3>
+          <h3 style="margin:0;min-width:0">${escapeHtml(cacheName || "缓存问题明细")}</h3>
           ${
             canWrite
-              ? `<button type="button" class="btn btn-secondary btn-sm" data-cache-detect-doc>检测文档</button>`
+              ? `<button type="button" class="btn btn-secondary btn-sm" data-cache-detect-doc style="flex-shrink:0;white-space:nowrap">检测文档</button>`
               : ""
           }
         </div>
@@ -6809,14 +7035,14 @@ async function pageMonitor() {
   }
   const statsHtml =
     stats && !stats.error
-      ? `<ul class="list-plain">
-        <li>用户数：${stats.user_count ?? 0}</li>
-        <li>知识库：${stats.kb_count ?? 0}</li>
-        <li>文档数：${stats.doc_count ?? 0}</li>
-        <li>活跃会话：${stats.active_sessions ?? 0}</li>
-        <li>任务队列：${stats.task_queue_size ?? 0}</li>
-        <li>LLM Guard 近 24 小时阻拦：${stats.guard_blocked_24h ?? 0}</li>
-        <li>LLM Guard 近 7 天阻拦：${stats.guard_blocked_7d ?? 0}</li>
+      ? `<ul class="list-plain monitor-stats-list">
+        <li><span class="monitor-stat-label">用户数</span><span class="monitor-stat-value">${stats.user_count ?? 0}</span></li>
+        <li><span class="monitor-stat-label">知识库</span><span class="monitor-stat-value">${stats.kb_count ?? 0}</span></li>
+        <li><span class="monitor-stat-label">文档数</span><span class="monitor-stat-value">${stats.doc_count ?? 0}</span></li>
+        <li><span class="monitor-stat-label">活跃会话</span><span class="monitor-stat-value">${stats.active_sessions ?? 0}</span></li>
+        <li><span class="monitor-stat-label">任务队列</span><span class="monitor-stat-value">${stats.task_queue_size ?? 0}</span></li>
+        <li><span class="monitor-stat-label">LLM Guard 近 24 小时阻拦</span><span class="monitor-stat-value">${stats.guard_blocked_24h ?? 0}</span></li>
+        <li><span class="monitor-stat-label">LLM Guard 近 7 天阻拦</span><span class="monitor-stat-value">${stats.guard_blocked_7d ?? 0}</span></li>
       </ul>`
       : `<p class="text-muted">${escapeHtml(stats?.error || "暂无统计")}</p>`;
   document.getElementById("pageRoot").innerHTML = `

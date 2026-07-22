@@ -248,13 +248,37 @@
 }
 
 #htRunDetailCard .ht-detail-table {
+  table-layout: fixed;
+  width: 100%;
   border-collapse: collapse;
+}
+
+/* 列宽：短列够放表头不换行；问题列减浪费；召回给长文件名 */
+#htRunDetailCard .ht-detail-table col.ht-detail-col-hit {
+  width: 3.75rem;
+}
+#htRunDetailCard .ht-detail-table col.ht-detail-col-qa {
+  width: 34%;
+}
+#htRunDetailCard .ht-detail-table col.ht-detail-col-frag {
+  width: 7rem;
+}
+#htRunDetailCard .ht-detail-table col.ht-detail-col-strategy {
+  width: 4rem;
+}
+#htRunDetailCard .ht-detail-table col.ht-detail-col-elapsed {
+  width: 4.5rem;
+}
+#htRunDetailCard .ht-detail-table col.ht-detail-col-recall {
+  width: 30%;
 }
 
 /* 极细蓝色表格竖线 */
 #htRunDetailCard .ht-detail-table th,
 #htRunDetailCard .ht-detail-table td {
   border-right: 1px solid color-mix(in srgb, var(--color-primary, #3b82f6) 28%, transparent);
+  text-align: center;
+  vertical-align: middle;
 }
 
 #htRunDetailCard .ht-detail-table th:last-child,
@@ -262,17 +286,76 @@
   border-right: none;
 }
 
+#htRunDetailCard .ht-detail-table th.col-status,
+#htRunDetailCard .ht-detail-table th.ht-frag-col,
+#htRunDetailCard .ht-detail-table th.ht-strategy-col,
+#htRunDetailCard .ht-detail-table th.ht-elapsed-col {
+  white-space: nowrap;
+}
+
 #htRunDetailCard .ht-detail-table th.ht-q-col,
 #htRunDetailCard .ht-detail-table td.ht-q-cell {
-  width: 52%;
-  min-width: 18rem;
+  width: auto;
+  min-width: 0;
+  text-align: left;
 }
 
 #htRunDetailCard .ht-hit-cell {
-  width: 4.5rem;
+  width: 3.75rem;
   vertical-align: middle;
   padding-top: 12px;
   padding-bottom: 12px;
+}
+
+#htRunDetailCard .ht-frag-col,
+#htRunDetailCard .ht-frag-cell {
+  width: 7rem;
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+#htRunDetailCard .ht-frag-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  text-align: center;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+#htRunDetailCard .ht-frag-ratio {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#htRunDetailCard .ht-frag-pct {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+#htRunDetailCard .ht-strategy-col,
+#htRunDetailCard .ht-strategy-cell {
+  width: 4rem;
+  text-align: center;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+#htRunDetailCard .ht-elapsed-col,
+#htRunDetailCard .ht-elapsed-cell {
+  width: 4.5rem;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
 }
 
 #htRunDetailCard .ht-q-cell {
@@ -325,17 +408,22 @@
   overflow: visible;
 }
 
+#htRunDetailCard .ht-recall-col,
 #htRunDetailCard .ht-recall-cell {
-  width: 14%;
+  width: auto;
+  min-width: 0;
   white-space: normal !important;
   font-size: var(--font-size-xs);
   word-break: break-word;
+  overflow-wrap: anywhere;
   vertical-align: middle;
   padding-top: 12px;
   padding-bottom: 12px;
+  text-align: center;
+  line-height: 1.45;
 }
 
-/* 命中 / 相关度 / 耗时 / 召回：上下居中；问题列仍顶对齐便于阅读长文 */
+/* 命中 / 片段 / 策略 / 耗时 / 召回：上下居中；问题列仍顶对齐便于阅读长文 */
 #htRunDetailCard .ht-detail-table td:not(.ht-q-cell) {
   white-space: normal;
   vertical-align: middle;
@@ -345,33 +433,223 @@
   vertical-align: top;
 }
 
-/* 运行记录：操作按钮上下两行，让出列宽 */
-#htRunTable td.col-actions {
-  width: 5.25rem;
-  min-width: 5.25rem;
-  max-width: 5.75rem;
+#htRunDetailCard .ht-detail-table td.ht-strategy-cell,
+#htRunDetailCard .ht-detail-table td.ht-elapsed-cell {
+  white-space: nowrap;
 }
 
-#htRunTable .table-actions.table-actions-col {
-  display: grid;
-  grid-template-columns: 1fr;
+/* 运行记录：操作上下两行；按钮保持 sm 固有尺寸 */
+#htRunTable th.col-actions,
+#htRunTable td.col-actions {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  max-width: 5.5rem;
+}
+
+#htRunTable .table-actions.table-actions-col,
+#htRunTable .table-actions.ht-run-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
-  width: 100%;
-  min-width: 0;
-  max-width: 5.25rem;
+  width: auto;
+  max-width: 100%;
   margin-inline: auto;
 }
 
-#htRunTable .table-actions.table-actions-col > .btn {
-  width: 100%;
+#htRunTable .table-actions.ht-run-actions > .btn {
+  width: auto !important;
+  min-width: 4.5rem;
+  max-width: none;
+  height: auto;
+  min-height: 28px;
+  padding: 0 12px;
+  flex: 0 0 auto;
 }
 
 .ht-case-card-footer {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 12px;
   padding-top: 4px;
+}
+
+.ht-case-card-footer .btn-sm {
+  min-width: 6.5rem;
+}
+
+/*
+ * 测试用例表列宽（半宽卡片）
+ * 勾选/题数/操作收紧；说明吃剩余；名称中等可换行。
+ */
+#htCaseTable,
+.table-ht-cases {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+#htCaseTable col.ht-cases-col-check {
+  width: 2.75rem;
+}
+#htCaseTable col.ht-cases-col-name {
+  width: 28%;
+}
+#htCaseTable col.ht-cases-col-num {
+  width: 3.5rem;
+}
+#htCaseTable col.ht-cases-col-desc {
+  width: auto;
+}
+#htCaseTable col.ht-cases-col-actions {
+  width: 5.5rem;
+}
+
+#htCaseTable th,
+#htCaseTable td {
+  text-align: center;
+  vertical-align: middle;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  overflow: visible;
+  max-width: none;
+}
+
+#htCaseTable th.col-check,
+#htCaseTable td.col-check {
+  width: 2.75rem;
+  max-width: 2.75rem;
+}
+
+#htCaseTable th.col-num,
+#htCaseTable td.col-num {
+  width: 3.5rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+#htCaseTable th.col-actions,
+#htCaseTable td.col-actions {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  max-width: 5.5rem;
+}
+
+#htCaseTable .table-actions.ht-case-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+#htCaseTable .table-actions.ht-case-actions .table-actions-row {
+  display: flex;
+  justify-content: center;
+  width: auto;
+}
+
+#htCaseTable .table-actions.ht-case-actions .btn {
+  width: auto !important;
+  min-width: 4.5rem;
+  max-width: none;
+  height: auto;
+  min-height: 28px;
+  padding: 0 12px;
+  flex: 0 0 auto;
+}
+
+/*
+ * 运行记录表列宽（半宽卡片）
+ * 用例/时间给足；相关性/策略/操作收紧；命中两行避免「1/1（100%）」挤换行。
+ */
+#htRunTable,
+.table-ht-runs {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+#htRunTable col.ht-runs-col-case {
+  width: 26%;
+}
+#htRunTable col.ht-runs-col-score {
+  width: 4.25rem;
+}
+#htRunTable col.ht-runs-col-hit {
+  width: 4.75rem;
+}
+#htRunTable col.ht-runs-col-strategy {
+  width: 3.5rem;
+}
+#htRunTable col.ht-runs-col-time {
+  width: 6.75rem;
+}
+#htRunTable col.ht-runs-col-actions {
+  width: 5.5rem;
+}
+
+#htRunTable th,
+#htRunTable td {
+  text-align: center;
+  vertical-align: middle;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  overflow: visible;
+  max-width: none;
+}
+
+#htRunTable th.col-score,
+#htRunTable td.col-score,
+#htRunTable th.col-strategy,
+#htRunTable td.col-strategy {
+  white-space: nowrap;
+}
+
+#htRunTable th.col-hit,
+#htRunTable td.col-hit {
+  white-space: normal;
+}
+
+#htRunTable .ht-run-hit-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+#htRunTable .ht-run-hit-ratio {
+  font-weight: 600;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+#htRunTable .ht-run-hit-pct {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+#htRunTable th.col-name,
+#htRunTable td.col-name {
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .pager-stack {
@@ -1240,13 +1518,20 @@ html[data-theme="dark"] select.form-control option {
   justify-self: center;
 }
 
-/* 未包 table-actions、但单元格内直接放多个按钮时，同样两列换行 */
-.table td.col-actions:not(.col-actions-detail):not(:has(.table-actions)) {
+/* 未包 table-actions、但单元格内直接放按钮时，同样两列换行（纯文案/占位不改 display，避免断横线与偏左） */
+.table td.col-actions:not(.col-actions-detail):has(> .btn):not(:has(.table-actions)) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   align-items: stretch;
   justify-items: stretch;
+}
+
+.table td.col-actions > .cell-muted {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-inline: auto;
 }
 
 /* 表格内状态标签：完整显示，永不省略 */
@@ -1706,6 +1991,7 @@ html[data-theme="dark"] .modal-panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
@@ -1715,6 +2001,14 @@ html[data-theme="dark"] .modal-panel {
   font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--color-text);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.modal-header > .btn,
+.modal-header > .btn-sm {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .modal-body {
