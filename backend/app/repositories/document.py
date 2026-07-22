@@ -33,7 +33,7 @@ async def list_documents(
     page_size: int = 20,
     keyword: str | None = None,
 ) -> tuple[list[Document], int]:
-    filters = [Document.kb_id == kb_id]
+    filters = [Document.kb_id == kb_id, Document.status != "archived"]
     if keyword:
         filters.append(Document.filename.ilike(f"%{keyword}%"))
     total = await db.scalar(select(func.count()).select_from(Document).where(*filters)) or 0

@@ -228,6 +228,20 @@ async def rollback_snapshot(
             await db.rollback()
         raise
 
+    # 创建可轮询的向量化任务，供管理端 vectorize-status 进度条使用
+    from app.services.task_queue import TaskQueueService
+
+    task = await TaskQueueService(db).enqueue_task(
+        kb_id,
+        "rollback_rebuild",
+        payload={
+            "total_count": len(data.restored_document_ids or []),
+            "target_version": data.after_version,
+            "document_ids": [str(x) for x in (data.restored_document_ids or [])],
+            "user_id": str(current_user.id),
+        },
+    )
+
     background_tasks.add_task(
         run_rollback_rebuild,
         kb_id=kb_id,
@@ -235,6 +249,7 @@ async def rollback_snapshot(
         document_ids=list(data.restored_document_ids or []),
         operator_id=current_user.id,
         request_id=request_id,
+        task_id=task.id,
     )
     return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
 

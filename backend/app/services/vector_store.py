@@ -67,6 +67,36 @@ def upsert_chunks(
         raise
 
 
+def delete_document_vectors_in_version(
+    kb_id: UUID | str,
+    document_id: UUID | str,
+    index_version: str,
+) -> None:
+    """仅删除某文档在指定索引版本集合中的向量，保留其他版本（回退重建用）。"""
+    try:
+        from app.services.chroma_store import chroma_store
+
+        col = chroma_store.get_collection(kb_id, index_version)
+        if col is None:
+            return
+        try:
+            col.delete(where={"doc_id": str(document_id)})
+        except Exception:
+            pass
+        try:
+            col.delete(where={"document_id": str(document_id)})
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning(
+            "按版本删除向量失败 kb=%s doc=%s ver=%s: %s",
+            kb_id,
+            document_id,
+            index_version,
+            exc,
+        )
+
+
 def delete_document_vectors(kb_id: UUID | str, document_id: UUID | str) -> None:
     """删除某文档在各索引版本集合中的向量（尽力而为）。"""
     try:

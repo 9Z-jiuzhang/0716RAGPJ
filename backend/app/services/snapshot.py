@@ -280,7 +280,15 @@ class SnapshotService:
             }
             for p in (kb.permissions or [])
         ]
-        if snap_perms != cur_perms:
+
+        def _perm_key(item: dict[str, Any]) -> tuple:
+            return (
+                item.get("permission_code") or "",
+                item.get("user_id") or "",
+                item.get("role_id") or "",
+            )
+
+        if sorted(snap_perms, key=_perm_key) != sorted(cur_perms, key=_perm_key):
             changes.append(ConfigChangeItem(field="permissions", current=cur_perms, snapshot=snap_perms))
         return changes
 
@@ -334,6 +342,8 @@ class SnapshotService:
         snap_doc: SnapshotDocument,
         operator_id: UUID,
         current_map: dict[UUID, Document],
+        *,
+        clear_chunks: bool = True,
     ) -> Document:
         """按快照文档记录恢复/更新 Document 行（含分段规则与文本版本）。"""
         from app.models.document import _default_segment_rules
@@ -413,8 +423,100 @@ class SnapshotService:
             if chunks:
                 await doc_repo.replace_chunks(self.db, doc, chunks)
                 doc.status = "ready"
+        elif clear_chunks:
+            # 避免复用回退前旧分段；重建阶段按恢复文本重切
+            await doc_repo.replace_chunks(self.db, doc, [])
+            if has_text:
+                doc.status = "pending_segment"
 
         return doc
+
+    async def _materialize_chunks_from_text(self, doc: Document) -> None:
+        """仅按当前文本重写 PG 分段，不触碰向量库（失败补偿用）。"""
+        from app.repositories import document as doc_repo
+        from app.services.chunking import adapt_rules_for_file_type, merge_rules, split_text
+
+        source = (doc.normalized_text or doc.raw_text or "").strip()
+        if not source:
+            await doc_repo.replace_chunks(self.db, doc, [])
+            return
+        rules = adapt_rules_for_file_type(merge_rules(doc.segment_rules, None), doc.file_type)
+        previews = split_text(source, rules)
+        chunks = [
+            DocumentChunk(
+                kb_id=doc.kb_id,
+                chunk_index=p.chunk_index,
+                content=p.content,
+                char_count=p.char_count,
+                chunk_metadata=p.metadata,
+                is_enabled=True,
+            )
+            for p in previews
+        ]
+        await doc_repo.replace_chunks(self.db, doc, chunks)
+        doc.status = "ready"
+        await self.db.flush()
+
+    async def compensate_from_protection(
+        self,
+        kb_id: UUID,
+        protection_snapshot_id: UUID,
+        operator_id: UUID | None,
+        request_id: str | None = None,
+    ) -> None:
+        """回退重建失败时，用保护快照恢复文档/配置到回退前状态（不切换索引版本）。"""
+        kb = await self._get_kb_or_404(kb_id, for_update=True, load_relations=True)
+        snap = await self.repo.get_by_id(protection_snapshot_id, kb_id=kb_id)
+        if snap is None:
+            kb.status = "active"
+            await self.db.flush()
+            return
+
+        op = operator_id or kb.creator_id
+        current_map = {d.id: d for d in (kb.documents or [])}
+        snap_ids = {d.document_id for d in (snap.documents or [])}
+
+        for snap_doc in snap.documents or []:
+            # 补偿时清分段后立刻按文本物化，避免残留回退目标文本对应的分段
+            doc = await self._restore_document_from_snap(
+                kb, snap_doc, op, current_map, clear_chunks=True
+            )
+            await self._materialize_chunks_from_text(doc)
+
+        for doc in list(current_map.values()):
+            if doc.id not in snap_ids and doc.status != "archived":
+                doc.status = "archived"
+
+        kb_meta = (snap.config_snapshot or {}).get("kb", {})
+        if kb_meta.get("name"):
+            kb.name = kb_meta["name"]
+        if "tags" in kb_meta and kb_meta["tags"] is not None:
+            kb.tags = list(kb_meta["tags"] or [])
+        if "description" in kb_meta:
+            kb.description = kb_meta.get("description")
+        if kb_meta.get("chunk_size") is not None:
+            kb.chunk_size = kb_meta["chunk_size"]
+        if kb_meta.get("chunk_overlap") is not None:
+            kb.chunk_overlap = kb_meta["chunk_overlap"]
+        if kb_meta.get("embedding_model"):
+            kb.embedding_model = kb_meta["embedding_model"]
+        if kb_meta.get("visibility"):
+            kb.visibility = kb_meta["visibility"]
+
+        await self._restore_kb_segment_rules(kb, snap)
+        await self._restore_permissions(kb, snap)
+        kb.status = "active"
+        await self.db.flush()
+
+        await self.audit.log(
+            action="snapshot.rollback_compensate",
+            resource_type="kb",
+            resource_id=str(kb_id),
+            user_id=operator_id,
+            detail={"protection_snapshot_id": str(protection_snapshot_id)},
+            request_id=request_id,
+            result="success",
+        )
 
     async def _restore_permissions(self, kb: KnowledgeBase, snap: Snapshot) -> None:
         """整库回退时按快照重建 kb_permissions。"""
@@ -707,6 +809,12 @@ class SnapshotService:
                         pass
 
             kb_meta = (snap.config_snapshot or {}).get("kb", {})
+            if kb_meta.get("name"):
+                kb.name = kb_meta["name"]
+            if "tags" in kb_meta and kb_meta["tags"] is not None:
+                kb.tags = list(kb_meta["tags"] or [])
+            if "description" in kb_meta:
+                kb.description = kb_meta.get("description")
             if kb_meta.get("chunk_size") is not None:
                 kb.chunk_size = kb_meta["chunk_size"]
             if kb_meta.get("chunk_overlap") is not None:
@@ -720,8 +828,16 @@ class SnapshotService:
             await self._restore_permissions(kb, snap)
 
         # 5) 创建新索引版本（building），不覆盖历史、暂不激活
+        # 选择性回退也必须把未选中但仍有效的文档写入新版本，否则 activate 后检索丢失
+        rebuild_ids = [
+            d.id
+            for d in current_map.values()
+            if d.status not in ("archived", "deleted")
+        ]
         version_code = f"v{utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}-restore"
-        total_chunks = sum(d.chunk_count for d in target_docs)
+        total_chunks = sum(
+            (current_map[i].chunk_count or 0) for i in rebuild_ids if i in current_map
+        )
         index_version = IndexVersion(
             kb_id=kb.id,
             version=version_code,
@@ -733,7 +849,8 @@ class SnapshotService:
                 "protection_snapshot_id": str(protection.id),
                 "segment_rules": (snap.config_snapshot or {}).get("segment_rules", {}),
                 "kb_meta": (snap.config_snapshot or {}).get("kb", {}),
-                "document_ids": [str(d.document_id) for d in target_docs],
+                "document_ids": [str(x) for x in rebuild_ids],
+                "restored_document_ids": [str(x) for x in restored_ids],
                 "selective": selective,
                 "before_version": before_version,
                 "rebuild_required": True,
@@ -769,6 +886,7 @@ class SnapshotService:
                 "index_status": IndexVersionStatus.BUILDING.value,
                 "restored_document_count": len(target_docs),
                 "restored_document_ids": [str(x) for x in restored_ids],
+                "rebuild_document_ids": [str(x) for x in rebuild_ids],
                 "total_changes": preview.total_changes,
                 "selective": selective,
                 "rebuild_required": True,
@@ -785,7 +903,8 @@ class SnapshotService:
             before_version=before_version,
             after_version=version_code,
             restored_document_count=len(target_docs),
-            restored_document_ids=restored_ids,
+            # 供异步重建：含选择性场景下未改动但仍需迁入新版本的文档
+            restored_document_ids=rebuild_ids,
             selective=selective,
             rebuild_required=True,
             message=("回退元数据已应用并创建保护快照；已调度向量重建，" "完成后将原子激活新索引版本。"),

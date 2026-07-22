@@ -39,6 +39,7 @@ from app.schemas.knowledge_base import (
 from app.services.chunking import merge_rules
 from app.services.document_pipeline import run_resegment_pipeline
 from app.services.index_switch import IndexSwitchService
+from app.services.observability import write_audit
 from app.services.snapshot_hooks import take_auto_snapshot
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,15 @@ class KnowledgeBaseService:
             creator_id=creator_id,
         )
         self.db.add(kb)
+        await self.db.flush()
+        await write_audit(
+            self.db,
+            user_id=creator_id,
+            action="kb.create",
+            resource_type="kb",
+            resource_id=str(kb.id),
+            detail={"name": kb.name, "department": kb.department, "type": kb.type},
+        )
         await self.db.commit()
         await self.db.refresh(kb)
         return await self._to_response(kb)
@@ -173,6 +183,14 @@ class KnowledgeBaseService:
                 setattr(kb, field, value)
         # 统一由部门派生可见性
         kb.visibility = derive_visibility(kb.department)
+        await write_audit(
+            self.db,
+            user_id=user_id,
+            action="kb.update",
+            resource_type="kb",
+            resource_id=str(kb.id),
+            detail={"fields": sorted(payload.keys())},
+        )
         await self.db.commit()
         await self.db.refresh(kb)
         return await self._to_response(kb)
@@ -181,10 +199,26 @@ class KnowledgeBaseService:
         """软删除或物理删除知识库。"""
         kb = await self._get_kb_including_deleted(kb_id)
         if permanent:
+            await write_audit(
+                self.db,
+                user_id=user_id,
+                action="kb.delete",
+                resource_type="kb",
+                resource_id=str(kb.id),
+                detail={"name": kb.name, "permanent": True},
+            )
             await self.db.delete(kb)
         else:
             kb.status = KnowledgeBaseStatus.DELETED.value
             kb.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            await write_audit(
+                self.db,
+                user_id=user_id,
+                action="kb.delete",
+                resource_type="kb",
+                resource_id=str(kb.id),
+                detail={"name": kb.name, "permanent": False},
+            )
         await self.db.commit()
 
     async def re_vectorize_kb(
@@ -200,6 +234,8 @@ class KnowledgeBaseService:
         """
         options = options or ReVectorizeRequest()
         kb = await self._get_active_kb(kb_id)
+        if kb.status == KnowledgeBaseStatus.VECTORIZING.value:
+            raise ConflictException("该知识库正在重建索引，请稍后再试")
 
         # 禁止并发重建
         active = await self.db.scalar(
@@ -286,6 +322,18 @@ class KnowledgeBaseService:
         )
         kb = await self._get_active_kb(str(kb.id))
         kb.status = KnowledgeBaseStatus.VECTORIZING.value
+        await write_audit(
+            self.db,
+            user_id=user_id,
+            action="kb.re_vectorize",
+            resource_type="kb",
+            resource_id=str(kb.id),
+            detail={
+                "task_id": str(task.id),
+                "target_version": target_version,
+                "document_count": len(docs),
+            },
+        )
         await self.db.commit()
         await self.db.refresh(task)
 
@@ -337,6 +385,14 @@ class KnowledgeBaseService:
                     permission_code=item.permission,
                 )
             )
+        await write_audit(
+            self.db,
+            user_id=user_id,
+            action="kb.permissions",
+            resource_type="kb",
+            resource_id=str(kb.id),
+            detail={"permission_count": len(data.permissions)},
+        )
         await self.db.commit()
 
     async def _get_active_kb(self, kb_id: str) -> KnowledgeBase:
@@ -366,10 +422,20 @@ class KnowledgeBaseService:
         return kb
 
     async def _to_response(self, kb: KnowledgeBase, *, include_permissions: bool = False) -> KnowledgeBaseResponse:
-        doc_count = await self.db.scalar(select(func.count()).select_from(Document).where(Document.kb_id == kb.id)) or 0
+        doc_count = (
+            await self.db.scalar(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.kb_id == kb.id, Document.status != "archived")
+            )
+            or 0
+        )
         chunk_count = (
             await self.db.scalar(
-                select(func.coalesce(func.sum(Document.chunk_count), 0)).where(Document.kb_id == kb.id)
+                select(func.coalesce(func.sum(Document.chunk_count), 0)).where(
+                    Document.kb_id == kb.id,
+                    Document.status != "archived",
+                )
             )
             or 0
         )
