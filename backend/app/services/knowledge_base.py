@@ -424,9 +424,7 @@ class KnowledgeBaseService:
     async def _to_response(self, kb: KnowledgeBase, *, include_permissions: bool = False) -> KnowledgeBaseResponse:
         doc_count = (
             await self.db.scalar(
-                select(func.count())
-                .select_from(Document)
-                .where(Document.kb_id == kb.id, Document.status != "archived")
+                select(func.count()).select_from(Document).where(Document.kb_id == kb.id, Document.status != "archived")
             )
             or 0
         )

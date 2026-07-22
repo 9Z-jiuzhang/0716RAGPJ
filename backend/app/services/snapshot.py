@@ -478,9 +478,7 @@ class SnapshotService:
 
         for snap_doc in snap.documents or []:
             # 补偿时清分段后立刻按文本物化，避免残留回退目标文本对应的分段
-            doc = await self._restore_document_from_snap(
-                kb, snap_doc, op, current_map, clear_chunks=True
-            )
+            doc = await self._restore_document_from_snap(kb, snap_doc, op, current_map, clear_chunks=True)
             await self._materialize_chunks_from_text(doc)
 
         for doc in list(current_map.values()):
@@ -829,15 +827,9 @@ class SnapshotService:
 
         # 5) 创建新索引版本（building），不覆盖历史、暂不激活
         # 选择性回退也必须把未选中但仍有效的文档写入新版本，否则 activate 后检索丢失
-        rebuild_ids = [
-            d.id
-            for d in current_map.values()
-            if d.status not in ("archived", "deleted")
-        ]
+        rebuild_ids = [d.id for d in current_map.values() if d.status not in ("archived", "deleted")]
         version_code = f"v{utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}-restore"
-        total_chunks = sum(
-            (current_map[i].chunk_count or 0) for i in rebuild_ids if i in current_map
-        )
+        total_chunks = sum((current_map[i].chunk_count or 0) for i in rebuild_ids if i in current_map)
         index_version = IndexVersion(
             kb_id=kb.id,
             version=version_code,
