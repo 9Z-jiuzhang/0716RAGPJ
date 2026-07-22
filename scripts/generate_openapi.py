@@ -1144,6 +1144,34 @@ schemas["SystemStatsResponse"] = {
             "maxItems": 7,
             "description": "近 7 天每日命中率 0–1（含今天，升序）",
         },
+        "qa_trend_30d": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 30,
+            "maxItems": 30,
+            "description": "近 30 天每日用户提问数（含今天，升序）",
+        },
+        "hit_rate_trend_30d": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 30,
+            "maxItems": 30,
+            "description": "近 30 天每日命中率 0–1（含今天，升序）",
+        },
+        "error_24h": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "近 24 小时错误量（4 个等宽时段，旧→新）",
+        },
+        "error_hourly_48h": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "minItems": 48,
+            "maxItems": 48,
+            "description": "近 48 小时每小时错误量（文档失败+向量化失败，旧→新）",
+        },
         "guard_blocked_24h": prop("integer", "最近 24 小时 Guard 阻拦次数", default=0),
         "guard_blocked_7d": prop("integer", "最近 7 天 Guard 阻拦次数", default=0),
         "guard_recent_events": {
@@ -1201,7 +1229,7 @@ paths["/auth/register"] = {
 paths["/auth/login"] = {
     "post": op(
         "用户登录",
-        "公开接口。校验用户名密码，返回 access/refresh JWT。禁用用户返回 403。",
+        "公开接口。校验用户名密码，返回 access/refresh JWT。凭证错误返回 401（文案：用户名或密码错误）；禁用用户返回 403。",
         ["认证"],
         public=True,
         request_body=json_body("LoginRequest"),

@@ -273,9 +273,9 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度、置信提示）、登录/注册、对话历史、个人中心（含改密）、文档上传（员工/管理员）。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标与安全窗口、用户/角色/部门、大模型与用量、知识库/文档工作台/快照、命中率测试、RAGAS、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（Grafana）、**API 接入指南**。
-- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、公共 CSS；接入指南 Markdown 亦挂在 `/assets/docs/`。
+- **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度、置信提示）、登录/注册、对话历史、个人中心（含改密）、**多文件批量上传**（员工/管理员）。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势与错误分桶）与安全窗口、用户/角色/部门、大模型与用量、知识库/文档工作台/快照、命中率测试、RAGAS、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（Grafana）、**API 接入指南**。
+- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、主题/动效、公共 CSS；接入指南 Markdown 亦挂在 `/assets/docs/`。
 
 ### 2.7 可观测性
 
@@ -426,8 +426,9 @@ docker compose ps
 0716RAGPJ/
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/          # 路由层（auth/users/roles/departments/models/
-│   │   │                    #   knowledge_bases/documents/qa/hit_tests/snapshots/audit/monitor）
+│   │   ├── api/v1/          # 路由（auth/users/roles/departments/models/
+│   │   │                    #   knowledge_bases/documents/qa/hit_tests/snapshots/
+│   │   │                    #   audit/monitor/query-processing/role-caches/ragas）
 │   │   ├── schemas/         # Pydantic 契约模型
 │   │   ├── services/        # 业务服务层
 │   │   ├── retrieval/       # vector / fulltext / hybrid / scope
@@ -439,7 +440,7 @@ docker compose ps
 ├── frontend/
 │   ├── guest/               # 访客端 SPA（挂载 /）
 │   ├── admin/               # 管理端 SPA（挂载 /admin/）
-│   └── shared/              # 共享 api/auth/router/css（/assets）
+│   └── shared/              # 共享 api/auth/router/css/docs（/assets）
 ├── docker/
 │   ├── nginx/               # nginx.conf（web）/ reverse-proxy.conf（统一入口）
 │   ├── postgres/init.sql    # 扩展与全文检索约定
@@ -452,6 +453,7 @@ docker compose ps
 │   ├── CLOUD_DEPLOY.md           # 云端部署指南
 │   └── CONTRACT.md               # 契约说明
 ├── scripts/                      # E2E / 契约生成 / 运维脚本
+├── testdoc/                      # 上传解析联调样例文档
 ├── docker-compose.yml            # 本机开发编排
 ├── docker-compose.prod.yml       # 云端覆盖
 ├── requirements.txt

@@ -170,7 +170,7 @@ Authorization: Bearer <access_token>
 | user | 用户资料、roles、permissions、department |
 | landing / landing_href | Web 端分流提示；**原生 App 可忽略**，自行进主界面 |
 
-**功能解说：** 这是接入的第一步。App 应持久化两个 Token 与用户摘要；权限列表可用于隐藏无权限的菜单。
+**功能解说：** 这是接入的第一步。App 应持久化两个 Token 与用户摘要；权限列表可用于隐藏无权限的菜单。凭证错误返回 `401`，文案为「用户名或密码错误」；账号禁用返回 `403`。
 
 ### 5.3 刷新令牌 — `POST /auth/refresh`（公开）
 
@@ -319,7 +319,7 @@ data: {"content":"……"}
 | 接口 | 鉴权 | 功能解说 |
 |------|------|----------|
 | `GET /monitor/health` | 公开或低门槛 | 检查 postgres / redis / chroma / langfuse / minio 等组件是否 healthy |
-| `GET /monitor/stats` | `system:read` | 用户数、问答趋势、Guard 阻拦统计等，偏管理端仪表盘 |
+| `GET /monitor/stats` | `system:read` | 用户数、7/30 天问答与命中率趋势、48h 错误分桶、Guard 阻拦统计等，偏管理端仪表盘 |
 | `GET /monitor/guard-events` | `system:read` | LLM Guard 拦截明细（账号、IP、意图），偏安全运营 |
 
 移动端 SDK 建议仅在启动或设置页调用 `health`；不要把管理统计接口暴露给普通用户 Token。

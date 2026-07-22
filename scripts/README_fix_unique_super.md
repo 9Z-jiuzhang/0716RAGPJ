@@ -12,18 +12,17 @@
 
 ## 手动脚本
 
-在 API 容器内执行：
+在**仓库根目录**执行（需 `.env` 中 Postgres 可达，本机已映射 `5432`）：
 
 ```bash
-docker compose exec api python -c "import asyncio; from pathlib import Path; import sys; sys.path.insert(0,'/app'); ..."
-```
-
-或在仓库根目录（需配置好 DATABASE_URL / PYTHONPATH=backend）：
-
-```bash
-cd c:\Users\cao\Desktop\iqa\0716RAGPJ
+# Windows PowerShell
 $env:PYTHONPATH="backend"
 python scripts/fix_unique_super_admin.py
+```
+
+```bash
+# Linux / macOS
+PYTHONPATH=backend python scripts/fix_unique_super_admin.py
 ```
 
 脚本会打印被降级的用户名列表。

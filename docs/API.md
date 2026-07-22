@@ -195,7 +195,7 @@ Authorization: Bearer <access_token>
 | landing | `admin`=管理端，`app`=问答端 |
 | landing_href | 前端跳转，如 `/admin/` 或 `/#/chat` |
 
-凭证错误 → `401`；用户被禁用 → `403`。
+凭证错误 → `401`（`detail`/`message` 为「用户名或密码错误」）；用户被禁用 → `403`。
 
 ### 3.3 刷新 Token
 
@@ -528,7 +528,7 @@ Authorization: Bearer <access_token>
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
 | GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`uptime_seconds`；`checks` 含 postgres/redis/chroma/langfuse/minio 连通性 |
-| GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d`、`hit_rate_trend_7d`、`guard_blocked_24h`、`guard_blocked_7d`、`guard_recent_events` |
+| GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d` / `qa_trend_30d`、`hit_rate_trend_7d` / `hit_rate_trend_30d`、`error_24h`（4 桶）、`error_hourly_48h`（48 点）、`guard_blocked_24h`、`guard_blocked_7d`、`guard_recent_events` |
 | GET | `/monitor/guard-events` | `system:read` | 分页 Guard 拦截明细；默认 `page_size=50` |
 | GET | `/metrics`（应用根，非 `/api/v1`） | 内部 | Prometheus 文本指标，**不走统一包装**；云端可借 `METRICS_PUBLIC=false` 限制暴露 |
 
@@ -606,6 +606,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.0 | 2026-07-22 | `/monitor/stats` 补充 30 天趋势与 48h 错误分桶；登录失败文案对齐「用户名或密码错误」 |
 | 2.1.0 | 2026-07-21 | 对齐本机入口 `18080`；补充改密、Guard 事件、SSE Guard/预处理事件、命中率 `score`、Query/角色缓存/RAGAS 索引；重生成 openapi（61 paths） |
 | 2.1.0 | 2026-07-19 | 补充会话闲置过期（active→expired）、访客不自动复用会话、`active_sessions` 定义；对齐 Langfuse 云端配置说明 |
 | 2.1.0 | 2026-07-17 | 契约迁入 `docs/`；补充用户删除、角色等级与分配规则；`admin` 不含 `role:write`；默认角色改为 `guest`；废弃 `user` 角色 |
