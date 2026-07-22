@@ -516,8 +516,8 @@ Authorization: Bearer <access_token>
 
 - 快照含元数据、文档版本、分段规则、权限配置引用；**向量不落快照**，回退后重建索引。
 - 自动触发类型：上传/删除/规范化/重分段/重向量化/权限/分段规则变更（`trigger` 前缀 `auto_*`）。
-- 回退流程：先创建 `rollback_protection` 保护快照 → 恢复文档/配置/权限 → 创建 `building` 索引版本，KB 转 `vectorizing`；向量重建完成后由服务层 `activate_index_version` 原子切换。
-- **回退结果**（`RollbackResultResponse`）：`protection_snapshot_id`、`new_index_version`、`index_status`、`before_version?`、`after_version`、`restored_document_count`、`restored_document_ids`、`selective`、`rebuild_required`、`message`。
+- 回退流程：先创建 `rollback_protection` 保护快照 → 恢复文档/配置/权限（含 name/tags/description）→ 创建 `building` 索引版本，KB 转 `vectorizing`；写入 `rollback_rebuild` 任务后异步重建。**选择性回退**也会把未选中但仍有效的文档迁入新版本集合，避免 activate 后检索丢失。重建只写目标版本集合。任一文档失败则不激活，并用保护快照补偿库表。
+- **回退结果**（`RollbackResultResponse`）：`protection_snapshot_id`、`new_index_version`、`index_status`、`before_version?`、`after_version`、`restored_document_count`、`restored_document_ids`（实际为待重建文档 ID 列表）、`selective`、`rebuild_required`、`message`。
 
 ---
 
@@ -528,7 +528,9 @@ Authorization: Bearer <access_token>
 | GET | `/audit/logs` | `audit:read` | 分页；筛选：`user_id`、`action`、`resource_type`、`resource_id`、`result`、`start_date`、`end_date` |
 | GET | `/audit/logs/{log_id}` | `audit:read` | 详情，含 `detail` 变更对比、`ip_address`、`user_agent`、`error_message` |
 
-**列表项**（`AuditLogListItem`）：`id`、`user_id?`、`user_name?`、`action`、`resource_type`、`resource_id?`、`result`(默认success)、`request_id?`、`created_at`。`action` 示例：`kb.create`、`doc.delete`、`user.disable`。
+**列表项**（`AuditLogListItem`）：`id`、`user_id?`、`user_name?`、`action`、`resource_type`、`resource_id?`、`result`(默认success)、`request_id?`、`created_at`。`action` 示例：`kb.create`、`kb.update`、`kb.delete`、`kb.permissions`、`kb.re_vectorize`、`doc.upload`、`doc.delete`、`auth.login`、`auth.change_password`、`user.status`、`snapshot.rollback`。
+
+说明：文档写操作使用 `doc.*` 前缀（与管理端筛选 `doc.` 对齐）；知识库使用 `kb.*`；认证使用 `auth.*`。
 
 ---
 
@@ -604,7 +606,7 @@ Authorization: Bearer <access_token>
 4. `/qa/ask` 覆盖：未登录仅 GUEST 库、登录后授权范围、非法 `kb_ids`、`guard_blocked`。
 5. 上传超大文件 → `413`；不支持格式 → `400` 且 message 明确。
 6. SSE 至少覆盖 `intent → chunk → citations → done`；拦截场景覆盖 `guard_blocked`。
-7. 回退：`confirm=false` 必拒；`true` 后可查向量化进度。
+7. 回退：`confirm=false` 必拒；`true` 后创建 `rollback_rebuild` 向量化任务，可通过 `GET /knowledge-bases/{kb_id}/vectorize-status` 查询进度；重建成功后原子激活新索引，失败则用保护快照补偿库表且不切换版本。
 8. 部门：GUEST 部门不可删除/改 code；员工访问 GUEST 库不应被拒。
 9. 用户：管理员不可删除/禁用同级或更高级用户；不可将他人设为 admin/超管；角色权限配置仅超管可调。
 10. 改密：普通用户成功；`super` 返回 `403`。

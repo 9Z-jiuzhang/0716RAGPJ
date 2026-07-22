@@ -48,6 +48,9 @@ async def write_audit(
     detail: dict[str, Any] | str | None = None,
     result: str = "success",
     error_message: str | None = None,
+    request_id: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> None:
     payload: dict[str, Any] | None
     if isinstance(detail, str):
@@ -62,6 +65,9 @@ async def write_audit(
         detail=payload,
         result=result,
         error_message=error_message,
+        request_id=request_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
 
 

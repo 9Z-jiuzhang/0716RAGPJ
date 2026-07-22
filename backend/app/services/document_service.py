@@ -51,6 +51,13 @@ from app.utils.exceptions import (
 logger = logging.getLogger(__name__)
 
 
+async def assert_kb_mutable(db: AsyncSession, kb_id: uuid.UUID) -> None:
+    """知识库处于 vectorizing（回退/重向量化）时拒绝文档写操作。"""
+    kb = await doc_repo.get_knowledge_base(db, kb_id)
+    if kb is not None and str(kb.status) == "vectorizing":
+        raise DocumentError("知识库正在重建索引，请稍后再试", http_status=409)
+
+
 def to_document_response(doc: Document) -> DocumentResponse:
     return DocumentResponse(
         id=str(doc.id),
@@ -108,6 +115,7 @@ async def upload_document(
     kb = await doc_repo.get_knowledge_base(db, kb_id)
     if not kb:
         raise DocumentNotFoundError(f"knowledge_base:{kb_id}")
+    await assert_kb_mutable(db, kb_id)
     file_type = _validate_upload(filename, content)
     await take_auto_snapshot(db, kb_id, SnapshotTrigger.AUTO_UPLOAD, user.id, name=f"upload:{filename}")
     kb_rule = await doc_repo.get_or_create_kb_rule(db, kb_id)
@@ -140,7 +148,7 @@ async def upload_document(
     await write_audit(
         db,
         user_id=user.id,
-        action="document.upload",
+        action="doc.upload",
         resource_type="document",
         resource_id=str(doc.id),
         detail={
@@ -395,6 +403,7 @@ async def get_document_content_preview(
 
 
 async def delete_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User) -> None:
+    await assert_kb_mutable(db, kb_id)
     doc = await get_document_detail(db, kb_id, doc_id)
     await take_auto_snapshot(db, kb_id, SnapshotTrigger.AUTO_DELETE, user.id, name=f"delete:{doc.filename}")
     file_path = doc.file_path
@@ -403,7 +412,7 @@ async def delete_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID,
     await write_audit(
         db,
         user_id=user.id,
-        action="document.delete",
+        action="doc.delete",
         resource_type="document",
         resource_id=str(doc_id),
         detail={
@@ -423,6 +432,7 @@ async def update_segment_rules(
     body: UpdateSegmentRulesRequest,
     user: User,
 ) -> Document:
+    await assert_kb_mutable(db, kb_id)
     doc = await get_document_detail(db, kb_id, doc_id)
     # 5.8.1：分段规则变更前自动快照
     await take_auto_snapshot(
@@ -457,7 +467,7 @@ async def update_segment_rules(
     await write_audit(
         db,
         user_id=user.id,
-        action="document.segment_rules",
+        action="doc.segment_rules",
         resource_type="document",
         resource_id=str(doc_id),
         detail=patch,
@@ -468,6 +478,7 @@ async def update_segment_rules(
 
 
 async def normalize_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User) -> NormalizeResult:
+    await assert_kb_mutable(db, kb_id)
     doc = await get_document_detail(db, kb_id, doc_id)
     await take_auto_snapshot(
         db,
@@ -488,7 +499,7 @@ async def normalize_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UU
     await write_audit(
         db,
         user_id=user.id,
-        action="document.normalize",
+        action="doc.normalize",
         resource_type="document",
         resource_id=str(doc_id),
         detail={"before": stats.char_count_before, "after": stats.char_count_after},
@@ -528,6 +539,7 @@ async def update_chunk(
     body: UpdateChunkRequest,
     user: User,
 ) -> DocumentChunk:
+    await assert_kb_mutable(db, kb_id)
     await get_document_detail(db, kb_id, doc_id)
     chunk = await doc_repo.get_chunk(db, doc_id, chunk_id)
     if not chunk:
@@ -544,7 +556,7 @@ async def update_chunk(
     await write_audit(
         db,
         user_id=user.id,
-        action="document.chunk_update",
+        action="doc.chunk_update",
         resource_type="chunk",
         resource_id=str(chunk_id),
         detail={"is_enabled": chunk.is_enabled},
@@ -556,6 +568,7 @@ async def update_chunk(
 
 async def prepare_retry(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User) -> Document:
     """error 状态重试：合法流转到 parsing，由后台流水线重新执行。【对齐状态机】"""
+    await assert_kb_mutable(db, kb_id)
     doc = await get_document_detail(db, kb_id, doc_id)
     if doc.status != DocumentStatus.ERROR.value:
         from app.utils.exceptions import DocumentError
@@ -565,7 +578,7 @@ async def prepare_retry(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, u
     await write_audit(
         db,
         user_id=user.id,
-        action="document.retry",
+        action="doc.retry",
         resource_type="document",
         resource_id=str(doc_id),
         detail={"from": DocumentStatus.ERROR.value, "to": DocumentStatus.PARSING.value},

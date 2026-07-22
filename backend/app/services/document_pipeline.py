@@ -61,7 +61,7 @@ async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = 
                     await write_audit(
                         err_db,
                         user_id=doc.creator_id,
-                        action="document.pipeline_error",
+                        action="doc.pipeline_error",
                         resource_type="document",
                         resource_id=str(document_id),
                         detail={"status": doc.status},
@@ -79,11 +79,13 @@ async def run_resegment_pipeline(
     *,
     skip_auto_snapshot: bool = False,
     index_version: str | None = None,
+    preserve_other_versions: bool = False,
 ) -> None:
     """重分段 + 向量化（API re-segment 异步任务）。
 
     skip_auto_snapshot：回退重建等场景避免嵌套自动快照。
     index_version：写入向量库的目标索引版本（回退 building 版本）。
+    preserve_other_versions：只改目标版本集合，不删其它版本向量。
     """
     async with SessionLocal() as db:
         doc = await doc_repo.get_document_by_id(db, document_id)
@@ -120,6 +122,7 @@ async def run_resegment_pipeline(
                     user_id=user_id or doc.creator_id,
                     skip_auto_snapshot=True,
                     index_version=index_version,
+                    preserve_other_versions=preserve_other_versions,
                 )
             await db.commit()
         except Exception as exc:
@@ -214,6 +217,7 @@ async def _vectorize(
     *,
     skip_auto_snapshot: bool = False,
     index_version: str | None = None,
+    preserve_other_versions: bool = False,
 ) -> None:
     if doc.status != DocumentStatus.VECTORIZING.value:
         apply_status(doc, DocumentStatus.VECTORIZING.value)
@@ -237,7 +241,10 @@ async def _vectorize(
         version = index_version or active_version or str(uuid.uuid4())
 
     enabled = [c for c in (doc.chunks or []) if c.is_enabled]
-    vector_store.delete_document_vectors(doc.kb_id, doc.id)
+    if preserve_other_versions and version:
+        vector_store.delete_document_vectors_in_version(doc.kb_id, doc.id, version)
+    else:
+        vector_store.delete_document_vectors(doc.kb_id, doc.id)
     if enabled:
         vectors = embedding.embed_texts([c.content for c in enabled])
         vector_store.upsert_chunks(
@@ -277,21 +284,52 @@ async def run_rollback_rebuild(
     document_ids: list[uuid.UUID],
     operator_id: uuid.UUID,
     request_id: str | None = None,
+    task_id: uuid.UUID | None = None,
 ) -> None:
-    """回退后异步重建受影响文档向量，并原子激活新索引版本（5.8.3）。
+    """回退后异步重建向量，并原子激活新索引版本（5.8.3）。
 
-    - 已有分段：只向量化（兼容旧快照内嵌 chunks）
-    - 否则：重分段 + 向量化（从快照恢复的文本或对象存储）
+    - 恢复后无分段（pending_segment）：重分段 + 写入目标版本
+    - 未改动但仍需进入新版本的文档：将现有分段写入目标版本
+    - 仅操作目标版本集合，不破坏当前生效版本
+    - 任一文档失败：不激活，并用保护快照补偿库表
     """
+    from datetime import datetime, timezone
+
     from sqlalchemy import select
 
     from app.models.enums import IndexVersionStatus
     from app.models.index_version import IndexVersion
     from app.models.knowledge_base import KnowledgeBase
+    from app.models.vectorize_task import VectorizeTask
     from app.services.snapshot import SnapshotService
 
     errors: list[str] = []
     before_version: str | None = None
+    protection_snapshot_id: str | None = None
+    total = len(document_ids)
+    processed = 0
+
+    async def _update_task(*, status: str | None = None, error_message: str | None = None) -> None:
+        if task_id is None:
+            return
+        async with SessionLocal() as tdb:
+            task = await tdb.get(VectorizeTask, task_id)
+            if task is None:
+                return
+            if status:
+                task.status = status
+                if status == "running" and task.started_at is None:
+                    task.started_at = datetime.now(timezone.utc)
+                if status in ("completed", "failed"):
+                    task.completed_at = datetime.now(timezone.utc)
+            task.processed_count = processed
+            task.total_count = total
+            task.progress = int(100 * processed / total) if total else 100
+            if error_message is not None:
+                task.error_message = error_message[:2000]
+            await tdb.commit()
+
+    await _update_task(status="running")
 
     for doc_id in document_ids:
         try:
@@ -299,27 +337,39 @@ async def run_rollback_rebuild(
                 doc = await doc_repo.get_document_by_id(db, doc_id)
                 if not doc:
                     errors.append(f"{doc_id}: not found")
+                    processed += 1
+                    await _update_task()
                     continue
-                if doc.chunks:
-                    await _vectorize(
-                        db,
-                        doc,
-                        user_id=operator_id,
-                        skip_auto_snapshot=True,
-                        index_version=target_version,
-                    )
-                    await db.commit()
-                else:
+                # 恢复后清空过分段：必须按快照文本重切；否则只写入目标版本集合
+                need_resegment = (
+                    doc.status == DocumentStatus.PENDING_SEGMENT.value
+                    or not doc.chunks
+                    or doc.status in (DocumentStatus.UPLOADED.value, DocumentStatus.ERROR.value)
+                )
+                if need_resegment:
                     await db.commit()
                     await run_resegment_pipeline(
                         doc_id,
                         user_id=operator_id,
                         skip_auto_snapshot=True,
                         index_version=target_version,
+                        preserve_other_versions=True,
                     )
+                else:
+                    await _vectorize(
+                        db,
+                        doc,
+                        user_id=operator_id,
+                        skip_auto_snapshot=True,
+                        index_version=target_version,
+                        preserve_other_versions=True,
+                    )
+                    await db.commit()
         except Exception as exc:  # noqa: BLE001
             logger.exception("rollback rebuild failed doc=%s", doc_id)
             errors.append(f"{doc_id}: {exc}")
+        processed += 1
+        await _update_task()
 
     async with SessionLocal() as db:
         kb = await db.get(KnowledgeBase, kb_id)
@@ -335,15 +385,30 @@ async def run_rollback_rebuild(
                 kb_id,
                 target_version,
             )
+            await _update_task(status="failed", error_message="missing kb/version")
             return
 
-        before_version = (iv.config_snapshot or {}).get("before_version")
-        all_failed = bool(document_ids) and len(errors) == len(document_ids)
+        cfg = iv.config_snapshot or {}
+        before_version = cfg.get("before_version")
+        protection_snapshot_id = cfg.get("protection_snapshot_id")
 
-        if all_failed:
+        if errors:
             iv.status = IndexVersionStatus.FAILED.value
             iv.error_message = "; ".join(errors)[:2000]
-            kb.status = "active"
+            # 保护快照补偿：恢复回退前元数据，不切换索引版本（旧版向量仍在）
+            if protection_snapshot_id:
+                try:
+                    await SnapshotService(db).compensate_from_protection(
+                        kb_id,
+                        uuid.UUID(str(protection_snapshot_id)),
+                        operator_id,
+                        request_id=request_id,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("rollback compensate failed kb=%s", kb_id)
+                    kb.status = "active"
+            else:
+                kb.status = "active"
             await SnapshotService(db).audit.log(
                 action="snapshot.rollback_rebuild",
                 resource_type="kb",
@@ -354,12 +419,14 @@ async def run_rollback_rebuild(
                     "before_version": before_version,
                     "after_version": target_version,
                     "errors": errors[:20],
+                    "compensated": bool(protection_snapshot_id),
                 },
                 request_id=request_id,
                 result="failure",
                 error_message=iv.error_message,
             )
             await db.commit()
+            await _update_task(status="failed", error_message=iv.error_message)
             return
 
         try:
@@ -369,7 +436,6 @@ async def run_rollback_rebuild(
                 operator_id=operator_id,
                 request_id=request_id,
             )
-            # 用当前文档分段数刷新索引版本统计
             from sqlalchemy import func as sa_func
 
             from app.models import Document
@@ -386,25 +452,22 @@ async def run_rollback_rebuild(
                 or 0
             )
             iv.chunk_count = total_chunks
-            if errors:
-                iv.error_message = f"部分失败: {'; '.join(errors)[:1800]}"
             await SnapshotService(db).audit.log(
                 action="snapshot.rollback_rebuild",
                 resource_type="kb",
                 resource_id=str(kb_id),
-                user_id=operator_id,
                 detail={
                     "target_version": target_version,
                     "document_count": len(document_ids),
-                    "partial_errors": errors[:20] if errors else [],
                     "before_version": before_version,
                     "after_version": target_version,
                 },
+                user_id=operator_id,
                 request_id=request_id,
                 result="success",
-                error_message=("; ".join(errors)[:2000] if errors else None),
             )
             await db.commit()
+            await _update_task(status="completed")
         except Exception as exc:  # noqa: BLE001
             logger.exception("rollback activate failed kb=%s", kb_id)
             await db.rollback()
@@ -419,7 +482,20 @@ async def run_rollback_rebuild(
                 if iv:
                     iv.status = IndexVersionStatus.FAILED.value
                     iv.error_message = str(exc)[:2000]
-                if kb:
+                    cfg = iv.config_snapshot or {}
+                    protection_snapshot_id = cfg.get("protection_snapshot_id")
+                if kb and protection_snapshot_id:
+                    try:
+                        await SnapshotService(err_db).compensate_from_protection(
+                            kb_id,
+                            uuid.UUID(str(protection_snapshot_id)),
+                            operator_id,
+                            request_id=request_id,
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.exception("rollback compensate after activate fail kb=%s", kb_id)
+                        kb.status = "active"
+                elif kb:
                     kb.status = "active"
                 await SnapshotService(err_db).audit.log(
                     action="snapshot.rollback_rebuild",
@@ -436,3 +512,4 @@ async def run_rollback_rebuild(
                     error_message=str(exc)[:2000],
                 )
                 await err_db.commit()
+            await _update_task(status="failed", error_message=str(exc)[:2000])

@@ -225,6 +225,7 @@ async def re_segment(
 ):
     """重新分段并向量化（异步 202）。【前端：预览确认后触发】"""
     try:
+        await document_service.assert_kb_mutable(db, _uuid(kb_id, "kb_id"))
         doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
     except DocumentError as exc:
         _raise_doc_error(exc)
