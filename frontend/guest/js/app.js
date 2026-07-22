@@ -334,24 +334,24 @@ function pageChat() {
       <button type="button" class="qa-sidebar-expand" id="btnSidebarExpand" title="展开历史对话" aria-label="展开历史对话" aria-hidden="${sidebarCollapsed ? "false" : "true"}">›</button>
       <div class="qa-chat-column" id="qaChatColumn">
         <div class="qa-chat-stage" id="qaChatStage">
-          <div class="qa-messages" id="msgList">
-            <div class="empty-state" id="msgEmpty">
-              <div class="qa-welcome-mark">AI</div>
+        <div class="qa-messages" id="msgList">
+          <div class="empty-state" id="msgEmpty">
+            <div class="qa-welcome-mark">AI</div>
               <h1>有什么我能帮你检索？</h1>
-              <p>${tip}</p>
-              <div class="qa-welcome-note">回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。</div>
-              <div class="qa-suggestions">
-                <button type="button" data-question="请介绍当前可访问的知识库内容">了解知识库内容</button>
-                <button type="button" data-question="如何上传并管理文档？">如何管理文档</button>
-                <button type="button" data-question="请说明平台的权限访问规则">查看权限规则</button>
-              </div>
+            <p>${tip}</p>
+            <div class="qa-welcome-note">回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。</div>
+            <div class="qa-suggestions">
+              <button type="button" data-question="请介绍当前可访问的知识库内容">了解知识库内容</button>
+              <button type="button" data-question="如何上传并管理文档？">如何管理文档</button>
+              <button type="button" data-question="请说明平台的权限访问规则">查看权限规则</button>
             </div>
           </div>
+        </div>
           <button type="button" class="qa-scroll-bottom" id="btnScrollBottom" title="回到底部" aria-label="回到底部" hidden>↓</button>
           <div class="qa-composer" id="qaComposer">
             <div class="qa-composer-resize" id="qaComposerResize" title="拖拽调整高度" role="separator" aria-orientation="horizontal"></div>
-            <textarea class="form-control" id="questionInput" placeholder="请输入问题，Enter 发送，Shift+Enter 换行"></textarea>
-            <button type="button" class="btn" id="btnSend">发送</button>
+          <textarea class="form-control" id="questionInput" placeholder="请输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+          <button type="button" class="btn" id="btnSend">发送</button>
           </div>
         </div>
       </div>
@@ -1053,8 +1053,8 @@ function startNewChat() {
   currentSessionId = null;
   resetSessionHistory(null);
   highlightSidebarSession(null);
-  const list = document.getElementById("msgList");
-  if (!list) return;
+    const list = document.getElementById("msgList");
+    if (!list) return;
   const role = getPrimaryRole();
   const tip =
     role === "guest"
@@ -1645,7 +1645,7 @@ function renderLoginForm(panel) {
     <div class="form-group">
       <label for="loginPass">密码</label>
       <div class="auth-pass-field">
-        <input class="form-control auth-input" id="loginPass" type="password" autocomplete="current-password" placeholder="请输入密码" />
+      <input class="form-control auth-input" id="loginPass" type="password" autocomplete="current-password" placeholder="请输入密码" />
         <button type="button" class="auth-pass-toggle" id="loginPassToggle" aria-label="显示密码" title="显示密码" aria-pressed="false">
           <svg class="auth-pass-icon auth-pass-icon-show" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 5c-5 0-9.3 3.1-11 7.5C2.7 16.9 7 20 12 20s9.3-3.1 11-7.5C21.3 8.1 17 5 12 5zm0 12.5A5 5 0 1 1 12 7.5a5 5 0 0 1 0 10zm0-2.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/></svg>
           <svg class="auth-pass-icon auth-pass-icon-hide" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.3 2.2 2.2 3.3l3.1 3.1C3.4 7.7 1.7 9.5 1 12.5 2.7 16.9 7 20 12 20c2.1 0 4-.5 5.7-1.4l3 3 1.1-1.1L3.3 2.2zM12 17.5c-2.8 0-5-2.2-5-5 0-.8.2-1.5.5-2.1l1.6 1.6c0 .2 0 .3 0 .5a2.5 2.5 0 0 0 2.5 2.5c.2 0 .3 0 .5-.1l1.6 1.6c-.6.3-1.3.5-2.1.5zm8.1-1.9-1.7-1.7c.4-.7.6-1.5.6-2.4a5 5 0 0 0-6.4-4.8L10.8 5C11.2 5 11.6 5 12 5c5 0 9.3 3.1 11 7.5-.5 1.3-1.3 2.5-2.3 3.5l-.6.6z"/></svg>
@@ -1863,7 +1863,7 @@ async function pageHistory() {
                   <div class="text-muted">${formatDateTime(s.updated_at)} · ${escapeHtml(s.message_count || 0)} 条消息</div>
                 </div>
                 <div class="history-item-actions" style="display:flex;gap:6px;flex-wrap:wrap">
-                  <button class="btn btn-secondary btn-sm" data-open="${escapeHtml(s.id)}">打开</button>
+                <button class="btn btn-secondary btn-sm" data-open="${escapeHtml(s.id)}">打开</button>
                   <button class="btn btn-secondary btn-sm" data-rename="${escapeHtml(s.id)}">重命名</button>
                   <button class="btn btn-danger btn-sm" data-del-session="${escapeHtml(s.id)}">删除</button>
                 </div>
@@ -2059,7 +2059,7 @@ async function pageUpload() {
       <div class="upload-drop" id="dropZone">
         <span class="upload-drop-copy-idle">点击或拖拽 PDF、Word（DOC/DOCX）、TXT、Markdown（MD）文件到此处（支持多选）</span>
         <span class="upload-drop-copy-active">松手即可上传</span>
-      </div>
+    </div>
       <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
     </div>
     <div class="card upload-progress-panel span-4">
@@ -2076,7 +2076,7 @@ async function pageUpload() {
       </div>
       </div>
     </div>
-  </div>`;
+    </div>`;
 
   const drop = document.getElementById("dropZone");
   const fileInput = document.getElementById("fileInput");
@@ -2215,9 +2215,9 @@ async function handleUpload(file, opts = {}) {
     }
   } catch (e) {
     if (!opts.quietToast) {
-      bar.style.width = "0%";
-      prog.innerHTML = `<span class="text-danger">上传失败：${escapeHtml(e.message || "未知错误")}</span>`;
-      toast(e.message || "上传失败", "error");
+    bar.style.width = "0%";
+    prog.innerHTML = `<span class="text-danger">上传失败：${escapeHtml(e.message || "未知错误")}</span>`;
+    toast(e.message || "上传失败", "error");
     }
     throw e;
   }

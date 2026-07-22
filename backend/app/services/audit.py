@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import AuditLog
 from app.repositories.audit import AuditRepository
 from app.schemas.audit import (
+    AuditBatchDeleteResult,
     AuditLogFilterParams,
     AuditLogListItem,
     AuditLogListResponse,
@@ -72,3 +73,9 @@ class AuditService:
             page=params.page,
             page_size=params.page_size,
         )
+
+    async def batch_delete(self, ids: list[UUID]) -> AuditBatchDeleteResult:
+        uniq = list(dict.fromkeys(ids))
+        deleted = await self.repo.delete_by_ids(uniq)
+        await self.db.commit()
+        return AuditBatchDeleteResult(deleted=deleted)

@@ -887,8 +887,7 @@ html[data-theme="light"] .stat-card:hover {
 
 html[data-theme="light"] .card:hover,
 html[data-theme="light"] .glass-panel:hover,
-html[data-theme="light"] .kb-card:hover,
-html[data-theme="light"] .kb-create-card:hover {
+html[data-theme="light"] .kb-card:hover {
   background: var(--glass-bg) !important;
   border: var(--glass-border) !important;
   border-top-color: color-mix(in srgb, var(--color-primary) 48%, transparent) !important;
@@ -1037,8 +1036,7 @@ html[data-theme="dark"] .topnav {
 html[data-theme="dark"] .card:hover,
 html[data-theme="dark"] .glass-panel:hover,
 html[data-theme="dark"] .stat-card:hover,
-html[data-theme="dark"] .kb-card:hover,
-html[data-theme="dark"] .kb-create-card:hover {
+html[data-theme="dark"] .kb-card:hover {
   background: var(--color-card, #1e2a3a) !important;
   background-image: none !important;
   border-color: var(--color-border, #303f54) !important;
@@ -1169,9 +1167,8 @@ html[data-theme="dark"] .landing-enter {
   color: #ffffff !important;
 }
 
-/* 知识库卡片页头：夜间深色表头，字色用浅冷灰 */
-html[data-theme="dark"] .kb-card-cover span,
-html[data-theme="dark"] .kb-card-cover em {
+/* 知识库卡片页头：夜间深色表头，字色用浅冷灰（不含类型徽章） */
+html[data-theme="dark"] .kb-card-cover > span:not(.badge) {
   color: var(--color-text-body, #e6edf7) !important;
 }
 
@@ -1253,8 +1250,7 @@ html[data-theme="light"] .landing-enter {
   color: #ffffff !important;
 }
 
-html[data-theme="light"] .kb-card-cover span,
-html[data-theme="light"] .kb-card-cover em {
+html[data-theme="light"] .kb-card-cover > span:not(.badge) {
   color: #3a4452 !important;
 }
 

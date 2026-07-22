@@ -50,3 +50,15 @@ class AuditLogListResponse(PaginationResponse[AuditLogListItem]):
     """审计日志分页列表。"""
 
     pass
+
+
+class AuditBatchDeleteRequest(BaseModel):
+    """批量删除审计日志。"""
+
+    ids: list[UUID] = Field(..., min_length=1, max_length=200, description="要删除的审计日志 ID 列表")
+
+
+class AuditBatchDeleteResult(BaseModel):
+    """批量删除结果。"""
+
+    deleted: int = Field(..., description="实际删除条数")

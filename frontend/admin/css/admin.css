@@ -90,8 +90,7 @@ html[data-theme="dark"] .app-shell-admin .stat-card {
 html[data-theme="dark"] .app-shell-admin .card:hover,
 html[data-theme="dark"] .app-shell-admin .glass-panel:hover,
 html[data-theme="dark"] .app-shell-admin .stat-card:hover,
-html[data-theme="dark"] .app-shell-admin .kb-card:hover,
-html[data-theme="dark"] .app-shell-admin .kb-create-card:hover {
+html[data-theme="dark"] .app-shell-admin .kb-card:hover {
   background: var(--color-card, #1e2a3a) !important;
   background-image: none !important;
   border-color: var(--color-border, #303f54) !important;
@@ -116,8 +115,7 @@ html[data-theme="dark"] .app-shell-admin .kb-create-card:hover {
 .app-shell-admin .card:hover,
 .app-shell-admin .glass-panel:hover,
 .app-shell-admin .stat-card:hover,
-.app-shell-admin .kb-card:hover,
-.app-shell-admin .kb-create-card:hover {
+.app-shell-admin .kb-card:hover {
   border: var(--glass-border) !important;
   border-top-color: rgba(168, 188, 210, 0.16) !important;
   box-shadow: var(--shadow) !important;
@@ -141,8 +139,7 @@ html[data-theme="light"] .app-shell-admin .stat-card {
 html[data-theme="light"] .app-shell-admin .card:hover,
 html[data-theme="light"] .app-shell-admin .glass-panel:hover,
 html[data-theme="light"] .app-shell-admin .stat-card:hover,
-html[data-theme="light"] .app-shell-admin .kb-card:hover,
-html[data-theme="light"] .app-shell-admin .kb-create-card:hover {
+html[data-theme="light"] .app-shell-admin .kb-card:hover {
   background: linear-gradient(
     135deg,
     rgba(224, 238, 250, 0.78) 0%,
@@ -573,9 +570,10 @@ html[data-theme="dark"] .usage-notice {
   }
 }
 
-/* 知识库详情：基本信息 / 概览 等高对齐 */
+/* 知识库详情：基本信息 / 概览 等宽等高均匀分布 */
 .page-grid.kb-detail-top {
   align-items: stretch;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
 }
 
 .page-grid.kb-detail-top > .card {
@@ -586,6 +584,7 @@ html[data-theme="dark"] .usage-notice {
   min-height: 0;
 }
 
+.page-grid.kb-detail-top > .card > .meta-list,
 .page-grid.kb-detail-top > .card .kb-detail-overview-body {
   flex: 1 1 auto;
   display: flex;
@@ -1520,9 +1519,53 @@ html[data-theme="light"] .dashboard-hero::after {
 .kb-summary-row {
   display: flex;
   justify-content: space-between;
-  margin: 18px 2px 12px;
+  margin: 12px 2px 12px;
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
+}
+
+.kb-list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 4px 0 4px;
+}
+
+.kb-list-toolbar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.kb-list-toolbar-create {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.kb-list-toolbar-spacer {
+  display: none;
+}
+
+.kb-list-search {
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 420px;
+}
+
+.kb-list-filter {
+  flex: 0 1 160px;
+  min-width: 140px;
+}
+
+.kb-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 .kb-summary-row b {
@@ -1549,15 +1592,21 @@ html[data-theme="light"] .dashboard-hero::after {
   flex-direction: column;
 }
 
-.kb-card:hover,
-.kb-create-card:hover {
+.kb-card:hover {
   transform: none !important;
   border: var(--glass-border) !important;
   box-shadow: var(--shadow) !important;
   filter: none !important;
 }
 
-.kb-create-card {
+/* 创建卡：固定淡蓝底，取消悬停变色；仅保留按压反馈 */
+.kb-create-card,
+.app-shell-admin .kb-create-card,
+.app-shell-admin .kb-create-card:hover,
+html[data-theme="light"] .app-shell-admin .kb-create-card,
+html[data-theme="light"] .app-shell-admin .kb-create-card:hover,
+html[data-theme="dark"] .app-shell-admin .kb-create-card,
+html[data-theme="dark"] .app-shell-admin .kb-create-card:hover {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1565,11 +1614,27 @@ html[data-theme="light"] .dashboard-hero::after {
   gap: 9px;
   padding: 24px;
   min-height: 220px;
-  color: var(--color-primary-light);
-  border-style: dashed;
-  background: var(--color-primary-soft);
+  color: var(--color-primary-light) !important;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 42%, transparent) !important;
+  border-top-color: color-mix(in srgb, var(--color-primary) 42%, transparent) !important;
+  background: var(--color-primary-soft) !important;
+  background-image: none !important;
+  box-shadow: var(--shadow) !important;
+  filter: none !important;
+  transform: none !important;
   cursor: pointer;
   font: inherit;
+  transition: transform 0.12s ease, filter 0.12s ease, background-color 0.12s ease;
+}
+
+.kb-create-card:active,
+.app-shell-admin .kb-create-card:active,
+html[data-theme="light"] .app-shell-admin .kb-create-card:active,
+html[data-theme="dark"] .app-shell-admin .kb-create-card:active {
+  transform: scale(0.97) !important;
+  filter: brightness(0.94) !important;
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-primary-soft)) !important;
+  background-image: none !important;
 }
 
 .kb-card-heading h3 {
@@ -1647,7 +1712,7 @@ html[data-theme="dark"] .kb-card:nth-child(3n + 2) .kb-card-cover {
   ) !important;
 }
 
-.kb-card-cover span {
+.kb-card-cover > span:not(.badge) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1660,24 +1725,20 @@ html[data-theme="dark"] .kb-card:nth-child(3n + 2) .kb-card-cover {
   font-weight: 600;
 }
 
-.kb-card-cover em {
-  padding: 4px 8px;
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.45);
-  color: #556070;
+/* 类型徽章放在封面右上角 */
+.kb-card-cover > .badge {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin: 0;
   font-size: var(--font-size-2xs);
-  font-style: normal;
+  width: auto;
+  height: auto;
+  border-radius: 999px;
 }
 
-html[data-theme="dark"] .kb-card-cover span {
+html[data-theme="dark"] .kb-card-cover > span:not(.badge) {
   background: rgba(56, 135, 240, 0.18);
   color: var(--color-text-body, #e6edf7);
-}
-
-html[data-theme="dark"] .kb-card-cover em {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-secondary, #8998ad);
-  border: none;
 }
 
 .kb-card-body {
@@ -1765,6 +1826,282 @@ html[data-theme="dark"] .kb-card-cover em {
 
 .kb-card-access .badge {
   font-size: var(--font-size-2xs);
+}
+
+/* 知识库列表：整卡可点进概览 */
+.kb-card-clickable {
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.kb-card-clickable:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border)) !important;
+}
+
+.kb-card-clickable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.kb-card-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  position: relative;
+  z-index: 2;
+}
+
+/* 共享蓝描边胶囊：列表「文档详情」与详情页「编辑知识库」 */
+.btn.kb-card-btn {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: none !important;
+  filter: none !important;
+  pointer-events: auto;
+  transition:
+    transform 120ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+/*
+ * 蓝描边胶囊：镂空，不用实心主色白字。
+ * 必须压过 base.css 的 html[data-theme] .btn { color:#fff !important }
+ */
+html[data-theme="light"] .btn.kb-card-btn-detail,
+html[data-theme="dark"] .btn.kb-card-btn-detail,
+.btn.kb-card-btn-detail {
+  background: var(--btn-ghost-bg) !important;
+  background-image: none !important;
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border)) !important;
+  color: var(--color-primary-dark, var(--color-primary)) !important;
+}
+
+html[data-theme="dark"] .btn.kb-card-btn-detail {
+  color: var(--color-primary-light, var(--color-primary)) !important;
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-card, #1e2a3a)) !important;
+}
+
+html[data-theme="light"] .btn.kb-card-btn-detail:hover,
+html[data-theme="dark"] .btn.kb-card-btn-detail:hover,
+.btn.kb-card-btn-detail:hover {
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--btn-ghost-bg)) !important;
+  border-color: var(--color-primary) !important;
+  color: var(--color-primary-dark, var(--color-primary)) !important;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-primary) 18%, transparent) !important;
+  transform: translateY(-1px) !important;
+  filter: none !important;
+}
+
+html[data-theme="dark"] .btn.kb-card-btn-detail:hover {
+  color: var(--color-primary-light, var(--color-primary)) !important;
+  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-card, #1e2a3a)) !important;
+}
+
+html[data-theme="light"] .btn.kb-card-btn-detail:active:not(:disabled),
+html[data-theme="dark"] .btn.kb-card-btn-detail:active:not(:disabled),
+.btn.kb-card-btn-detail:active:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 22%, var(--btn-ghost-bg)) !important;
+  border-color: var(--color-primary-dark, var(--color-primary)) !important;
+  color: var(--color-primary-dark, var(--color-primary)) !important;
+  box-shadow: inset 0 1px 4px color-mix(in srgb, var(--color-primary) 22%, transparent) !important;
+  transform: translateY(1px) scale(0.98) !important;
+  filter: none !important;
+}
+
+html[data-theme="dark"] .btn.kb-card-btn-detail:active:not(:disabled) {
+  color: var(--color-primary-light, var(--color-primary)) !important;
+  background: color-mix(in srgb, var(--color-primary) 26%, var(--color-card, #1e2a3a)) !important;
+}
+
+html[data-theme="light"] .kb-card-actions .btn.kb-card-btn-del,
+html[data-theme="dark"] .kb-card-actions .btn.kb-card-btn-del,
+.kb-card-actions .btn.kb-card-btn-del {
+  background: var(--btn-ghost-bg) !important;
+  background-image: none !important;
+  border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border)) !important;
+  color: var(--color-danger) !important;
+}
+
+html[data-theme="dark"] .kb-card-actions .btn.kb-card-btn-del {
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--color-card, #1e2a3a)) !important;
+}
+
+html[data-theme="light"] .kb-card-actions .btn.kb-card-btn-del:hover,
+html[data-theme="dark"] .kb-card-actions .btn.kb-card-btn-del:hover,
+.kb-card-actions .btn.kb-card-btn-del:hover {
+  background: color-mix(in srgb, var(--color-danger) 12%, var(--btn-ghost-bg)) !important;
+  border-color: var(--color-danger) !important;
+  color: var(--color-danger) !important;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-danger) 20%, transparent) !important;
+  transform: translateY(-1px) !important;
+  filter: none !important;
+}
+
+html[data-theme="dark"] .kb-card-actions .btn.kb-card-btn-del:hover {
+  background: color-mix(in srgb, var(--color-danger) 18%, var(--color-card, #1e2a3a)) !important;
+}
+
+html[data-theme="light"] .kb-card-actions .btn.kb-card-btn-del:active:not(:disabled),
+html[data-theme="dark"] .kb-card-actions .btn.kb-card-btn-del:active:not(:disabled),
+.kb-card-actions .btn.kb-card-btn-del:active:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 20%, var(--btn-ghost-bg)) !important;
+  border-color: var(--color-danger) !important;
+  color: var(--color-danger) !important;
+  box-shadow: inset 0 2px 6px color-mix(in srgb, var(--color-danger) 24%, transparent) !important;
+  transform: translateY(1px) scale(0.97) !important;
+  filter: none !important;
+}
+
+html[data-theme="dark"] .kb-card-actions .btn.kb-card-btn-del:active:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 26%, var(--color-card, #1e2a3a)) !important;
+}
+
+/* 知识库工作区顶栏：单行「知识库管理 —— 下拉框」+ 右侧页签 */
+.kb-workspace-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: 0;
+  padding: 8px 14px;
+  border: var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+
+.kb-ws-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.kb-ws-back {
+  flex-shrink: 0;
+  white-space: nowrap;
+  /* 知识库管理：蓝色胶囊，文字加粗加大 */
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border)) !important;
+  background: var(--color-primary-soft) !important;
+  color: var(--color-primary-light) !important;
+  font-size: var(--font-size-sm) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
+  padding: 7px 16px;
+}
+
+.kb-ws-back:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 70%, var(--color-border)) !important;
+  background: color-mix(in srgb, var(--color-primary) 22%, var(--color-primary-soft)) !important;
+  color: var(--color-primary-light) !important;
+}
+
+.kb-ws-sep {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  user-select: none;
+}
+
+.kb-ws-select {
+  flex: 1 1 auto;
+  min-width: 140px;
+  max-width: 320px;
+  width: auto;
+}
+
+.kb-ws-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .kb-workspace-bar {
+    flex-wrap: wrap;
+  }
+
+  .kb-ws-tabs {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+}
+
+/* 副标题按钮：知识库管理 / 文档详情 / 文档上传 / 历史快照（及 FastAPI 页签）共用 */
+.kb-ws-tab {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill, 999px);
+  padding: 6px 14px;
+  background: color-mix(in srgb, var(--color-surface-solid, #fff) 88%, transparent);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  line-height: 1.25;
+  cursor: pointer;
+  transition: var(--transition);
+  box-sizing: border-box;
+}
+
+.kb-ws-tab:hover {
+  color: var(--color-text);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+}
+
+.kb-ws-tab.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  background: var(--color-primary-soft);
+  color: var(--color-primary-light);
+  font-weight: 600;
+}
+
+/* 详情页头与卡片：上下等距、不过宽 */
+#kbWsBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+#kbWsBody .page-head {
+  margin: 0;
+  padding: 2px 0;
+  align-items: center;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+
+#kbWsBody .page-head-text,
+#kbWsBody .page-head-actions {
+  display: flex;
+  align-items: center;
+  min-height: 0;
+}
+
+#kbWsBody .page-head .page-desc {
+  margin: 0;
+  line-height: 1.35;
+  align-self: center;
 }
 
 @media (max-width: 960px) {
@@ -2231,7 +2568,874 @@ html[data-theme="light"] .kb-upload-file {
   }
 }
 
+/* ---------- 文档列表：上传时间紧随序号；分段列收窄；文件名换行 ---------- */
+.table-docs {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+.table-docs col.docs-col-check {
+  width: 3%;
+}
+.table-docs col.docs-col-index {
+  width: 5.5%;
+}
+.table-docs col.docs-col-time {
+  width: 10%;
+}
+.table-docs col.docs-col-name {
+  width: 32.5%;
+}
+.table-docs col.docs-col-size,
+.table-docs col.docs-col-num,
+.table-docs col.docs-col-status {
+  width: 11%;
+}
+.table-docs col.docs-col-actions {
+  width: 16%;
+}
+
+.table-docs th,
+.table-docs td {
+  overflow: hidden;
+  vertical-align: middle;
+  max-width: 0;
+}
+
+.table-docs th.col-time,
+.table-docs td.col-time {
+  overflow: visible;
+  white-space: normal !important;
+  text-overflow: clip;
+  max-width: none;
+}
+
+.table-docs .cell-time-stack .cell-time-date,
+.table-docs .cell-time-stack .cell-time-clock {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  max-width: none;
+}
+
+.table-docs th.col-index,
+.table-docs td.col-index {
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  max-width: none;
+}
+
+.table-docs th.col-name,
+.table-docs td.col-name {
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.table-docs th.col-num,
+.table-docs td.col-num,
+.table-docs th.col-size,
+.table-docs td.col-size {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 操作列：宽度已按全局比例收窄；交互样式走全局 table-actions */
+.table-docs th.col-actions,
+.table-docs td.col-actions {
+  max-width: none;
+  overflow: visible;
+  white-space: normal;
+}
+
+/* ---------- 大模型配置表：内容均分 + 全列居中；操作列宽 12.5rem 不变 ----------
+ * 策略：URL/Key 中等占比可换行；短列收紧；Key 状态徽章单独换行；操作按钮上下两行且保持 btn-sm 固有尺寸。
+ */
+.table-models {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+.table-models col.models-col-name {
+  width: 11%;
+}
+.table-models col.models-col-type {
+  width: 8%;
+}
+.table-models col.models-col-model {
+  width: 12%;
+}
+.table-models col.models-col-url {
+  width: 24%;
+}
+.table-models col.models-col-key {
+  width: 14%;
+}
+.table-models col.models-col-priority {
+  width: 6%;
+}
+.table-models col.models-col-enabled {
+  width: 6%;
+}
+.table-models col.models-col-default {
+  width: 5%;
+}
+.table-models col.models-col-actions {
+  width: 12.5rem;
+}
+
+.table-models th,
+.table-models td {
+  overflow: hidden;
+  vertical-align: middle;
+  max-width: 0;
+  text-align: center;
+}
+
+.table-models th.col-name,
+.table-models td.col-name,
+.table-models th.col-model,
+.table-models td.col-model,
+.table-models th.col-url,
+.table-models td.col-url,
+.table-models th.col-key,
+.table-models td.col-key,
+.table-models th.col-type,
+.table-models td.col-type,
+.table-models th.col-num,
+.table-models td.col-num,
+.table-models th.col-status,
+.table-models td.col-status,
+.table-models th.col-default,
+.table-models td.col-default {
+  width: auto;
+  max-width: none;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.table-models th.col-url,
+.table-models td.col-url {
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.table-models th.col-type,
+.table-models td.col-type,
+.table-models th.col-num,
+.table-models td.col-num,
+.table-models th.col-status,
+.table-models td.col-status,
+.table-models th.col-default,
+.table-models td.col-default {
+  overflow: visible !important;
+}
+
+.table-models th.col-num,
+.table-models td.col-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.table-models .models-key-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.table-models .models-key-cell code {
+  display: block;
+  max-width: 100%;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.table-models .models-key-cell .badge {
+  flex: 0 0 auto;
+}
+
+.table-models th.col-actions,
+.table-models td.col-actions {
+  max-width: none;
+  overflow: visible;
+  text-align: center;
+}
+
+/* 操作：上下两行；按钮保持 sm 固有尺寸，不拉满格子 */
+.table-models .table-actions.models-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+.table-models .table-actions.models-actions .table-actions-row {
+  display: flex;
+  justify-content: center;
+  width: auto;
+}
+
+.table-models .table-actions.models-actions .btn {
+  width: auto !important;
+  min-width: 4.5rem;
+  max-width: none;
+  height: auto;
+  min-height: 28px;
+  padding: 0 12px;
+  justify-self: center;
+  flex: 0 0 auto;
+}
+
+/* ---------- 角色与权限表：按内容分配列宽；操作列保持全局 12.5rem 不动 ----------
+ * 问题：全局 col-name=8rem、col-code=7rem 挤占空间；说明列被压扁导致与「内置」重叠。
+ * 策略：说明列最大；中文名/标识中等可换行；内置/权限数收紧；操作列不改。
+ */
+.table-roles {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+.table-roles col.roles-col-name {
+  width: 16%;
+}
+.table-roles col.roles-col-code {
+  width: 14%;
+}
+.table-roles col.roles-col-desc {
+  width: 40%;
+}
+.table-roles col.roles-col-builtin {
+  width: 8%;
+}
+.table-roles col.roles-col-num {
+  width: 7%;
+}
+.table-roles col.roles-col-actions {
+  width: 12.5rem;
+}
+
+.table-roles th,
+.table-roles td {
+  overflow: hidden;
+  vertical-align: middle;
+  max-width: 0;
+}
+
+.table-roles th.col-name,
+.table-roles td.col-name,
+.table-roles th.col-code,
+.table-roles td.col-code,
+.table-roles th.col-desc,
+.table-roles td.col-desc {
+  width: auto;
+  max-width: none;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.table-roles th.col-desc,
+.table-roles td.col-desc {
+  line-height: 1.45;
+}
+
+.table-roles th.col-builtin,
+.table-roles td.col-builtin {
+  width: auto;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-align: center;
+}
+
+.table-roles th.col-num,
+.table-roles td.col-num {
+  width: auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.table-roles th.col-actions,
+.table-roles td.col-actions {
+  max-width: none;
+  overflow: visible;
+}
+
+/* ---------- 角色缓存配置表：按内容类型分配列宽；操作列保持全局 12.5rem 不动 ----------
+ * 问题：全局 col-name=8rem、col-role=5.5rem 把长文挤扁；无宽度的缓存数/周期却吃掉剩余空白。
+ * 策略：文案列多给、数字/状态列收紧、时间列够两行日期、操作列沿用全局宽度不改按钮网格。
+ */
+.table-role-caches {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+.table-role-caches col.rc-col-kb {
+  width: 24%;
+}
+.table-role-caches col.rc-col-role {
+  width: 18%;
+}
+.table-role-caches col.rc-col-count {
+  width: 6%;
+}
+.table-role-caches col.rc-col-cycle {
+  width: 10%;
+}
+.table-role-caches col.rc-col-time {
+  width: 9%;
+}
+.table-role-caches col.rc-col-status {
+  width: 7%;
+}
+.table-role-caches col.rc-col-actions {
+  width: 12.5rem; /* 与全局 .col-actions 一致，不改操作区 */
+}
+
+.table-role-caches th,
+.table-role-caches td {
+  overflow: hidden;
+  vertical-align: middle;
+  max-width: 0;
+}
+
+.table-role-caches th.col-name,
+.table-role-caches td.col-name,
+.table-role-caches th.col-role,
+.table-role-caches td.col-role {
+  width: auto; /* 取消全局 8rem / 5.5rem，交给 colgroup */
+  max-width: none;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.table-role-caches th.col-num,
+.table-role-caches td.col-num {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.table-role-caches th.col-cycle,
+.table-role-caches td.col-cycle {
+  white-space: normal;
+  text-align: center;
+}
+
+.table-role-caches th.col-time,
+.table-role-caches td.col-time {
+  width: auto;
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.table-role-caches th.col-status,
+.table-role-caches td.col-status {
+  width: auto;
+}
+
+.table-role-caches th.col-actions,
+.table-role-caches td.col-actions {
+  /* 刻意不覆盖全局操作列宽与按钮网格 */
+  max-width: none;
+  overflow: visible;
+}
+
+/* ---------- 操作审计表：内容占比分配；详情操作列沿用 col-actions-detail 不改 ----------
+ * 问题：col-shrink-sm 把资源 ID / 请求标识压到 4.5rem 并前端截断，难读；短列与长 ID 比例失衡。
+ * 策略：ID 列加宽可换行完整显示；操作者/动作中等；勾选/序号/结果收紧；操作列保持详情专用宽度。
+ */
+.table-audit {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+.table-audit col.audit-col-check {
+  width: 2.5rem;
+}
+.table-audit col.audit-col-index {
+  width: 3.25rem;
+}
+.table-audit col.audit-col-actor {
+  width: 10%;
+}
+.table-audit col.audit-col-action {
+  width: 12%;
+}
+.table-audit col.audit-col-resource {
+  width: 8%;
+}
+.table-audit col.audit-col-rid {
+  width: 16%;
+}
+.table-audit col.audit-col-req {
+  width: 16%;
+}
+.table-audit col.audit-col-result {
+  width: 6%;
+}
+.table-audit col.audit-col-time {
+  width: 9%;
+}
+.table-audit col.audit-col-actions {
+  width: 4.5rem;
+}
+
+.table-audit th,
+.table-audit td {
+  overflow: hidden;
+  vertical-align: middle;
+  max-width: 0;
+  text-align: center;
+}
+
+.table-audit th.col-check,
+.table-audit td.col-check,
+.table-audit th.col-index,
+.table-audit td.col-index,
+.table-audit th.col-status,
+.table-audit td.col-status {
+  width: auto;
+  max-width: none;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.table-audit th.col-name,
+.table-audit td.col-name,
+.table-audit th.col-action,
+.table-audit td.col-action,
+.table-audit th.col-resource,
+.table-audit td.col-resource,
+.table-audit th.col-id,
+.table-audit td.col-id,
+.table-audit th.col-time,
+.table-audit td.col-time {
+  width: auto;
+  max-width: none;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.table-audit th.col-id,
+.table-audit td.col-id {
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.table-audit th.col-actions,
+.table-audit td.col-actions {
+  max-width: none;
+  overflow: visible;
+}
+
+.card-header-actions #btnAuditBatchDelete {
+  flex: 0 0 auto;
+}
+
+/* 表格卡片底栏：批量删除 + 分页水平居中 */
+.table-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  min-height: 36px;
+}
+
+.table-card-footer-start {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-card-footer .pager {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* ---------- 文档工作台：固定卡片高度（对齐原分段效果 420px 内容区） ---------- */
+.doc-wb-modal {
+  width: min(920px, calc(100vw - 24px));
+  height: min(640px, 92vh);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.doc-wb-modal .modal-title {
+  flex-shrink: 0;
+}
+
+.doc-wb-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.doc-wb-meta {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.doc-wb-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.doc-wb-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 420px;
+  max-height: 420px;
+}
+
+.doc-wb-pane {
+  height: 100%;
+  max-height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.doc-wb-pane-surface {
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-surface-solid, #ffffff);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#docPreviewBody.doc-wb-pane-surface {
+  font-family: inherit;
+}
+
+.doc-wb-effect-hint {
+  margin: 0 0 8px;
+}
+
+.doc-wb-actions {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 尺寸锁定；绿/蓝/红仅改配色，按压反馈保留 */
+.doc-wb-actions .btn {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 14px;
+  box-sizing: border-box;
+  border-radius: var(--radius-pill, 999px);
+  line-height: 1;
+  font-size: var(--font-size-xs);
+}
+
+.doc-wb-actions .btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.12);
+  filter: brightness(0.96);
+}
+
+.doc-wb-actions .btn-success {
+  background: transparent;
+  color: var(--color-success);
+  border: 1px solid var(--color-success);
+  box-shadow: none;
+}
+
+.doc-wb-actions .btn-success:hover {
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
+  border-color: var(--color-success);
+  transform: none;
+}
+
+.doc-wb-actions .btn-primary {
+  background: var(--color-primary);
+  color: var(--btn-fg-on-fill, #ffffff);
+  border: 1px solid transparent;
+}
+
+.doc-wb-actions .btn-primary:hover {
+  background: var(--color-primary-dark);
+  color: var(--btn-fg-on-fill, #ffffff);
+  transform: none;
+}
+
+.doc-wb-actions .btn-danger {
+  background: transparent;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  box-shadow: none;
+}
+
+.doc-wb-actions .btn-danger:hover {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  transform: none;
+}
+
+/* ---------- 历史快照表：按内容重分配非操作列；操作列样式/宽度不动 ----------
+ * 问题：名称列过窄导致长名堆叠；括号被 overflow-wrap:anywhere 拆断；说明列偏宽挤占名称。
+ * 策略：名称/触发加宽、说明略收；名称括号段强制换行；操作列 col/按钮网格保持原样。
+ */
+.table-snapshots {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+.table-snapshots col.snap-col-time {
+  width: 9%;
+}
+.table-snapshots col.snap-col-name {
+  width: 28%;
+}
+.table-snapshots col.snap-col-trigger {
+  width: 12%;
+}
+.table-snapshots col.snap-col-num {
+  width: 6%;
+}
+.table-snapshots col.snap-col-desc {
+  width: 23%;
+}
+.table-snapshots col.snap-col-actions {
+  width: 16%;
+}
+
+.table-snapshots th,
+.table-snapshots td {
+  overflow: hidden;
+  vertical-align: middle;
+  max-width: 0; /* 配合 fixed：强制按 col 宽分配，避免被内容撑开 */
+}
+
+.table-snapshots th.col-time,
+.table-snapshots td.col-time {
+  overflow: visible;
+  white-space: normal !important;
+  text-overflow: clip;
+  max-width: none;
+  text-align: center;
+}
+
+.table-snapshots .cell-time-stack {
+  max-width: none;
+}
+
+.table-snapshots .cell-time-stack .cell-time-date,
+.table-snapshots .cell-time-stack .cell-time-clock {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  max-width: none;
+}
+
+.table-snapshots th.col-name,
+.table-snapshots td.col-name,
+.table-snapshots th.col-desc,
+.table-snapshots td.col-desc {
+  width: auto;
+  max-width: none;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.table-snapshots .snap-name-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.table-snapshots .snap-name-main,
+.table-snapshots .snap-name-sub {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.table-snapshots .snap-name-sub {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+}
+
+.table-snapshots th.col-desc,
+.table-snapshots td.col-desc {
+  text-align: center;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.table-snapshots th.col-num,
+.table-snapshots td.col-num {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.table-snapshots th.col-trigger,
+.table-snapshots td.col-trigger {
+  white-space: normal !important;
+  overflow: hidden;
+  text-align: center;
+}
+
+/* 触发方式徽章：随列宽换行，不撑破单元格 */
+.table-snapshots td.col-trigger .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: auto;
+  min-height: 28px;
+  max-width: 100%;
+  padding: 4px 8px;
+  white-space: normal;
+  line-height: 1.25;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  flex-shrink: 1;
+  box-sizing: border-box;
+}
+
+.table-snapshots th.col-actions,
+.table-snapshots td.col-actions {
+  max-width: none;
+  overflow: visible;
+  white-space: normal;
+  vertical-align: middle;
+  text-align: center;
+}
+
+/* 严格沿用全局 table-actions 两列网格（超出自动换行）；不改 display/grid。
+   按钮均分格子宽度，长文案自适应（可换行），禁止再锁死 4.5rem / 单行 flex。 */
+.table-snapshots .table-actions > .btn,
+.table-snapshots .table-actions > span {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: 28px;
+  box-sizing: border-box;
+  justify-self: stretch;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.25;
+  text-align: center;
+}
+
+/* 回退差异预览表：说明列固定宽度内自动换行；「不可选」提示 */
+.table-snap-preview th.col-desc,
+.table-snap-preview td.col-desc {
+  width: 34%;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: left;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+
+.table-snap-preview .snap-doc-na {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
 /* ---------- API 接入指南文档页 ---------- */
+.api-guide-bar {
+  display: flex;
+  align-items: center;
+  margin: 0 0 14px;
+}
+
+.fastapi-swagger-card {
+  margin-bottom: 16px;
+}
+
+.fastapi-swagger-frame {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0 0 calc(var(--radius-card) - 2px) calc(var(--radius-card) - 2px);
+  background: #ffffff;
+}
+
+.fastapi-swagger-iframe {
+  display: block;
+  width: 100%;
+  height: min(72vh, 820px);
+  min-height: 520px;
+  border: 0;
+  background: #ffffff;
+  color-scheme: light;
+}
+
+html[data-theme="dark"] .fastapi-swagger-frame,
+html[data-theme="dark"] .fastapi-swagger-iframe {
+  background: #0b0f19;
+  color-scheme: dark;
+}
+
+html[data-theme="light"] .fastapi-swagger-frame,
+html[data-theme="light"] .fastapi-swagger-iframe {
+  background: #ffffff;
+  color-scheme: light;
+}
+
 .fastapi-docs-card {
   min-height: calc(100vh - 180px);
 }

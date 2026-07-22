@@ -11,6 +11,8 @@ from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.models import User
 from app.schemas.audit import (
+    AuditBatchDeleteRequest,
+    AuditBatchDeleteResult,
     AuditLogFilterParams,
     AuditLogListResponse,
     AuditLogResponse,
@@ -60,6 +62,23 @@ async def list_audit_logs(
         end_date=end_date,
     )
     data: AuditLogListResponse = await AuditService(db).list_logs(params)
+    return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
+
+
+@router.post(
+    "/logs/batch-delete",
+    response_model=BaseResponse,
+    status_code=status.HTTP_200_OK,
+    summary="批量删除审计日志",
+    description="按勾选 ID 批量删除审计记录（不可恢复）。",
+)
+async def batch_delete_audit_logs(
+    body: AuditBatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("audit:read")),
+    request_id: str = Depends(_request_id),
+) -> BaseResponse:
+    data: AuditBatchDeleteResult = await AuditService(db).batch_delete(body.ids)
     return BaseResponse(data=data.model_dump(mode="json"), request_id=request_id)
 
 

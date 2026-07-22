@@ -278,7 +278,7 @@
 #htRunDetailCard .ht-q-cell {
   text-align: left;
   white-space: normal !important;
-  overflow: visible !important;
+  overflow: hidden !important;
   vertical-align: top;
   padding-top: 14px;
   padding-bottom: 16px;
@@ -289,6 +289,11 @@
   flex-direction: column;
   gap: 6px;
   text-align: left;
+  max-height: 11rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 
 #htRunDetailCard .ht-qa-label {
@@ -419,6 +424,8 @@
 .page-head-text {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
 .page-head h1 {
@@ -528,8 +535,7 @@
 .card:hover,
 .glass-panel:hover,
 .stat-card:hover,
-.kb-card:hover,
-.kb-create-card:hover {
+.kb-card:hover {
   /* 全局取消卡片悬停位移；首页指定卡片在 admin.css 单独放行 */
   background: var(--glass-bg) !important;
   background-image: none;
@@ -825,9 +831,9 @@ html[data-theme="dark"] select.form-control option {
   color: var(--color-danger);
 }
 
-/* ---------- 表格（全局约束：不超出容器，列可挤压省略） ---------- */
+/* ---------- 表格（全局硬性：不超出容器；单元格内容默认可换行，禁止「…」截断） ---------- */
 .table-wrap {
-  overflow-x: hidden; /* 禁止横向超出；靠列挤压适配 */
+  overflow-x: hidden; /* 禁止横向超出显示区域 */
   overflow-y: visible;
   max-width: 100%;
   min-width: 0;
@@ -885,10 +891,10 @@ html[data-theme="dark"] select.form-control option {
   font-weight: var(--font-weight-normal);
   line-height: var(--line-height-tight);
   overflow: hidden;
-  text-overflow: clip; /* 默认不出现「…」；需省略的列单独声明 */
-  white-space: nowrap;
-  word-break: normal;
-  overflow-wrap: normal;
+  text-overflow: clip; /* 全局禁止「…」；长文换行显示 */
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   max-width: none;
   box-sizing: border-box;
 }
@@ -981,7 +987,17 @@ html[data-theme="dark"] select.form-control option {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-normal);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.table .cell-muted-stack {
+  display: inline-block;
+  text-align: center;
+  line-height: 1.35;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 .table .cell-time-stack {
@@ -1000,9 +1016,11 @@ html[data-theme="dark"] select.form-control option {
 .table .cell-time-stack .cell-time-clock {
   display: block;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .table .cell-time-stack .cell-time-clock {
@@ -1023,10 +1041,12 @@ html[data-theme="dark"] select.form-control option {
 .table th.col-time,
 .table td.col-time {
   width: 7rem;
-  white-space: nowrap;
+  white-space: normal;
   vertical-align: middle;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .table th.col-status,
@@ -1069,14 +1089,20 @@ html[data-theme="dark"] select.form-control option {
   width: 8rem;
   color: var(--color-text);
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .table th.col-code,
 .table td.col-code {
   width: 7rem;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .table th.col-actions:not(.col-actions-detail),
@@ -1108,26 +1134,49 @@ html[data-theme="dark"] select.form-control option {
   min-width: 0 !important;
   max-width: 100% !important;
   padding: 0 10px !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
   flex-shrink: 1;
 }
 
-/* 可压缩列：角色文案 */
+/* 可压缩列：角色文案（换行完整显示，不用省略号） */
 .table th.col-role,
 .table td.col-role {
   width: 5.5rem;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-/* 内容次要列：优先挤压 */
+/* 内容次要列：优先挤压，仍换行完整显示 */
 .table th.col-shrink,
 .table td.col-shrink {
   width: 6rem;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 检测周期等「输入+单位」列：居中 */
+.table th.col-cycle,
+.table td.col-cycle {
+  text-align: center;
+  white-space: normal;
+}
+
+.table td.col-cycle .cell-inline-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 auto;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .table th.col-shrink-sm,

@@ -441,11 +441,11 @@ async function dispatchRender() {
   closeAllModals();
   playPageEnter();
   const path = currentPath();
-  // 知识库详情 / 文档 / 快照
+  // 知识库工作区（旧 /documents、/snapshots 归一化到 ?tab=）
   let m;
-  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)\/documents$/))) return pageDocuments(m[1]);
-  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)\/snapshots$/))) return pageSnapshots(m[1]);
-  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)$/))) return pageKbDetail(m[1]);
+  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)\/documents$/))) return navigate(kbWorkspacePath(m[1], "docs"));
+  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)\/snapshots$/))) return navigate(kbWorkspacePath(m[1], "snaps"));
+  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)$/))) return pageKbWorkspace(m[1]);
   if (path === "/admin/users") return pageUsers();
   if (path === "/admin/roles") return pageRoles();
   if ((m = path.match(/^\/admin\/departments\/([^/]+)$/))) return pageDepartmentDetail(m[1]);
@@ -908,12 +908,12 @@ async function pageUsers() {
         </div>
         <div class="table-wrap"><table class="table table-users">
           <thead><tr>
+            <th class="col-time">创建时间</th>
             <th class="col-name">账号</th>
-            <th>昵称</th>
+            <th>用户名</th>
             <th class="col-status">状态</th>
             <th>角色</th>
-            <th>部门</th>
-            <th class="col-time">创建时间</th>
+            <th>所属部门</th>
             <th class="col-time">最近登录</th>
             <th class="col-actions">操作</th>
           </tr></thead>
@@ -930,7 +930,7 @@ async function pageUsers() {
                   : escapeHtml(roleLabelOf(u));
                 const ops = canWrite
                   ? isFixedSuper
-                    ? `<span class="cell-muted">固定超管（不可操作）</span>`
+                    ? `<span class="cell-muted cell-muted-stack">固定超管<br />（不可操作）</span>`
                     : canManage
                       ? `<div class="table-actions table-actions-stack">
                     <div class="table-actions-row">
@@ -945,12 +945,12 @@ async function pageUsers() {
                   : `<span class="cell-muted">—</span>`;
                 const focused = focusUserId && String(u.id) === String(focusUserId);
                 return `<tr data-id="${escapeHtml(u.id)}" class="${focused ? "row-focus" : ""}" ${focused ? 'style="outline:2px solid var(--color-primary, #5b8def);outline-offset:-2px"' : ""}>
+                  <td class="col-time">${formatDateTimeHtml(u.created_at)}</td>
                   <td class="col-name"><strong class="cell-primary">${escapeHtml(u.username)}</strong></td>
                   <td>${escapeHtml(u.nickname || "-")}</td>
                   <td class="col-status">${st}</td>
                   <td class="cell-role">${roleCell}</td>
                   <td>${escapeHtml(u.department || "-")}</td>
-                  <td class="col-time">${formatDateTimeHtml(u.created_at)}</td>
                   <td class="col-time">${formatDateTimeHtml(u.last_login_at)}</td>
                   <td class="col-actions">${ops}</td>
                 </tr>`;
@@ -1147,17 +1147,25 @@ async function pageRoles() {
       <div class="card panel-fill">
         <div class="card-header">
           <div class="card-header-text">
-            <h3 class="card-title">角色与权限</h3>
+            <h3 class="card-title">角色列表</h3>
             <p class="card-sub">共 ${items.filter((r) => r.name !== "user" && r.name !== "kb_admin").length} 个角色</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-roles">
+          <colgroup>
+            <col class="roles-col-name" />
+            <col class="roles-col-code" />
+            <col class="roles-col-desc" />
+            <col class="roles-col-builtin" />
+            <col class="roles-col-num" />
+            <col class="roles-col-actions" />
+          </colgroup>
           <thead><tr>
-            <th class="col-name">中文名</th>
+            <th class="col-name">身份角色</th>
             <th class="col-code">标识</th>
             <th class="col-desc">说明</th>
             <th class="col-builtin">内置</th>
-            <th>权限数</th>
+            <th class="col-num">权限数</th>
             <th class="col-actions">操作</th>
           </tr></thead>
           <tbody>
@@ -1171,9 +1179,9 @@ async function pageRoles() {
                 return `<tr>
                   <td class="col-name"><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
                   <td class="col-code"><code>${escapeHtml(r.name)}</code></td>
-                  <td class="col-desc" title="${escapeHtml(desc)}"><span class="cell-clamp">${escapeHtml(desc)}</span></td>
+                  <td class="col-desc">${escapeHtml(desc || "—")}</td>
                   <td class="col-builtin">${r.is_builtin ? `<span class="badge badge-info">内置</span>` : "-"}</td>
-                  <td>${(r.permissions || []).length}</td>
+                  <td class="col-num">${(r.permissions || []).length}</td>
                   <td class="col-actions">
                     <div class="table-actions">
                       <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
@@ -1317,6 +1325,19 @@ function accessScopeBadge(k) {
   if (dept === "GUEST") return `<span class="badge badge-success">访客专用</span>`;
   if (dept) return `<span class="badge">${escapeHtml(k.department)} 部门</span>`;
   return `<span class="badge">私有</span>`;
+}
+
+/** 知识库类型中文 */
+function kbTypeLabel(type) {
+  return (
+    { general: "通用知识", technical: "技术文档", product: "产品手册", faq: "FAQ" }[String(type || "").toLowerCase()] ||
+    type ||
+    "通用知识"
+  );
+}
+
+function kbTypeBadge(type) {
+  return `<span class="badge badge-info">${escapeHtml(kbTypeLabel(type))}</span>`;
 }
 
 function departmentSelectHtml(departments, selectedCode, { emptyLabel = "不限 / 未分配" } = {}) {
@@ -1897,29 +1918,59 @@ async function pageModels() {
             <p class="card-sub">${canWrite ? "可编辑密钥引用与优先级" : "仅超级管理员可配置密钥与优先级（需 model:write）"}</p>
           </div>
         </div>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>名称</th><th>类型</th><th>模型</th><th>URL</th><th>Key 环境变量</th><th>优先级</th><th>启用</th><th>默认</th><th class="col-actions">操作</th></tr></thead>
+        <div class="table-wrap"><table class="table table-models">
+          <colgroup>
+            <col class="models-col-name" />
+            <col class="models-col-type" />
+            <col class="models-col-model" />
+            <col class="models-col-url" />
+            <col class="models-col-key" />
+            <col class="models-col-priority" />
+            <col class="models-col-enabled" />
+            <col class="models-col-default" />
+            <col class="models-col-actions" />
+          </colgroup>
+          <thead><tr>
+            <th class="col-name">名称</th>
+            <th class="col-type">类型</th>
+            <th class="col-model">模型</th>
+            <th class="col-url">URL</th>
+            <th class="col-key">Key 环境变量</th>
+            <th class="col-num">优先级</th>
+            <th class="col-status">启用</th>
+            <th class="col-default">默认</th>
+            <th class="col-actions">操作</th>
+          </tr></thead>
           <tbody>
             ${items
               .map(
                 (m) => `<tr>
-                  <td>${escapeHtml(m.name)}</td>
-                  <td><span class="badge">${escapeHtml(m.model_type)}</span></td>
-                  <td>${escapeHtml(m.model_name || "-")}</td>
-                  <td class="text-muted" style="max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(m.base_url || "")}">${escapeHtml(m.base_url || "-")}</td>
-                  <td><code>${escapeHtml(m.api_key_env || "-")}</code>${m.has_api_key ? ' <span class="badge badge-success">已配置</span>' : ""}</td>
-                  <td>${escapeHtml(m.priority ?? 100)}</td>
-                  <td>${m.is_enabled ? `<span class="badge badge-success">是</span>` : `<span class="badge badge-danger">否</span>`}</td>
-                  <td>${m.is_default ? "✓" : ""}</td>
-                  <td class="col-actions">
-                    <div class="table-actions">
-                      ${
-                        canWrite
-                          ? `<button class="btn btn-text btn-sm" data-edit="${escapeHtml(m.id)}">编辑</button>
-                             <button class="btn ${m.is_enabled ? "btn-danger" : "btn-success"} btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>`
-                          : `<span class="text-muted">—</span>`
-                      }
+                  <td class="col-name">${escapeHtml(m.name)}</td>
+                  <td class="col-type"><span class="badge">${escapeHtml(m.model_type)}</span></td>
+                  <td class="col-model">${escapeHtml(m.model_name || "-")}</td>
+                  <td class="col-url text-muted" title="${escapeHtml(m.base_url || "")}">${escapeHtml(m.base_url || "-")}</td>
+                  <td class="col-key">
+                    <div class="models-key-cell">
+                      <code>${escapeHtml(m.api_key_env || "-")}</code>
+                      ${m.has_api_key ? `<span class="badge badge-success">已配置</span>` : ""}
                     </div>
+                  </td>
+                  <td class="col-num">${escapeHtml(m.priority ?? 100)}</td>
+                  <td class="col-status">${m.is_enabled ? `<span class="badge badge-success">是</span>` : `<span class="badge badge-danger">否</span>`}</td>
+                  <td class="col-default">${m.is_default ? "✓" : ""}</td>
+                  <td class="col-actions">
+                    ${
+                      canWrite
+                        ? `<div class="table-actions table-actions-stack models-actions">
+                      <div class="table-actions-row">
+                        <button class="btn btn-text btn-sm" data-edit="${escapeHtml(m.id)}">编辑</button>
+                      </div>
+                      <div class="table-actions-row">
+                        <button class="btn ${m.is_enabled ? "btn-danger" : "btn-success"} btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>
+                      </div>
+                    </div>`
+                        : `<span class="text-muted">—</span>`
+                    }
                   </td>
                 </tr>`
               )
@@ -2097,43 +2148,297 @@ async function renderModelUsage(model, days) {
   }
 }
 
+/* ========== 知识库工作区（同页 Tab + ?tab=） ========== */
+const KB_WS_TABS = ["overview", "docs", "snaps"];
+const KB_WS_TAB_LABELS = { overview: "文档详情", docs: "文档上传", snaps: "历史快照" };
+
+function normalizeKbTab(tab) {
+  const t = String(tab || "overview").toLowerCase();
+  if (t === "documents") return "docs";
+  if (t === "snapshots") return "snaps";
+  if (t === "acl") return "overview"; // 授权已并入详情
+  return KB_WS_TABS.includes(t) ? t : "overview";
+}
+
+function getKbTabFromHash() {
+  const q = location.hash.split("?")[1] || "";
+  return normalizeKbTab(new URLSearchParams(q).get("tab"));
+}
+
+function kbWorkspacePath(kbId, tab) {
+  const t = normalizeKbTab(tab);
+  return t === "overview" ? `/admin/knowledge-bases/${kbId}` : `/admin/knowledge-bases/${kbId}?tab=${t}`;
+}
+
+function isKbDocsView(kbId) {
+  const path = currentPath();
+  const re = new RegExp(`^/admin/knowledge-bases/${String(kbId).replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}$`);
+  if (!re.test(path)) return false;
+  return getKbTabFromHash() === "docs";
+}
+
+function renderKbWorkspaceBar(kbId, kbName, tab, kbList) {
+  const curTab = normalizeKbTab(tab);
+  const options = (kbList || [])
+    .map(
+      (k) =>
+        `<option value="${escapeHtml(k.id)}" ${String(k.id) === String(kbId) ? "selected" : ""}>${escapeHtml(k.name || k.id)}</option>`
+    )
+    .join("");
+  const visibleTabs = KB_WS_TABS.filter((t) => {
+    if (t === "docs") return hasPermission("doc:read");
+    if (t === "snaps") return hasPermission("snapshot:read");
+    return true;
+  });
+  const tabs = visibleTabs
+    .map(
+      (t) =>
+        `<button type="button" class="kb-ws-tab ${t === curTab ? "is-active" : ""}" data-kb-tab="${t}">${KB_WS_TAB_LABELS[t]}</button>`
+    )
+    .join("");
+  return `<nav class="kb-workspace-bar" aria-label="知识库工作区">
+    <div class="kb-ws-nav">
+      <button type="button" class="kb-ws-tab kb-ws-back" data-go="/admin/knowledge-bases">知识库管理</button>
+      <span class="kb-ws-sep" aria-hidden="true">——</span>
+      <select class="form-control kb-ws-select" id="kbWsSelect" aria-label="切换知识库">${options}</select>
+    </div>
+    <div class="kb-ws-tabs" role="tablist">${tabs}</div>
+  </nav>`;
+}
+
+function bindKbWorkspaceBar(kbId) {
+  document.querySelectorAll(".kb-workspace-bar [data-go]").forEach((b) =>
+    b.addEventListener("click", () => navigate(b.getAttribute("data-go")))
+  );
+  const sel = document.getElementById("kbWsSelect");
+  if (sel) {
+    sel.onchange = () => {
+      const nextId = sel.value;
+      if (nextId && String(nextId) !== String(kbId)) navigate(kbWorkspacePath(nextId, getKbTabFromHash()));
+    };
+  }
+  document.querySelectorAll(".kb-ws-tab[data-kb-tab]").forEach((btn) => {
+    btn.onclick = () => {
+      const t = btn.getAttribute("data-kb-tab");
+      if (normalizeKbTab(t) !== getKbTabFromHash()) navigate(kbWorkspacePath(kbId, t));
+    };
+  });
+}
+
+async function pageKbWorkspace(id) {
+  if (!requirePerm("kb:read", "知识库")) return;
+  let tab = getKbTabFromHash();
+  if (tab === "docs" && !hasPermission("doc:read")) tab = "overview";
+  if (tab === "snaps" && !hasPermission("snapshot:read")) tab = "overview";
+  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载知识库…</div>`;
+  let kbList = [];
+  let kbName = id;
+  try {
+    const data = await api.get("/knowledge-bases?page=1&page_size=100");
+    kbList = data.items || [];
+    const cur = kbList.find((k) => String(k.id) === String(id));
+    if (cur) kbName = cur.name || id;
+  } catch (e) {
+    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  document.getElementById("pageRoot").innerHTML = `
+    ${renderKbWorkspaceBar(id, kbName, tab, kbList)}
+    <div id="kbWsBody"></div>`;
+  bindKbWorkspaceBar(id);
+  if (tab === "docs") await pageDocuments(id, { embedded: true, mountId: "kbWsBody" });
+  else if (tab === "snaps") await pageSnapshots(id, { embedded: true, mountId: "kbWsBody" });
+  else await pageKbDetail(id, { embedded: true, mountId: "kbWsBody" });
+}
+
 /* ========== 知识库列表 ========== */
 async function pageKbList() {
   if (!requirePerm("kb:read", "知识库管理")) return;
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载知识库…</div>`;
   try {
-    const data = await api.get("/knowledge-bases?page=1&page_size=50");
-    const items = data.items || [];
-    const statusLabel = (status) => ({ active: "已同步", ready: "已就绪", processing: "处理中" }[String(status || "").toLowerCase()] || status || "待配置");
+    const [data, departments] = await Promise.all([
+      api.get("/knowledge-bases?page=1&page_size=100"),
+      loadDepartmentOptions(),
+    ]);
+    const allItems = data.items || [];
+    const statusLabel = (status) =>
+      ({ active: "已同步", ready: "已就绪", processing: "处理中", vectorizing: "向量化中" }[String(status || "").toLowerCase()] ||
+        status ||
+        "待配置");
+    const filters = { q: "", department: "", type: "" };
+
+    const matchKb = (k) => {
+      const q = filters.q.trim().toLowerCase();
+      if (q) {
+        const hay = `${k.name || ""} ${k.description || ""} ${(k.tags || []).join(" ")}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (filters.type && String(k.type || "").toLowerCase() !== filters.type) return false;
+      if (filters.department === "__private__") {
+        if (String(k.department || "").trim()) return false;
+      } else if (filters.department) {
+        if (String(k.department || "").toUpperCase() !== filters.department.toUpperCase()) return false;
+      }
+      return true;
+    };
+
+    const renderCard = (k) => {
+      const st = String(k.status || "").toLowerCase();
+      const canWriteKb = hasPermission("kb:write");
+      return `<article class="kb-card kb-card-clickable" data-kb-open="${escapeHtml(k.id)}" tabindex="0" role="link" aria-label="打开 ${escapeHtml(k.name)}">
+          <div class="kb-card-cover"><span>${escapeHtml((k.name || "知").slice(0, 1))}</span>${kbTypeBadge(k.type)}</div>
+          <div class="kb-card-body">
+            <div class="kb-card-heading"><h3>${escapeHtml(k.name)}</h3><span class="status-dot ${st === "processing" || st === "vectorizing" ? "is-processing" : ""}">${escapeHtml(statusLabel(k.status))}</span></div>
+            <p>${escapeHtml(k.description || "暂未填写知识库简介，可进入详情页补充说明。")}</p>
+            <div class="kb-card-meta"><span>${escapeHtml(k.document_count ?? k.doc_count ?? 0)} 份文档</span><span>${formatDateTime(k.updated_at)}</span></div>
+            <div class="kb-card-access kb-card-tags">${accessScopeBadge(k)}</div>
+            <div class="kb-card-actions">
+              <button type="button" class="btn btn-sm kb-card-btn kb-card-btn-detail" data-kb-detail="${escapeHtml(k.id)}">文档详情</button>
+              ${
+                canWriteKb
+                  ? `<button type="button" class="btn btn-sm kb-card-btn kb-card-btn-del" data-kb-del="${escapeHtml(k.id)}" data-kb-name="${escapeHtml(k.name || "")}">删除</button>`
+                  : ""
+              }
+            </div>
+          </div>
+        </article>`;
+    };
+
+    const bindCards = () => {
+      const stopOnAction = (e) => e.target.closest("[data-kb-detail], [data-kb-del]");
+      document.querySelectorAll(".kb-card-clickable[data-kb-open]").forEach((card) => {
+        const open = () => navigate(kbWorkspacePath(card.getAttribute("data-kb-open"), "overview"));
+        card.addEventListener("click", (e) => {
+          if (stopOnAction(e)) return;
+          open();
+        });
+        card.addEventListener("keydown", (e) => {
+          if (stopOnAction(e)) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            open();
+          }
+        });
+      });
+      document.querySelectorAll("[data-kb-detail]").forEach((b) => {
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          navigate(kbWorkspacePath(b.getAttribute("data-kb-detail"), "overview"));
+        });
+      });
+      document.querySelectorAll("[data-kb-del]").forEach((b) => {
+        b.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const kid = b.getAttribute("data-kb-del");
+          const kname = b.getAttribute("data-kb-name") || kid;
+          const ok = await confirmDialog({
+            title: "删除知识库",
+            message: `确定删除知识库「${escapeHtml(kname)}」吗？删除后将无法恢复。`,
+            confirmText: "删除",
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            await api.delete(`/knowledge-bases/${kid}`);
+            toast("已删除", "success");
+            await pageKbList();
+          } catch (err) {
+            toast(err.message || "删除失败", "error");
+          }
+        });
+      });
+      const btnCreateCard = document.getElementById("btnCreateKbCard");
+      if (btnCreateCard) btnCreateCard.onclick = () => document.getElementById("btnCreateKb")?.click();
+    };
+
+    const paintList = () => {
+      const items = allItems.filter(matchKb);
+      const grid = document.getElementById("kbCardGrid");
+      const summary = document.getElementById("kbListSummary");
+      if (summary) {
+        const docTotal = items.reduce(
+          (sum, k) => sum + Number(k.document_count ?? k.doc_count ?? 0),
+          0
+        );
+        summary.innerHTML = `<span>共 <b>${items.length}</b> 个知识库 · 文档合计 <b>${docTotal}</b> 份${
+          items.length !== allItems.length ? `（筛选自 ${allItems.length} 个知识库）` : ""
+        }</span><span>仅展示当前账号有权访问的内容</span>`;
+      }
+      if (!grid) return;
+      const createCard = hasPermission("kb:write")
+        ? `<button type="button" class="kb-create-card" id="btnCreateKbCard"><span>+</span><b>创建新知识库</b><small>配置类型和访问范围</small></button>`
+        : "";
+      grid.innerHTML =
+        createCard +
+        (items.map(renderCard).join("") ||
+          `<div class="card empty-state span-12">${
+            allItems.length ? "无匹配的知识库，请调整搜索或筛选条件" : "暂未创建可访问的知识库"
+          }</div>`);
+      bindCards();
+    };
+
+    const deptFilterOpts = [
+      `<option value="">全部部门</option>`,
+      `<option value="__private__">私有</option>`,
+      ...(departments || [])
+        .filter((d) => d.is_enabled !== false)
+        .map((d) => `<option value="${escapeHtml(d.code)}">${escapeHtml(d.name)}（${escapeHtml(d.code)}）</option>`),
+    ].join("");
+
     document.getElementById("pageRoot").innerHTML = `
       ${pageHead({
         title: "知识库管理",
         desc: "管理企业知识资产、文档索引与访问范围。",
-        actions: hasPermission("kb:write")
-          ? `<button class="btn" id="btnCreateKb">+ 新建知识库</button>`
-          : `<span class="role-chip">只读访问</span>`,
+        actions: hasPermission("kb:write") ? "" : `<span class="role-chip">只读访问</span>`,
       })}
-      <div class="kb-summary-row"><span>共 <b>${items.length}</b> 个知识库</span><span>仅展示当前账号有权访问的内容</span></div>
-      <section class="kb-card-grid">
-        ${hasPermission("kb:write") ? `<button type="button" class="kb-create-card" id="btnCreateKbCard"><span>+</span><b>创建新知识库</b><small>配置类型、访问范围和分段策略</small></button>` : ""}
-        ${items.map((k) => `<article class="kb-card">
-          <div class="kb-card-cover"><span>${escapeHtml((k.name || "知").slice(0, 1))}</span><em>${escapeHtml(k.type || "通用知识")}</em></div>
-          <div class="kb-card-body">
-            <div class="kb-card-heading"><h3>${escapeHtml(k.name)}</h3><span class="status-dot ${String(k.status || "").toLowerCase() === "processing" ? "is-processing" : ""}">${escapeHtml(statusLabel(k.status))}</span></div>
-            <p>${escapeHtml(k.description || "暂未填写知识库简介，可进入详情页补充说明。")}</p>
-            <div class="kb-card-meta"><span>${escapeHtml(k.doc_count ?? 0)} 份文档</span><span>${formatDateTime(k.updated_at)}</span></div>
-            <div class="kb-card-access">${accessScopeBadge(k)}</div>
-            <div class="kb-card-actions"><button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">查看详情</button><button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}/documents">文档管理</button></div>
-          </div>
-        </article>`).join("") || `<div class="card empty-state span-12">暂未创建可访问的知识库</div>`}
-      </section>`;
-    document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
+      <div class="kb-list-toolbar">
+        <div class="kb-list-toolbar-filters">
+          <input type="search" class="form-control kb-list-search" id="kbSearchInput" placeholder="搜索名称、简介或标签…" autocomplete="off" />
+          <select class="form-control kb-list-filter" id="kbFilterDept" aria-label="按部门筛选">${deptFilterOpts}</select>
+          <select class="form-control kb-list-filter" id="kbFilterType" aria-label="按类型筛选">
+            <option value="">全部类型</option>
+            <option value="general">通用知识</option>
+            <option value="technical">技术文档</option>
+            <option value="product">产品手册</option>
+            <option value="faq">FAQ</option>
+          </select>
+        </div>
+        <div class="kb-list-toolbar-create">
+          ${
+            hasPermission("kb:write")
+              ? `<button class="btn" id="btnCreateKb">+ 新建知识库</button>`
+              : ""
+          }
+        </div>
+        <div class="kb-list-toolbar-spacer" aria-hidden="true"></div>
+      </div>
+      <div class="kb-summary-row" id="kbListSummary"></div>
+      <section class="kb-card-grid" id="kbCardGrid"></section>`;
+
+    paintList();
+
+    const searchInput = document.getElementById("kbSearchInput");
+    const deptSel = document.getElementById("kbFilterDept");
+    const typeSel = document.getElementById("kbFilterType");
+    let searchTimer = null;
+    const applyFilters = () => {
+      filters.q = searchInput?.value || "";
+      filters.department = deptSel?.value || "";
+      filters.type = typeSel?.value || "";
+      paintList();
+    };
+    if (searchInput) {
+      searchInput.oninput = () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(applyFilters, 180);
+      };
+    }
+    if (deptSel) deptSel.onchange = applyFilters;
+    if (typeSel) typeSel.onchange = applyFilters;
+
     const btnCreate = document.getElementById("btnCreateKb");
-    const btnCreateCard = document.getElementById("btnCreateKbCard");
-    if (btnCreateCard) btnCreateCard.onclick = () => btnCreate?.click();
     if (btnCreate) {
       btnCreate.onclick = async () => {
-        const departments = await loadDepartmentOptions();
         const deptOptions = departmentSelectHtml(departments, "", { emptyLabel: "私有（仅创建者/授权可见）" });
         const mask = document.createElement("div");
         mask.className = "modal-mask";
@@ -2215,45 +2520,48 @@ async function pageKbList() {
   }
 }
 
-/* ========== 知识库详情 ========== */
-async function pageKbDetail(id) {
-  if (!requirePerm("kb:read", "知识库详情")) return;
+/* ========== 知识库详情（工作区内嵌：基本信息 + 授权） ========== */
+async function pageKbDetail(id, opts = {}) {
+  const { embedded = false, mountId = "pageRoot" } = opts;
+  if (!embedded && !requirePerm("kb:read", "知识库详情")) return;
   const canWrite = hasPermission("kb:write");
+  const mountEl = () => document.getElementById(mountId);
 
   async function render() {
-    document.getElementById("pageRoot").innerHTML = `<div class="loading">加载详情…</div>`;
+    mountEl().innerHTML = `<div class="loading">加载详情…</div>`;
     try {
       const k = await api.get(`/knowledge-bases/${id}`);
-      document.getElementById("pageRoot").innerHTML = `
-        ${pageHead({
-          title: k.name || "知识库详情",
-          desc: `${k.type || "通用"} · ${k.status || "-"} · Embedding ${k.embedding_model || "-"}`,
-          actions: `
-            <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases">返回列表</button>
-            <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/documents">文档管理</button>
-            <button class="btn btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(id)}/snapshots">快照管理</button>
-            ${canWrite ? `<button class="btn btn-sm" id="btnEditKb">编辑</button>` : ""}
-            ${canWrite ? `<button class="btn btn-danger btn-sm" id="btnDeleteKb">删除</button>` : ""}
-            ${hasPermission("kb:vectorize") ? `<button class="btn btn-secondary btn-sm" id="btnRevec">重新向量化</button>` : ""}
-          `,
-        })}
-        <div class="page-grid kb-detail-top">
-          <div class="card span-7">
-            <div class="card-header"><div class="card-header-text"><h3 class="card-title">基本信息</h3></div></div>
+      const overviewHead = pageHead({
+        title: k.name || "知识库详情",
+        desc: `${k.type || "通用"} · ${k.status || "-"} · Embedding ${k.embedding_model || "-"}`,
+        actions: canWrite
+          ? `<button type="button" class="btn btn-sm kb-card-btn kb-card-btn-detail" id="btnEditKb">编辑知识库</button>
+             <button class="btn btn-danger btn-sm" id="btnDeleteKb">删除知识库</button>`
+          : "",
+      });
+      const overviewGrid = `<div class="page-grid kb-detail-top">
+          <div class="card span-6">
+            <div class="card-header">
+              <div class="card-header-text"><h3 class="card-title">基本信息</h3></div>
+            </div>
             <div class="meta-list">
+              <div class="meta-row"><span class="meta-label">类型</span><span class="meta-value">${escapeHtml(
+                ({ general: "通用知识", technical: "技术文档", product: "产品手册", faq: "FAQ" }[String(k.type || "").toLowerCase()] ||
+                  k.type ||
+                  "-")
+              )}</span></div>
               <div class="meta-row"><span class="meta-label">简介</span><span class="meta-value">${escapeHtml(k.description || "无简介")}</span></div>
               <div class="meta-row"><span class="meta-label">标签</span><span class="meta-value">${escapeHtml((k.tags || []).join(", ") || "-")}</span></div>
               <div class="meta-row"><span class="meta-label">访问范围</span><span class="meta-value">${accessScopeBadge(k)}</span></div>
               <div class="meta-row"><span class="meta-label">索引版本</span><span class="meta-value">${escapeHtml(k.current_index_version)}</span></div>
-              <div class="meta-row"><span class="meta-label">分段</span><span class="meta-value">size=${escapeHtml(k.chunk_size)} · overlap=${escapeHtml(k.chunk_overlap)}</span></div>
             </div>
           </div>
-          <div class="card span-5">
+          <div class="card span-6">
             <div class="card-header"><div class="card-header-text"><h3 class="card-title">概览</h3></div></div>
             <div class="kb-detail-overview-body">
               <div class="stat-grid" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
-                <div class="stat-card"><div class="label">文档数</div><div class="value">${k.doc_count ?? 0}</div></div>
-                <div class="stat-card"><div class="label">分段数</div><div class="value">${k.chunk_count ?? 0}</div></div>
+                <div class="stat-card"><div class="label">文档数</div><div class="value">${escapeHtml(k.document_count ?? k.doc_count ?? 0)}</div></div>
+                <div class="stat-card"><div class="label">分段数</div><div class="value">${escapeHtml(k.chunk_count ?? 0)}</div></div>
               </div>
               <div class="meta-list">
                 <div class="meta-row"><span class="meta-label">创建</span><span class="meta-value">${formatDateTime(k.created_at)}</span></div>
@@ -2262,32 +2570,28 @@ async function pageKbDetail(id) {
               <p class="page-desc kb-detail-overview-note">知识库可绑定部门；员工仅能上传本部门或授权库。管理员与超管不受部门隔离。</p>
             </div>
           </div>
-        </div>
-        <div id="kbVecProgress" class="card" style="display:none;margin-top:12px">
-          <div class="card-header"><div class="card-header-text"><h3 class="card-title">向量化进度</h3><p class="card-sub" id="kbVecStatusText">—</p></div></div>
-          <div style="padding:12px 16px 16px">
-            <div style="height:10px;background:var(--color-bg);border:1px solid var(--color-border);border-radius:6px;overflow:hidden">
-              <div id="kbVecBar" style="height:100%;width:0;background:var(--color-primary);transition:width .25s"></div>
-            </div>
-          </div>
-        </div>
-        ${canWrite ? `<div class="card" style="margin-top:12px" id="kbAclCard">
+        </div>`;
+      const aclCard = canWrite
+        ? `<div class="card" id="kbAclCard" style="margin-top:16px">
           <div class="card-header">
             <div class="card-header-text">
               <h3 class="card-title">知识库授权（ACL）</h3>
               <p class="card-sub">同一用户/角色可多选权限；保存时全量替换并触发权限变更自动快照。禁止提交空列表覆盖现有授权。</p>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" id="btnAclAdd">添加一行</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnAclAdd">添加授权</button>
           </div>
           <div id="kbAclRows" style="padding:12px"></div>
           <div style="padding:0 12px 16px;display:flex;gap:8px;flex-wrap:wrap">
             <button type="button" class="btn btn-sm" id="btnAclSave">保存授权</button>
           </div>
-        </div>` : ""}`;
+        </div>`
+        : "";
+
+      mountEl().innerHTML = `${overviewHead}${overviewGrid}${aclCard}`;
 
       document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
 
-      // —— ACL 编辑器 ——
+      if (canWrite) {
       const KB_ACL_CODES = [
         ["kb:read", "查看知识库"],
         ["kb:upload", "上传文档"],
@@ -2437,7 +2741,7 @@ async function pageKbDetail(id) {
         const box = document.getElementById("kbAclRows");
         if (!box) return;
         if (!aclGrants.length) {
-          box.innerHTML = `<p class="text-muted">暂无 ACL 行。点击「添加一行」；若本库仅靠部门可见可保持为空，但不要用空列表覆盖已有授权。</p>`;
+          box.innerHTML = `<p class="text-muted">暂无 ACL 行。点击「添加授权」；若本库仅靠部门可见可保持为空，但不要用空列表覆盖已有授权。</p>`;
           return;
         }
         box.innerHTML = aclGrants
@@ -2683,33 +2987,6 @@ async function pageKbDetail(id) {
         }
       }
 
-      const showVecProgress = async () => {
-        const panel = document.getElementById("kbVecProgress");
-        const bar = document.getElementById("kbVecBar");
-        const text = document.getElementById("kbVecStatusText");
-        if (!panel || !hasPermission("kb:vectorize")) return;
-        panel.style.display = "block";
-        try {
-          const st = await pollUntil(
-            () => api.get(`/knowledge-bases/${id}/vectorize-status`),
-            {
-              intervalMs: 2000,
-              timeoutMs: 180000,
-              shouldStop: (v) => ["completed", "failed", "success", "error"].includes(String(v?.status || "").toLowerCase()),
-            }
-          );
-          const pct = Math.max(0, Math.min(100, Number(st.progress) || (String(st.status).includes("complet") ? 100 : 0)));
-          bar.style.width = `${pct}%`;
-          text.textContent = `${st.status} · ${st.processed_count ?? 0}/${st.total_count ?? 0} · ${pct}%${st.error_message ? " · " + st.error_message : ""}`;
-          if (String(st.status).toLowerCase().includes("fail") || st.status === "error") toast(st.error_message || "向量化失败", "error");
-          else toast("向量化任务已结束", "success");
-          await render();
-        } catch (e) {
-          text.textContent = e.message || "轮询结束";
-          toast(e.message || "进度查询结束", "error");
-        }
-      };
-
       const btnEdit = document.getElementById("btnEditKb");
       if (btnEdit) {
         btnEdit.onclick = async () => {
@@ -2785,76 +3062,9 @@ async function pageKbDetail(id) {
           }
         };
       }
-
-      const btnRevec = document.getElementById("btnRevec");
-      if (btnRevec) {
-        btnRevec.onclick = async () => {
-          const result = await openWideModal({
-            title: "重新向量化",
-            bodyHtml: `
-              <p class="text-muted" style="margin-top:0">将先创建变更快照，再按下方分段规则重切并重建索引；在线问答不中断。</p>
-              <label class="text-muted">分段长度 chunk_size（100–5000）</label>
-              <input class="form-control" id="rvChunkSize" type="number" min="100" max="5000" value="${escapeHtml(k.chunk_size ?? 500)}" style="margin:6px 0 12px" />
-              <label class="text-muted">分段重叠 chunk_overlap（0–1000）</label>
-              <input class="form-control" id="rvChunkOverlap" type="number" min="0" max="1000" value="${escapeHtml(k.chunk_overlap ?? 50)}" style="margin:6px 0 12px" />
-              <label class="text-muted">分段模式</label>
-              <select class="form-control" id="rvSplitMode" style="margin:6px 0 12px">
-                <option value="fixed">固定长度 fixed</option>
-                <option value="sliding">滑动窗口 sliding</option>
-                 <option value="paragraph">按段落 paragraph</option>
-                 <option value="heading">按标题 heading</option>
-                 <option value="markdown">Markdown 结构 markdown</option>
-              </select>
-              <label class="text-muted">嵌入模型（可留空沿用当前：${escapeHtml(k.embedding_model || "-")}）</label>
-              <input class="form-control" id="rvEmbed" value="" placeholder="留空则不改" style="margin:6px 0 12px" />
-              <label style="display:flex;gap:8px;align-items:center;margin:8px 0">
-                <input type="checkbox" id="rvApplyDocs" checked /> 同步规则到库内全部待处理文档
-              </label>
-              <label style="display:flex;gap:8px;align-items:center;margin:8px 0">
-                <input type="checkbox" id="rvForceAll" /> 强制处理全部文档（含非 ready）
-              </label>`,
-            actionsHtml: `
-              <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
-              <button type="button" class="btn" data-act="ok">开始重建</button>`,
-          });
-          if (!result) return;
-          const chunk_size = Number(result.root.querySelector("#rvChunkSize")?.value || 0);
-          const chunk_overlap = Number(result.root.querySelector("#rvChunkOverlap")?.value || 0);
-          const split_mode = result.root.querySelector("#rvSplitMode")?.value || "fixed";
-          const embedding_model = (result.root.querySelector("#rvEmbed")?.value || "").trim();
-          const apply_to_documents = Boolean(result.root.querySelector("#rvApplyDocs")?.checked);
-          const force_all = Boolean(result.root.querySelector("#rvForceAll")?.checked);
-          result.root.remove();
-          if (!Number.isFinite(chunk_size) || chunk_size < 100 || chunk_size > 5000) {
-            toast("分段长度须在 100–5000", "error");
-            return;
-          }
-          if (!Number.isFinite(chunk_overlap) || chunk_overlap < 0 || chunk_overlap > 1000) {
-            toast("分段重叠须在 0–1000", "error");
-            return;
-          }
-          try {
-            const task = await api.post(`/knowledge-bases/${id}/re-vectorize`, {
-              chunk_size,
-              chunk_overlap,
-              split_mode,
-              apply_to_documents,
-              force_all,
-              ...(embedding_model ? { embedding_model } : {}),
-            });
-            toast(
-              `已提交重建任务（${task?.total_count ?? 0} 篇文档）${task?.target_version ? " · " + task.target_version : ""}`,
-              "success"
-            );
-            await render();
-            showVecProgress();
-          } catch (e) {
-            toast(e.message || "提交失败", "error");
-          }
-        };
       }
     } catch (e) {
-      document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+      mountEl().innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
     }
   }
 
@@ -2894,9 +3104,11 @@ function docStatusBadge(status) {
   return `<span class="${badgeClass}">${escapeHtml(label)}</span>`;
 }
 
-async function pageDocuments(kbId) {
-  if (!requirePerm("doc:read", "文档管理")) return;
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载文档…</div>`;
+async function pageDocuments(kbId, opts = {}) {
+  const { embedded = false, mountId = "pageRoot" } = opts;
+  if (!embedded && !requirePerm("doc:read", "文档管理")) return;
+  const mountEl = () => document.getElementById(mountId);
+  mountEl().innerHTML = `<div class="loading">加载文档…</div>`;
 
   const canWrite = hasPermission("doc:write");
   const canSegment = hasPermission("doc:segment");
@@ -2921,21 +3133,25 @@ async function pageDocuments(kbId) {
   /** @type {AbortController | null} */
   let uploadAbort = null;
 
+  const UPLOAD_EXTS = new Set([".pdf", ".doc", ".docx", ".txt", ".md"]);
+  const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+  const MAX_BATCH_FILES = 100;
+
   const dropzoneIdleHtml = () => `
       <div class="kb-dropzone-inner">
         <span class="kb-dropzone-icon" aria-hidden="true"></span>
         <p class="kb-dropzone-title">
-          <span class="kb-dropzone-copy-idle">将文件拖拽到此处</span>
+          <span class="kb-dropzone-copy-idle">将文件或文件夹拖拽到此处</span>
           <span class="kb-dropzone-copy-active">松手即可上传</span>
         </p>
         <p class="kb-dropzone-lead">
-          <span class="kb-dropzone-copy-idle">也可点击本区域或上方按钮选择文件（支持多选）</span>
+          <span class="kb-dropzone-copy-idle">也可点击本区域选择文件，或用上方按钮选择文件夹（自动扫描可上传文件）</span>
           <span class="kb-dropzone-copy-active">释放鼠标开始批量上传</span>
         </p>
         <ul class="kb-dropzone-meta">
           <li>支持格式：PDF、DOC、DOCX、TXT、MD</li>
-          <li>单文件最大：100MB</li>
-          <li>一次可批量上传多个文件</li>
+          <li>单文件最大：100MB · 支持文件夹递归扫描</li>
+          <li>一次可批量上传多个文件（逐个上传）</li>
         </ul>
       </div>`;
 
@@ -2945,6 +3161,132 @@ async function pageDocuments(kbId) {
     if (item.status === "success") return "成功";
     if (item.status === "cancelled") return "已取消";
     return item.error || "失败";
+  };
+
+  const extOfName = (name) => {
+    const n = String(name || "");
+    const i = n.lastIndexOf(".");
+    return i >= 0 ? n.slice(i).toLowerCase() : "";
+  };
+
+  const isHiddenRelPath = (rel) =>
+    String(rel || "")
+      .replace(/\\/g, "/")
+      .split("/")
+      .some((p) => p.startsWith(".") && p !== "." && p !== "..");
+
+  /** 相对路径压扁为上传文件名，避免同名冲突 */
+  const flattenUploadName = (relPath, fallbackName) => {
+    const parts = String(relPath || fallbackName || "unnamed")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .split("/")
+      .filter(Boolean);
+    const joined = parts.join("_") || String(fallbackName || "unnamed");
+    return joined.replace(/[^\w.\u4e00-\u9fff\-]+/g, "_").slice(0, 200);
+  };
+
+  const readDirectoryEntries = (dirEntry) =>
+    new Promise((resolve, reject) => {
+      const reader = dirEntry.createReader();
+      const all = [];
+      const readBatch = () => {
+        reader.readEntries((batch) => {
+          if (!batch.length) return resolve(all);
+          all.push(...batch);
+          readBatch();
+        }, reject);
+      };
+      readBatch();
+    });
+
+  const entryToCollected = async (entry, pathPrefix = "") => {
+    if (!entry) return [];
+    if (entry.isFile) {
+      const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+      const rel = pathPrefix
+        ? `${pathPrefix}/${file.name}`
+        : String(entry.fullPath || file.name).replace(/^\/+/, "");
+      return [{ file, relativePath: rel }];
+    }
+    if (entry.isDirectory) {
+      const children = await readDirectoryEntries(entry);
+      const prefix = pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name;
+      const out = [];
+      for (const child of children) {
+        out.push(...(await entryToCollected(child, prefix)));
+      }
+      return out;
+    }
+    return [];
+  };
+
+  /** 从拖放 DataTransfer 收集文件（支持文件夹） */
+  const collectFromDataTransfer = async (dt) => {
+    const items = dt?.items;
+    if (items?.length) {
+      const entries = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const entry = item.webkitGetAsEntry?.() || item.getAsEntry?.();
+        if (entry) entries.push(entry);
+      }
+      if (entries.length) {
+        const collected = [];
+        for (const entry of entries) {
+          collected.push(...(await entryToCollected(entry)));
+        }
+        return collected;
+      }
+    }
+    return Array.from(dt?.files || []).map((f) => ({
+      file: f,
+      relativePath: f.webkitRelativePath || f.name,
+    }));
+  };
+
+  /** 从 input.files（含 webkitdirectory）收集 */
+  const collectFromFileList = (fileList) =>
+    Array.from(fileList || []).map((f) => ({
+      file: f,
+      relativePath: f.webkitRelativePath || f.name,
+    }));
+
+  /** 过滤可上传文件；同名用相对路径压扁 */
+  const filterUploadableFiles = (collected) => {
+    const files = [];
+    let skipped = 0;
+    for (const item of collected || []) {
+      const raw = item.file;
+      if (!raw) continue;
+      const rel = String(item.relativePath || raw.name || "").replace(/\\/g, "/");
+      if (isHiddenRelPath(rel)) {
+        skipped += 1;
+        continue;
+      }
+      if (!raw.size) {
+        skipped += 1;
+        continue;
+      }
+      if (raw.size > MAX_UPLOAD_BYTES) {
+        skipped += 1;
+        continue;
+      }
+      if (!UPLOAD_EXTS.has(extOfName(raw.name))) {
+        skipped += 1;
+        continue;
+      }
+      const uploadName = flattenUploadName(rel, raw.name);
+      const file =
+        uploadName === raw.name
+          ? raw
+          : new File([raw], uploadName, { type: raw.type, lastModified: raw.lastModified });
+      files.push({
+        file,
+        displayName: rel.includes("/") ? rel : raw.name,
+      });
+    }
+    return { files, skipped };
   };
 
   const clearUploadSession = () => {
@@ -2984,10 +3326,10 @@ async function pageDocuments(kbId) {
       lead = "可继续上传剩余文件，或结束本批并选择新文件";
     } else if (fail) {
       title = `上传完成 · 成功 ${ok} 个，失败 ${fail} 个`;
-      lead = "可重试失败项，或选择新文件继续上传";
+      lead = "可在本区重试失败项；失败文件不会留在文档列表";
     } else {
       title = `上传完成 · 全部成功（${ok} 个）`;
-      lead = "本批已全部成功，可继续选择新文件上传";
+      lead = "本批已全部成功，可继续选择新文件或文件夹上传";
     }
 
     const actionsHtml = busy
@@ -3034,8 +3376,8 @@ async function pageDocuments(kbId) {
 
     const btnUpload = document.getElementById("btnAdminUpload");
     if (btnUpload) btnUpload.disabled = busy;
-    const btnPreview = document.getElementById("btnPreviewUpload");
-    if (btnPreview) btnPreview.disabled = busy;
+    const btnFolder = document.getElementById("btnAdminUploadFolder");
+    if (btnFolder) btnFolder.disabled = busy;
 
     const btnNew = document.getElementById("btnDropzoneNew");
     if (btnNew) {
@@ -3086,8 +3428,8 @@ async function pageDocuments(kbId) {
     zone.innerHTML = dropzoneIdleHtml();
     const btnUpload = document.getElementById("btnAdminUpload");
     if (btnUpload) btnUpload.disabled = false;
-    const btnPreview = document.getElementById("btnPreviewUpload");
-    if (btnPreview) btnPreview.disabled = false;
+    const btnFolder = document.getElementById("btnAdminUploadFolder");
+    if (btnFolder) btnFolder.disabled = false;
     wireDropzone();
   };
 
@@ -3188,13 +3530,31 @@ async function pageDocuments(kbId) {
     await runPendingUploads();
   };
 
-  const doUploadFiles = async (fileList) => {
-    const files = Array.from(fileList || []).filter(Boolean);
-    if (!files.length) return toast("请选择文件", "error");
+  const doUploadFiles = async (fileListOrCollected) => {
     if (isUploading) return;
-    uploadBatch = files.map((f) => ({
-      name: f.name || "未命名文件",
-      file: f,
+    let collected;
+    if (Array.isArray(fileListOrCollected) && fileListOrCollected[0]?.file) {
+      collected = fileListOrCollected;
+    } else {
+      collected = collectFromFileList(fileListOrCollected);
+    }
+    const { files, skipped } = filterUploadableFiles(collected);
+    if (!files.length) {
+      return toast(
+        skipped ? `未找到可上传文件（已跳过 ${skipped} 个无效项）` : "请选择文件或文件夹",
+        "error"
+      );
+    }
+    let batch = files;
+    if (batch.length > MAX_BATCH_FILES) {
+      toast(`单次最多上传 ${MAX_BATCH_FILES} 个，已截取前 ${MAX_BATCH_FILES} 个`, "error");
+      batch = batch.slice(0, MAX_BATCH_FILES);
+    } else if (skipped) {
+      toast(`已跳过 ${skipped} 个不支持或无效文件`, "success");
+    }
+    uploadBatch = batch.map((x) => ({
+      name: x.displayName || x.file.name || "未命名文件",
+      file: x.file,
       status: "pending",
     }));
     await runPendingUploads();
@@ -3216,58 +3576,61 @@ async function pageDocuments(kbId) {
       const mask = document.createElement("div");
       mask.className = "modal-mask";
       mask.innerHTML = `
-        <div class="modal" role="dialog" aria-modal="true" style="width:min(920px,calc(100vw - 24px));max-height:92vh;overflow:auto">
+        <div class="modal doc-wb-modal" role="dialog" aria-modal="true">
           <h3 class="modal-title">文档工作台 · ${escapeHtml(filenameHint || content.filename || detail?.filename || "文档")}</h3>
-          <div class="modal-body">
-            <p class="text-muted" style="margin-top:0">
+          <div class="modal-body doc-wb-body">
+            <p class="text-muted doc-wb-meta">
               状态 <span class="badge">${escapeHtml(status)}</span>
               · 分段 <span id="docWbChunkCount">${escapeHtml(content.chunk_count ?? detail?.chunk_count ?? chunks.length)}</span>
               · 清洗 ${escapeHtml(content.normalized_char_count ?? 0)} 字
               · 原文 ${escapeHtml(content.raw_char_count ?? 0)} 字
               ${content.error_message || detail?.error_message ? ` · <span class="text-danger">${escapeHtml(content.error_message || detail.error_message)}</span>` : ""}
             </p>
-            <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-              <button type="button" class="btn btn-sm" data-tab="normalized">清洗正文</button>
-              <button type="button" class="btn btn-sm btn-secondary" data-tab="raw">解析原文</button>
-              <button type="button" class="btn btn-sm btn-secondary" data-tab="chunks">分段列表</button>
+            <div class="doc-wb-tabs" role="tablist" aria-label="文档工作台">
+              <button type="button" class="btn btn-sm" data-tab="normalized">清洗文档</button>
+              <button type="button" class="btn btn-sm btn-secondary" data-tab="raw">文档解析</button>
+              <button type="button" class="btn btn-sm btn-secondary" data-tab="chunks">分段详情</button>
+              <button type="button" class="btn btn-sm btn-secondary" data-tab="preview">分段效果</button>
               <button type="button" class="btn btn-sm btn-secondary" data-tab="rules">分段规则</button>
             </div>
-            <pre id="docPreviewBody" style="background:var(--color-bg-tint,#f8f9fa);padding:12px;border-radius:8px;overflow:auto;max-height:360px;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;margin:0"></pre>
-            <div id="docPreviewChunks" style="display:none;max-height:420px;overflow:auto"></div>
-            <div id="docPreviewRules" style="display:none">
-              <label class="text-muted">chunk_size（100–5000）</label>
-              <input class="form-control" id="ruleSize" type="number" min="100" max="5000" style="margin:6px 0 10px" />
-              <label class="text-muted">chunk_overlap（0–1000）</label>
-              <input class="form-control" id="ruleOverlap" type="number" min="0" max="1000" style="margin:6px 0 10px" />
-              <label class="text-muted">split_mode</label>
-              <select class="form-control" id="ruleMode" style="margin:6px 0 10px">
-                <option value="fixed">fixed</option>
-                <option value="sliding">sliding</option>
-                <option value="paragraph">paragraph</option>
-                <option value="heading">heading</option>
-                <option value="markdown">markdown</option>
-              </select>
-              <label class="text-muted">separators（可选，逗号分隔）</label>
-              <input class="form-control" id="ruleSeps" style="margin:6px 0 10px" placeholder="例如 \\n\\n,\\n" />
-              <div id="docPreviewDryRun" style="margin-top:12px;display:none">
-                <p class="text-muted" style="margin:0 0 8px">干跑预览（未写库）</p>
-                <div id="docPreviewDryRunList" style="max-height:240px;overflow:auto"></div>
+            <div class="doc-wb-panel">
+              <pre id="docPreviewBody" class="doc-wb-pane doc-wb-pane-surface"></pre>
+              <div id="docPreviewChunks" class="doc-wb-pane" style="display:none"></div>
+              <div id="docPreviewEffect" class="doc-wb-pane doc-wb-pane-surface" style="display:none">
+                <p class="text-muted doc-wb-effect-hint" id="docPreviewEffectHint">按当前分段规则干跑预览（未写库）</p>
+                <div id="docPreviewDryRunList"><p class="text-muted">加载预览中…</p></div>
+              </div>
+              <div id="docPreviewRules" class="doc-wb-pane" style="display:none">
+                <label class="text-muted">chunk_size（100–5000）</label>
+                <input class="form-control" id="ruleSize" type="number" min="100" max="5000" style="margin:6px 0 10px" />
+                <label class="text-muted">chunk_overlap（0–1000）</label>
+                <input class="form-control" id="ruleOverlap" type="number" min="0" max="1000" style="margin:6px 0 10px" />
+                <label class="text-muted">split_mode</label>
+                <select class="form-control" id="ruleMode" style="margin:6px 0 10px">
+                  <option value="fixed">fixed</option>
+                  <option value="sliding">sliding</option>
+                  <option value="paragraph">paragraph</option>
+                  <option value="heading">heading</option>
+                  <option value="markdown">markdown</option>
+                </select>
+                <label class="text-muted">separators（可选，逗号分隔）</label>
+                <input class="form-control" id="ruleSeps" style="margin:6px 0 10px" placeholder="例如 \\n\\n,\\n" />
               </div>
             </div>
           </div>
-          <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
-            ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" id="btnNormalize">规范化</button>` : ""}
-            ${canSegment ? `<button type="button" class="btn btn-secondary btn-sm" id="btnSaveRules">保存规则</button>
-              <button type="button" class="btn btn-secondary btn-sm" id="btnDryRun">预览分段效果</button>
-              <button type="button" class="btn btn-sm" id="btnResegment">应用并重分段</button>` : ""}
-            <button type="button" class="btn btn-secondary" data-close>关闭</button>
+          <div class="modal-actions doc-wb-actions" id="docWbActions">
+            <button type="button" class="btn btn-secondary btn-sm" data-close>关闭</button>
           </div>
         </div>`;
       document.body.appendChild(mask);
 
       const bodyEl = mask.querySelector("#docPreviewBody");
       const chunksEl = mask.querySelector("#docPreviewChunks");
+      const effectEl = mask.querySelector("#docPreviewEffect");
+      const effectListEl = mask.querySelector("#docPreviewDryRunList");
       const rulesEl = mask.querySelector("#docPreviewRules");
+      const actionsEl = mask.querySelector("#docWbActions");
+
       const fillRulesForm = () => {
         mask.querySelector("#ruleSize").value = rules.chunk_size ?? 500;
         mask.querySelector("#ruleOverlap").value = rules.chunk_overlap ?? 50;
@@ -3344,15 +3707,108 @@ async function pageDocuments(kbId) {
       };
       renderChunks();
 
+      const loadSegmentPreview = async () => {
+        effectListEl.innerHTML = `<p class="text-muted">加载预览中…</p>`;
+        try {
+          const body = readRulesForm();
+          const preview = await api.post(`/knowledge-bases/${kbId}/documents/${docId}/segment-preview`, body);
+          effectListEl.innerHTML = `<p class="text-muted">共 ${escapeHtml(preview.total_chunks ?? 0)} 段（未写库）</p>${(preview.chunks || [])
+            .slice(0, 50)
+            .map(
+              (c) => `<div style="border:1px solid var(--color-border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px">
+                <div class="text-muted">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字</div>
+                <div style="white-space:pre-wrap">${escapeHtml((c.content || "").slice(0, 400))}</div>
+              </div>`
+            )
+            .join("")}`;
+        } catch (e) {
+          effectListEl.innerHTML = `<p class="text-danger">${escapeHtml(e.message || "预览失败")}</p>`;
+        }
+      };
+
+      const wireActionButtons = () => {
+        const btnNormalize = mask.querySelector("#btnNormalize");
+        if (btnNormalize) {
+          btnNormalize.onclick = async () => {
+            try {
+              const result = await api.post(`/knowledge-bases/${kbId}/documents/${docId}/normalize`, {});
+              toast(
+                `规范化完成：删空行 ${result.removed_blank_lines ?? 0} · 删重复块 ${result.removed_duplicate_blocks ?? 0}`,
+                "success"
+              );
+              mask.remove();
+              openDocWorkbench(docId, filenameHint);
+              renderList();
+            } catch (e) {
+              toast(e.message || "规范化失败", "error");
+            }
+          };
+        }
+        const btnSaveRules = mask.querySelector("#btnSaveRules");
+        if (btnSaveRules) {
+          btnSaveRules.onclick = async () => {
+            try {
+              const body = readRulesForm();
+              const doc = await api.put(`/knowledge-bases/${kbId}/documents/${docId}/segment-rules`, body);
+              rules = { ...(doc.segment_rules || body) };
+              fillRulesForm();
+              toast("分段规则已保存（未重分段）", "success");
+            } catch (e) {
+              toast(e.message || "保存失败", "error");
+            }
+          };
+        }
+        const btnResegment = mask.querySelector("#btnResegment");
+        if (btnResegment) {
+          btnResegment.onclick = async () => {
+            const ok = await confirmDialog({
+              title: "重新分段",
+              message: "将按当前规则重新分段并向量化，可能耗时较长。确定继续？",
+              confirmText: "重分段",
+            });
+            if (!ok) return;
+            try {
+              const body = readRulesForm();
+              await api.put(`/knowledge-bases/${kbId}/documents/${docId}/segment-rules`, body);
+              await api.post(`/knowledge-bases/${kbId}/documents/${docId}/re-segment`, {});
+              toast("已提交重分段任务", "success");
+              mask.remove();
+              renderList();
+            } catch (e) {
+              toast(e.message || "重分段失败", "error");
+            }
+          };
+        }
+        const closeBtn = mask.querySelector("[data-close]");
+        if (closeBtn) closeBtn.onclick = () => mask.remove();
+      };
+
+      const renderActions = (tab) => {
+        const parts = [];
+        if (tab === "normalized" && canWrite) {
+          parts.push(`<button type="button" class="btn btn-secondary btn-sm" id="btnNormalize">规范化</button>`);
+        }
+        if (tab === "rules" && canSegment) {
+          parts.push(`<button type="button" class="btn btn-success btn-sm" id="btnSaveRules">保存规则</button>`);
+          parts.push(`<button type="button" class="btn btn-primary btn-sm" id="btnResegment">重新分段并向量化</button>`);
+        }
+        parts.push(`<button type="button" class="btn btn-danger btn-sm" data-close>关闭</button>`);
+        actionsEl.innerHTML = parts.join("");
+        wireActionButtons();
+      };
+
       const setActiveTab = (tab) => {
         mask.querySelectorAll("[data-tab]").forEach((b) => {
           b.className = b.getAttribute("data-tab") === tab ? "btn btn-sm" : "btn btn-sm btn-secondary";
         });
-        bodyEl.style.display = tab === "chunks" || tab === "rules" ? "none" : "block";
+        bodyEl.style.display = tab === "normalized" || tab === "raw" ? "block" : "none";
         chunksEl.style.display = tab === "chunks" ? "block" : "none";
+        effectEl.style.display = tab === "preview" ? "block" : "none";
         rulesEl.style.display = tab === "rules" ? "block" : "none";
         if (tab === "raw") bodyEl.textContent = content.raw_text || "（无原文）";
         else if (tab === "normalized") bodyEl.textContent = content.normalized_text || content.raw_text || "（无内容）";
+        if (tab === "preview") loadSegmentPreview();
+        renderActions(tab);
       };
       bodyEl.textContent = content.normalized_text || content.raw_text || "（无内容）";
       mask.querySelectorAll("[data-tab]").forEach((btn) => {
@@ -3362,88 +3818,8 @@ async function pageDocuments(kbId) {
         });
       });
 
-      const btnNormalize = mask.querySelector("#btnNormalize");
-      if (btnNormalize) {
-        btnNormalize.onclick = async () => {
-          try {
-            const result = await api.post(`/knowledge-bases/${kbId}/documents/${docId}/normalize`, {});
-            toast(
-              `规范化完成：删空行 ${result.removed_blank_lines ?? 0} · 删重复块 ${result.removed_duplicate_blocks ?? 0}`,
-              "success"
-            );
-            mask.remove();
-            openDocWorkbench(docId, filenameHint);
-            renderList();
-          } catch (e) {
-            toast(e.message || "规范化失败", "error");
-          }
-        };
-      }
+      setActiveTab("normalized");
 
-      const btnSaveRules = mask.querySelector("#btnSaveRules");
-      if (btnSaveRules) {
-        btnSaveRules.onclick = async () => {
-          try {
-            const body = readRulesForm();
-            const doc = await api.put(`/knowledge-bases/${kbId}/documents/${docId}/segment-rules`, body);
-            rules = { ...(doc.segment_rules || body) };
-            fillRulesForm();
-            toast("分段规则已保存（未重分段）", "success");
-          } catch (e) {
-            toast(e.message || "保存失败", "error");
-          }
-        };
-      }
-
-      const btnDryRun = mask.querySelector("#btnDryRun");
-      if (btnDryRun) {
-        btnDryRun.onclick = async () => {
-          try {
-            const body = readRulesForm();
-            const preview = await api.post(`/knowledge-bases/${kbId}/documents/${docId}/segment-preview`, body);
-            const box = mask.querySelector("#docPreviewDryRun");
-            const list = mask.querySelector("#docPreviewDryRunList");
-            box.style.display = "block";
-            list.innerHTML = `<p class="text-muted">共 ${escapeHtml(preview.total_chunks ?? 0)} 段</p>${(preview.chunks || [])
-              .slice(0, 30)
-              .map(
-                (c) => `<div style="border:1px solid var(--color-border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px">
-                  <div class="text-muted">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字</div>
-                  <div style="white-space:pre-wrap">${escapeHtml((c.content || "").slice(0, 400))}</div>
-                </div>`
-              )
-              .join("")}`;
-            setActiveTab("rules");
-            toast("干跑预览已生成", "success");
-          } catch (e) {
-            toast(e.message || "预览失败", "error");
-          }
-        };
-      }
-
-      const btnResegment = mask.querySelector("#btnResegment");
-      if (btnResegment) {
-        btnResegment.onclick = async () => {
-          const ok = await confirmDialog({
-            title: "重新分段",
-            message: "将按当前规则重新分段并向量化，可能耗时较长。确定继续？",
-            confirmText: "重分段",
-          });
-          if (!ok) return;
-          try {
-            const body = readRulesForm();
-            await api.put(`/knowledge-bases/${kbId}/documents/${docId}/segment-rules`, body);
-            await api.post(`/knowledge-bases/${kbId}/documents/${docId}/re-segment`, {});
-            toast("已提交重分段任务", "success");
-            mask.remove();
-            renderList();
-          } catch (e) {
-            toast(e.message || "重分段失败", "error");
-          }
-        };
-      }
-
-      mask.querySelector("[data-close]").onclick = () => mask.remove();
       mask.addEventListener("click", (e) => {
         if (e.target === mask) mask.remove();
       });
@@ -3455,18 +3831,24 @@ async function pageDocuments(kbId) {
   const wireDropzone = () => {
     const zone = document.getElementById("kbDropzone");
     const fileInput = document.getElementById("adminFile");
+    const folderInput = document.getElementById("adminFolder");
     if (!zone || !fileInput || !canUpload) return;
 
-    fileInput.onchange = () => {
-      if (isUploading) {
-        fileInput.value = "";
-        return;
-      }
-      if (fileInput.files?.length) {
-        doUploadFiles(fileInput.files);
-        fileInput.value = "";
-      }
+    const pickFromInput = (input) => {
+      if (!input) return;
+      input.onchange = () => {
+        if (isUploading) {
+          input.value = "";
+          return;
+        }
+        if (input.files?.length) {
+          doUploadFiles(input.files);
+          input.value = "";
+        }
+      };
     };
+    pickFromInput(fileInput);
+    pickFromInput(folderInput);
 
     if (uploadBatch?.length && (uploadBatchDone || isUploading)) {
       paintDropzoneBatch();
@@ -3503,12 +3885,17 @@ async function pageDocuments(kbId) {
       dragDepth = Math.max(0, dragDepth - 1);
       if (dragDepth === 0) setDragActive(false);
     });
-    zone.addEventListener("drop", (e) => {
+    zone.addEventListener("drop", async (e) => {
       e.preventDefault();
       dragDepth = 0;
       setDragActive(false);
       if (isUploading) return;
-      if (e.dataTransfer.files?.length) doUploadFiles(e.dataTransfer.files);
+      try {
+        const collected = await collectFromDataTransfer(e.dataTransfer);
+        await doUploadFiles(collected);
+      } catch (err) {
+        toast(err.message || "读取拖拽内容失败", "error");
+      }
     });
   };
 
@@ -3531,7 +3918,7 @@ async function pageDocuments(kbId) {
       }
       if (busy) {
         refreshTimer = setTimeout(() => {
-          if (currentPath().includes(`/knowledge-bases/${kbId}/documents`)) renderList();
+          if (embedded ? isKbDocsView(kbId) : currentPath().includes(`/knowledge-bases/${kbId}/documents`)) renderList();
         }, 4000);
       }
 
@@ -3539,26 +3926,23 @@ async function pageDocuments(kbId) {
 
       const selectableCount = items.filter((d) => !DOC_BUSY_STATUSES.has(String(d.status || ""))).length;
 
-      document.getElementById("pageRoot").innerHTML = `
+      const docActions = canUpload
+        ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
+                 <input type="file" id="adminFolder" class="hidden" webkitdirectory directory multiple />
+                 <button class="btn btn-sm" id="btnAdminUpload">选择文件</button>
+                 <button class="btn btn-secondary btn-sm" id="btnAdminUploadFolder">选择文件夹</button>`
+        : "";
+
+      mountEl().innerHTML = `
       ${pageHead({
         title: "文档管理",
-        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown。可拖拽上传；失败可重试；预览可改分段。",
-        actions: `
-          <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button>
-          ${
-            canUpload
-              ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
-                 ${canSegment ? `<button class="btn btn-secondary btn-sm" id="btnPreviewUpload">入库前预分段</button>` : ""}
-                 <button class="btn btn-sm" id="btnAdminUpload">选择并上传</button>`
-              : ""
-          }
-        `,
+        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown；可拖拽文件/文件夹。失败可在上传区重试，不会留在文档列表。",
+        actions: docActions,
       })}
       ${
         canUpload
           ? `<div class="kb-dropzone" id="kbDropzone">${dropzoneIdleHtml()}
-        </div>
-        <div id="uploadPreviewPanel" class="card" style="display:none;margin-bottom:12px"></div>`
+        </div>`
           : ""
       }
       <div class="card panel-fill">
@@ -3567,19 +3951,27 @@ async function pageDocuments(kbId) {
             <h3 class="card-title">文档列表</h3>
             <p class="card-sub">分段 / 预处理 / 向量化状态 · 共 ${total} 份 · 第 ${listPage}/${totalPages} 页${busy ? " · 处理中自动刷新" : ""}</p>
           </div>
-          ${
-            canWrite
-              ? `<div class="card-header-actions">
-                   <button type="button" class="btn btn-danger btn-sm" id="btnBatchDeleteDocs" disabled>批量删除</button>
-                 </div>`
-              : ""
-          }
         </div>
-        <div class="table-wrap"><table class="table">
+        <div class="table-wrap"><table class="table table-docs">
+          <colgroup>
+            ${canWrite ? `<col class="docs-col-check" />` : ""}
+            <col class="docs-col-index" />
+            <col class="docs-col-time" />
+            <col class="docs-col-name" />
+            <col class="docs-col-size" />
+            <col class="docs-col-num" />
+            <col class="docs-col-status" />
+            <col class="docs-col-actions" />
+          </colgroup>
           <thead><tr>
-            ${canWrite ? `<th class="col-check" style="width:44px"><input type="checkbox" id="docSelectAll" title="全选当前页" aria-label="全选当前页" ${selectableCount ? "" : "disabled"} /></th>` : ""}
-            <th class="col-index" style="width:56px">序号</th>
-            <th>文件名</th><th>大小</th><th>分段</th><th>状态</th><th class="col-time">上传时间</th><th class="col-actions">操作</th>
+            ${canWrite ? `<th class="col-check"><input type="checkbox" id="docSelectAll" title="全选当前页" aria-label="全选当前页" ${selectableCount ? "" : "disabled"} /></th>` : ""}
+            <th class="col-index">序号</th>
+            <th class="col-time">上传时间</th>
+            <th class="col-name">文件名</th>
+            <th class="col-size">大小</th>
+            <th class="col-num">分段</th>
+            <th class="col-status">状态</th>
+            <th class="col-actions">操作</th>
           </tr></thead>
           <tbody>
             ${items
@@ -3595,16 +3987,16 @@ async function pageDocuments(kbId) {
                       : ""
                   }
                   <td class="col-index">${seq}</td>
-                  <td>${escapeHtml(d.filename || d.name)}</td>
-                  <td>${escapeHtml(formatSize(d.file_size ?? d.size))}</td>
-                  <td>${escapeHtml(d.chunk_count ?? 0)}</td>
-                  <td class="col-status">${docStatusBadge(st)}</td>
                   <td class="col-time">${formatDateTimeHtml(d.created_at)}</td>
+                  <td class="col-name"><span class="cell-primary">${escapeHtml(d.filename || d.name)}</span></td>
+                  <td class="col-size">${escapeHtml(formatSize(d.file_size ?? d.size))}</td>
+                  <td class="col-num">${escapeHtml(d.chunk_count ?? 0)}</td>
+                  <td class="col-status">${docStatusBadge(st)}</td>
                   <td class="col-actions">
                     <div class="table-actions">
-                      <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">工作台</button>
-                      ${canWrite && isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
+                      <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">文档处理</button>
                       ${canWrite && !isBusy ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
+                      ${canWrite && isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
                     </div>
                   </td>
                 </tr>`;
@@ -3613,16 +4005,25 @@ async function pageDocuments(kbId) {
               `<tr><td colspan="${canWrite ? 8 : 7}" class="text-muted">暂无文档</td></tr>`}
           </tbody>
         </table></div>
-        ${
-          total > 0
-            ? `<div class="pager pager-center" id="docPager">
+        <div class="table-card-footer">
+          <div class="table-card-footer-start">
+            ${
+              canWrite
+                ? `<button type="button" class="btn btn-danger btn-sm" id="btnBatchDeleteDocs" disabled>批量删除</button>`
+                : ""
+            }
+          </div>
+          ${
+            total > 0
+              ? `<div class="pager pager-center" id="docPager">
                 <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
                 ${pageButtons}
                 <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
                 ${pageJump}
               </div>`
-            : ""
-        }
+              : ""
+          }
+        </div>
       </div>`;
 
       document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(b.getAttribute("data-go"))));
@@ -3702,58 +4103,8 @@ async function pageDocuments(kbId) {
 
       const btnUpload = document.getElementById("btnAdminUpload");
       if (btnUpload) btnUpload.onclick = () => document.getElementById("adminFile")?.click();
-
-      const btnPreviewUpload = document.getElementById("btnPreviewUpload");
-      if (btnPreviewUpload) {
-        const runPreview = async (f) => {
-          const fd = new FormData();
-          fd.append("file", f);
-          fd.append("chunk_size", "500");
-          fd.append("chunk_overlap", "50");
-          // 不传 split_mode：由后端按文件类型自动选择默认分段方式
-          try {
-            const preview = await api.upload(`/knowledge-bases/${kbId}/documents/segment-preview-file`, fd);
-            const panel = document.getElementById("uploadPreviewPanel");
-            panel.style.display = "block";
-            panel.innerHTML = `
-              <div class="card-header"><div class="card-header-text">
-                <h3 class="card-title">入库前预分段 · ${escapeHtml(preview.filename || f.name)}</h3>
-                <p class="card-sub">共 ${escapeHtml(preview.total_chunks ?? 0)} 段 · ${escapeHtml(preview.total_chars ?? 0)} 字（不写库）</p>
-              </div></div>
-              <div style="max-height:280px;overflow:auto;padding:12px">
-                ${(preview.chunks || [])
-                  .slice(0, 40)
-                  .map(
-                    (c) => `<div style="border:1px solid var(--color-border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px">
-                      <div class="text-muted">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字</div>
-                      <div style="white-space:pre-wrap">${escapeHtml((c.content || "").slice(0, 360))}</div>
-                    </div>`
-                  )
-                  .join("") || `<p class="text-muted">无分段</p>`}
-              </div>
-              <div style="padding:0 12px 12px"><button type="button" class="btn btn-sm" id="btnConfirmUploadAfterPreview">确认上传此文件</button></div>`;
-            document.getElementById("btnConfirmUploadAfterPreview").onclick = () => doUploadFiles([f]);
-            toast("预分段完成", "success");
-          } catch (e) {
-            toast(e.message || "预分段失败", "error");
-          }
-        };
-        btnPreviewUpload.onclick = () => {
-          const input = document.getElementById("adminFile");
-          if (!input) return;
-          const existing = input.files?.[0];
-          if (existing) {
-            runPreview(existing);
-            return;
-          }
-          const once = () => {
-            input.removeEventListener("change", once);
-            if (input.files?.[0]) runPreview(input.files[0]);
-          };
-          input.addEventListener("change", once);
-          input.click();
-        };
-      }
+      const btnFolder = document.getElementById("btnAdminUploadFolder");
+      if (btnFolder) btnFolder.onclick = () => document.getElementById("adminFolder")?.click();
 
       document.querySelectorAll("[data-preview]").forEach((btn) => {
         btn.onclick = () => openDocWorkbench(btn.getAttribute("data-preview"), btn.getAttribute("data-name"));
@@ -3784,7 +4135,7 @@ async function pageDocuments(kbId) {
       });
       syncBatchDeleteState();
     } catch (e) {
-      document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+      mountEl().innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
     }
   };
 
@@ -3806,8 +4157,8 @@ const SNAPSHOT_TRIGGER_LABELS = {
 
 const SNAPSHOT_CHANGE_LABELS = {
   added: "将恢复",
-  removed: "将归档",
-  modified: "将变更",
+  removed: "不在快照中",
+  modified: "内容有差异",
   unchanged: "无变化",
 };
 
@@ -3853,11 +4204,13 @@ function openWideModal({ title, bodyHtml, actionsHtml, width = "min(760px,calc(1
   });
 }
 
-async function pageSnapshots(kbId) {
-  if (!requirePerm("snapshot:read", "快照管理")) return;
+async function pageSnapshots(kbId, opts = {}) {
+  const { embedded = false, mountId = "pageRoot" } = opts;
+  if (!embedded && !requirePerm("snapshot:read", "快照管理")) return;
+  const mountEl = () => document.getElementById(mountId);
   const canWrite = hasPermission("snapshot:write");
   const canRestore = hasPermission("snapshot:restore");
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载快照…</div>`;
+  mountEl().innerHTML = `<div class="loading">加载快照…</div>`;
 
   const triggerBadge = (trigger) => {
     const label = SNAPSHOT_TRIGGER_LABELS[trigger] || trigger || "-";
@@ -3870,15 +4223,26 @@ async function pageSnapshots(kbId) {
     return `<span class="${cls}">${escapeHtml(label)}</span>`;
   };
 
+  /** 快照名称：括号段单独换行，避免窄列中被拆断 */
+  const formatSnapNameHtml = (name) => {
+    const raw = String(name || "-").trim() || "-";
+    const m = raw.match(/^(.+?)\s*([（(].+)$/);
+    if (m) {
+      return `<strong class="cell-primary snap-name-stack" title="${escapeHtml(raw)}"><span class="snap-name-main">${escapeHtml(
+        m[1].trim()
+      )}</span><span class="snap-name-sub">${escapeHtml(m[2].trim())}</span></strong>`;
+    }
+    return `<strong class="cell-primary" title="${escapeHtml(raw)}">${escapeHtml(raw)}</strong>`;
+  };
+
   const renderList = async () => {
     const data = await api.get(`/knowledge-bases/${kbId}/snapshots?page=1&page_size=50`);
     const items = data.items || [];
-    document.getElementById("pageRoot").innerHTML = `
+    mountEl().innerHTML = `
       ${pageHead({
         title: "快照管理",
         desc: "变更前自动留存；回退前强制生成保护快照。默认最多保留 50 份 / 90 天。",
         actions: `
-          <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button>
           ${
             canWrite
               ? `<button class="btn btn-sm" id="btnCreateSnap">手动创建快照</button>
@@ -3896,9 +4260,24 @@ async function pageSnapshots(kbId) {
         </div>
         ${
           items.length
-            ? `<div class="table-wrap"><table class="table">
+            ? `<div class="table-wrap"><table class="table table-snapshots">
+          <colgroup>
+            <col class="snap-col-time" />
+            <col class="snap-col-name" />
+            <col class="snap-col-trigger" />
+            <col class="snap-col-num" />
+            <col class="snap-col-num" />
+            <col class="snap-col-desc" />
+            <col class="snap-col-actions" />
+          </colgroup>
           <thead><tr>
-            <th>快照名称</th><th>触发方式</th><th>文档数</th><th>分段数</th><th>说明</th><th class="col-time">创建时间</th><th class="col-actions">操作</th>
+            <th class="col-time">创建时间</th>
+            <th class="col-name">快照名称</th>
+            <th class="col-trigger">触发方式</th>
+            <th class="col-num">文档数</th>
+            <th class="col-num">分段数</th>
+            <th class="col-desc">说明</th>
+            <th class="col-actions">操作</th>
           </tr></thead>
           <tbody>
             ${items
@@ -3907,7 +4286,7 @@ async function pageSnapshots(kbId) {
                 const ops = [
                   `<button type="button" class="btn btn-text btn-sm" data-detail="${escapeHtml(s.id)}">详情</button>`,
                   canRestore
-                    ? `<button type="button" class="btn btn-secondary btn-sm" data-preview="${escapeHtml(s.id)}">差异预览/回退</button>`
+                    ? `<button type="button" class="btn btn-secondary btn-sm" data-preview="${escapeHtml(s.id)}">预览/回退</button>`
                     : "",
                   canWrite && !isProtection
                     ? `<button type="button" class="btn btn-danger btn-sm" data-del="${escapeHtml(s.id)}">删除</button>`
@@ -3916,12 +4295,12 @@ async function pageSnapshots(kbId) {
                       : "",
                 ].filter(Boolean);
                 return `<tr>
-                  <td><strong>${escapeHtml(s.name || "-")}</strong></td>
-                  <td>${triggerBadge(s.trigger)}</td>
-                  <td>${escapeHtml(s.document_count ?? 0)}</td>
-                  <td>${escapeHtml(s.total_chunks ?? 0)}</td>
-                  <td>${escapeHtml(s.description || "—")}</td>
                   <td class="col-time">${formatDateTimeHtml(s.created_at)}</td>
+                  <td class="col-name">${formatSnapNameHtml(s.name)}</td>
+                  <td class="col-trigger">${triggerBadge(s.trigger)}</td>
+                  <td class="col-num">${escapeHtml(s.document_count ?? 0)}</td>
+                  <td class="col-num">${escapeHtml(s.total_chunks ?? 0)}</td>
+                  <td class="col-desc">${escapeHtml(s.description || "—")}</td>
                   <td class="col-actions"><div class="table-actions">${ops.join("")}</div></td>
                 </tr>`;
               })
@@ -4057,6 +4436,7 @@ async function pageSnapshots(kbId) {
           const configChanges = preview.config_changes || [];
           const result = await openWideModal({
             title: `回退差异预览 · ${preview.snapshot_name || ""}`,
+            width: "min(900px,calc(100vw - 24px))",
             bodyHtml: `
               <p class="text-muted">将影响 <strong>${escapeHtml(preview.total_changes ?? affected.length)}</strong> 份文档；
                 回退前会自动创建保护快照；确认后仅恢复元数据并生成 <code>building</code> 索引，向量重建完成后才会原子切换。</p>
@@ -4074,23 +4454,20 @@ async function pageSnapshots(kbId) {
                   : `<p class="text-muted">配置项与当前一致</p>`
               }
               <h4 style="margin:12px 0 8px;font-size:14px">文档变更（可勾选做选择性恢复）</h4>
-              <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                <input type="checkbox" id="snapSelective" /> 仅恢复下方勾选的文档（不改整库配置/权限）
-              </label>
-              <div class="table-wrap"><table class="table">
-                <thead><tr><th></th><th>变更</th><th>文件名</th><th>当前分段</th><th>快照分段</th><th>说明</th></tr></thead>
+              <p class="text-muted" style="margin:0 0 8px;font-size:12px">勾选下方文档可做选择性恢复（不改整库配置/权限）；不勾选则整库回退。</p>
+              <div class="table-wrap"><table class="table table-snap-preview">
+                <thead><tr><th class="col-check">选用</th><th>变更</th><th class="col-name">文件名</th><th>当前分段</th><th>快照分段</th><th class="col-desc">说明</th></tr></thead>
                 <tbody>${
                   (preview.affected_documents || []).length
                     ? (preview.affected_documents || [])
                         .map((a) => {
-                          const canSelect = a.change_type === "added" || a.change_type === "modified";
+                          // 选择性恢复只能勾选快照内文档（added/modified/unchanged）；removed 仅整库回退时归档
+                          const inSnapshot = a.change_type !== "removed";
                           return `<tr>
-                            <td>${
-                              canSelect
-                                ? `<input type="checkbox" class="snap-doc" value="${escapeHtml(a.document_id)}" ${
-                                    a.change_type !== "unchanged" ? "checked" : ""
-                                  } />`
-                                : ""
+                            <td class="col-check">${
+                              inSnapshot
+                                ? `<input type="checkbox" class="snap-doc" value="${escapeHtml(a.document_id)}" aria-label="选择 ${escapeHtml(a.filename || "文档")}" />`
+                                : `<span class="text-muted snap-doc-na" title="该文件不在此快照中，不能单独勾选；仅整库回退时才会从当前库移出（软归档）">不可选</span>`
                             }</td>
                             <td><span class="badge ${
                               a.change_type === "removed"
@@ -4100,11 +4477,19 @@ async function pageSnapshots(kbId) {
                                   : a.change_type === "modified"
                                     ? "badge-warning"
                                     : ""
+                            }" title="${
+                              a.change_type === "removed"
+                                ? "当前库有此文件，快照里没有；整库回退后会从当前库移出（软归档）"
+                                : a.change_type === "added"
+                                  ? "快照里有、当前库没有；回退后会恢复该文件"
+                                  : a.change_type === "modified"
+                                    ? "两边都有，但内容/分段不一致；回退后按快照覆盖"
+                                    : ""
                             }">${escapeHtml(SNAPSHOT_CHANGE_LABELS[a.change_type] || a.change_type)}</span></td>
-                            <td>${escapeHtml(a.filename)}</td>
+                            <td class="col-name">${escapeHtml(a.filename)}</td>
                             <td>${escapeHtml(a.current_chunk_count ?? "—")}</td>
                             <td>${escapeHtml(a.snapshot_chunk_count ?? "—")}</td>
-                            <td class="text-muted">${escapeHtml(a.detail || "")}</td>
+                            <td class="col-desc text-muted">${escapeHtml(a.detail || "")}</td>
                           </tr>`;
                         })
                         .join("")
@@ -4124,16 +4509,9 @@ async function pageSnapshots(kbId) {
             if (result?.root) result.root.remove();
             return;
           }
-          const selective = result.root.querySelector("#snapSelective")?.checked;
-          let document_ids;
-          if (selective) {
-            document_ids = [...result.root.querySelectorAll(".snap-doc:checked")].map((el) => el.value);
-            if (!document_ids.length) {
-              result.root.remove();
-              toast("选择性恢复请至少勾选一份文档", "error");
-              return;
-            }
-          }
+          const checkedIds = [...result.root.querySelectorAll(".snap-doc:checked")].map((el) => el.value);
+          const selective = checkedIds.length > 0;
+          const document_ids = selective ? checkedIds : undefined;
           result.root.remove();
           const ok = await confirmDialog({
             title: "二次确认回退",
@@ -4183,7 +4561,7 @@ async function pageSnapshots(kbId) {
   try {
     await renderList();
   } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+    mountEl().innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -5014,6 +5392,8 @@ const AUDIT_ACTION_LABELS = {
   "kb.delete": "删除知识库",
   "doc.upload": "上传文档",
   "doc.delete": "删除文档",
+  "doc.pipeline_error": "文档处理失败",
+  "doc.upload_failed_cleaned": "失败上传已清理",
   "doc.normalize": "规范化文档",
   "doc.resegment": "重分段",
   "role.create": "创建角色",
@@ -5589,20 +5969,39 @@ async function pageRoleCaches() {
             <p class="card-sub">完全相同且来源库仍有权限的问题才会命中</p>
           </div>
         </div>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th class="col-name">缓存知识库</th><th class="col-role">角色</th><th>缓存数</th><th>检测周期</th><th class="col-time">文档分析</th><th class="col-time">历史分析</th><th>状态</th><th class="col-actions">操作</th></tr></thead>
+        <div class="table-wrap"><table class="table table-role-caches">
+          <colgroup>
+            <col class="rc-col-kb" />
+            <col class="rc-col-role" />
+            <col class="rc-col-count" />
+            <col class="rc-col-cycle" />
+            <col class="rc-col-time" />
+            <col class="rc-col-time" />
+            <col class="rc-col-status" />
+            <col class="rc-col-actions" />
+          </colgroup>
+          <thead><tr>
+            <th class="col-name">缓存知识库</th>
+            <th class="col-role">角色</th>
+            <th class="col-num">缓存数</th>
+            <th class="col-cycle">检测周期</th>
+            <th class="col-time">文档分析</th>
+            <th class="col-time">历史分析</th>
+            <th class="col-status">状态</th>
+            <th class="col-actions">操作</th>
+          </tr></thead>
           <tbody>
             ${
               caches.length
                 ? caches
                     .map(
                       (cache) => `<tr data-role-cache-row="${escapeHtml(cache.role_id)}">
-                        <td class="col-name" title="${escapeHtml(cache.name)}"><strong>${escapeHtml(cache.name)}</strong></td>
+                        <td class="col-name" title="${escapeHtml(cache.name)}"><strong class="cell-primary">${escapeHtml(cache.name)}</strong></td>
                         <td class="col-role" title="${escapeHtml(cache.role_description || cache.role_name || "")}">${escapeHtml(cache.role_description || cache.role_name)}</td>
-                        <td>${escapeHtml(cache.question_count ?? 0)}</td>
-                        <td>
-                          <label style="display:flex;align-items:center;gap:6px;white-space:nowrap">
-                            <input class="form-control" style="width:76px" type="number" min="1" max="365" value="${escapeHtml(cache.interval_days)}" data-cache-interval ${canWrite ? "" : "disabled"} /> 天
+                        <td class="col-num">${escapeHtml(cache.question_count ?? 0)}</td>
+                        <td class="col-cycle">
+                          <label class="cell-inline-control">
+                            <input class="form-control" style="width:64px" type="number" min="1" max="365" value="${escapeHtml(cache.interval_days)}" data-cache-interval ${canWrite ? "" : "disabled"} /> 天
                           </label>
                         </td>
                         <td class="col-time">${cache.last_document_analysis_at ? formatDateTimeHtml(cache.last_document_analysis_at) : `<span class="cell-time">尚未执行</span>`}</td>
@@ -6058,7 +6457,9 @@ async function pageAudit() {
           <p><span class="text-muted">结果：</span>${
             d.result === "success"
               ? `<span class="badge badge-success">成功</span>`
-              : `<span class="badge badge-danger">${escapeHtml(d.result || "失败")}</span>`
+              : `<span class="badge badge-danger">${escapeHtml(
+                  d.result === "failure" ? "失败" : d.result || "失败"
+                )}</span>`
           }
             ${d.error_message ? ` · ${escapeHtml(d.error_message)}` : ""}</p>
           <p><span class="text-muted">时间：</span>${formatDateTime(d.created_at)}</p>
@@ -6127,18 +6528,31 @@ async function pageAudit() {
               <option value="success">成功</option>
               <option value="failure">失败</option>
             </select>
+            <button type="button" class="btn btn-danger btn-sm" id="btnAuditBatchDelete" disabled>批量删除</button>
             <button type="button" class="btn btn-sm" id="btnAuditBatchExport">批量导出 CSV</button>
           </div>
         </div>
-        <div class="table-wrap"><table class="table table-fit">
+        <div class="table-wrap"><table class="table table-audit">
+          <colgroup>
+            <col class="audit-col-check" />
+            <col class="audit-col-index" />
+            <col class="audit-col-actor" />
+            <col class="audit-col-action" />
+            <col class="audit-col-resource" />
+            <col class="audit-col-rid" />
+            <col class="audit-col-req" />
+            <col class="audit-col-result" />
+            <col class="audit-col-time" />
+            <col class="audit-col-actions" />
+          </colgroup>
           <thead><tr>
             <th class="col-check"><input type="checkbox" id="auditSelectAll" title="全选当前页" aria-label="全选当前页" ${items.length ? "" : "disabled"} /></th>
             <th class="col-index">序号</th>
             <th class="col-name">操作者</th>
-            <th class="col-shrink">动作</th>
-            <th class="col-shrink col-shrink-sm">资源</th>
-            <th class="col-shrink col-shrink-sm">资源 ID</th>
-            <th class="col-shrink">请求标识</th>
+            <th class="col-action">动作</th>
+            <th class="col-resource">资源</th>
+            <th class="col-id">资源 ID</th>
+            <th class="col-id">请求标识</th>
             <th class="col-status">结果</th>
             <th class="col-time">时间</th>
             <th class="col-actions col-actions-detail">操作</th>
@@ -6152,14 +6566,16 @@ async function pageAudit() {
                 <td class="col-check"><input type="checkbox" class="audit-row-check" value="${escapeHtml(a.id)}" aria-label="选择第 ${seq} 条" /></td>
                 <td class="col-index">${seq}</td>
                 <td class="col-name" title="${escapeHtml(actorName(a))}">${escapeHtml(actorName(a))}</td>
-                <td class="col-shrink" title="${escapeHtml(a.action)}">${escapeHtml(actionLabel(a.action))}</td>
-                <td class="col-shrink col-shrink-sm" title="${escapeHtml(resourceLabel(a.resource_type))}">${escapeHtml(resourceLabel(a.resource_type))}</td>
-                <td class="col-shrink col-shrink-sm text-muted" title="${escapeHtml(a.resource_id || "")}">${escapeHtml(a.resource_id ? String(a.resource_id).slice(0, 8) + "…" : "—")}</td>
-                <td class="col-shrink text-muted" title="${escapeHtml(a.request_id || "")}">${escapeHtml(a.request_id ? String(a.request_id).slice(0, 10) + "…" : "—")}</td>
+                <td class="col-action" title="${escapeHtml(a.action)}">${escapeHtml(actionLabel(a.action))}</td>
+                <td class="col-resource" title="${escapeHtml(resourceLabel(a.resource_type))}">${escapeHtml(resourceLabel(a.resource_type))}</td>
+                <td class="col-id text-muted" title="${escapeHtml(a.resource_id || "")}">${escapeHtml(a.resource_id || "—")}</td>
+                <td class="col-id text-muted" title="${escapeHtml(a.request_id || "")}">${escapeHtml(a.request_id || "—")}</td>
                 <td class="col-status">${
                   a.result === "success"
                     ? `<span class="badge badge-success">成功</span>`
-                    : `<span class="badge badge-danger">${escapeHtml(a.result || "失败")}</span>`
+                    : `<span class="badge badge-danger">${escapeHtml(
+                        a.result === "failure" ? "失败" : a.result || "失败"
+                      )}</span>`
                 }</td>
                 <td class="col-time">${formatDateTimeHtml(a.created_at)}</td>
                 <td class="col-actions col-actions-detail"><button type="button" class="btn btn-text btn-sm" data-audit="${escapeHtml(a.id)}">详情</button></td>
@@ -6171,11 +6587,14 @@ async function pageAudit() {
         </table></div>
         ${
           total > 0
-            ? `<div class="pager pager-center" id="auditPager">
-                <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
-                ${pageButtons}
-                <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
-                ${pageJump}
+            ? `<div class="table-card-footer">
+                <div class="table-card-footer-start"></div>
+                <div class="pager pager-center" id="auditPager">
+                  <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
+                  ${pageButtons}
+                  <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+                  ${pageJump}
+                </div>
               </div>`
             : ""
         }
@@ -6211,6 +6630,7 @@ async function pageAudit() {
     const syncBatchState = () => {
       const selectAll = document.getElementById("auditSelectAll");
       const sub = document.getElementById("auditListSub");
+      const btnDel = document.getElementById("btnAuditBatchDelete");
       const checks = Array.from(document.querySelectorAll(".audit-row-check"));
       const selected = checks.filter((c) => c.checked);
       if (selectAll && checks.length) {
@@ -6220,6 +6640,7 @@ async function pageAudit() {
         selectAll.checked = false;
         selectAll.indeterminate = false;
       }
+      if (btnDel) btnDel.disabled = selected.length === 0;
       if (sub) {
         sub.textContent = `共 ${total} 条 · 第 ${listPage}/${totalPages} 页 · 每页 ${AUDIT_PAGE_SIZE} 条 · 已选 ${selected.length} 条`;
       }
@@ -6237,8 +6658,32 @@ async function pageAudit() {
     document.querySelectorAll(".audit-row-check").forEach((cb) => {
       cb.onchange = () => syncBatchState();
     });
+    syncBatchState();
 
     document.getElementById("btnAuditBatchExport")?.addEventListener("click", chooseAuditExport);
+
+    const btnBatchDelete = document.getElementById("btnAuditBatchDelete");
+    if (btnBatchDelete) {
+      btnBatchDelete.onclick = async () => {
+        const ids = Array.from(document.querySelectorAll(".audit-row-check:checked")).map((el) => el.value);
+        if (!ids.length) return toast("请先勾选要删除的审计记录", "error");
+        const ok = await confirmDialog({
+          title: "批量删除",
+          message: `将删除已勾选的 ${ids.length} 条审计记录，删除后不可恢复，确定？`,
+          confirmText: "批量删除",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          const res = await api.post("/audit/logs/batch-delete", { ids });
+          const deleted = Number(res?.deleted ?? ids.length) || 0;
+          toast(`已删除 ${deleted} 条`, "success");
+          await load();
+        } catch (e) {
+          toast(e.message || "批量删除失败", "error");
+        }
+      };
+    }
 
     const pager = document.getElementById("auditPager");
     if (pager) {
@@ -6630,19 +7075,178 @@ function renderSimpleMarkdown(md) {
   return html.join("\n");
 }
 
-/** API 接入指南（替代原 Swagger 嵌入页） */
+/** 按管理端主题给同源 Swagger iframe 注入日间/夜间样式 */
+function swaggerThemeCss(theme) {
+  if (theme === "dark") {
+    return `
+html, body { background:#0b0f19 !important; color:#e6eaf2 !important; color-scheme:dark !important; }
+.swagger-ui { background:#0b0f19 !important; color:#e6eaf2 !important; }
+.swagger-ui .topbar { background:#111827 !important; }
+.swagger-ui .info .title { color:#f3f4f6 !important; }
+.swagger-ui .info p, .swagger-ui .info li, .swagger-ui .info table,
+.swagger-ui .info .base-url, .swagger-ui .markdown p, .swagger-ui .markdown li,
+.swagger-ui .renderedMarkdown p { color:#c5cad3 !important; }
+.swagger-ui .scheme-container { background:#111827 !important; box-shadow:none !important; }
+.swagger-ui .opblock-tag { color:#e6eaf2 !important; border-color:#30363d !important; }
+.swagger-ui .opblock { background:#161b22 !important; border-color:#30363d !important; box-shadow:none !important; }
+.swagger-ui .opblock .opblock-summary-path,
+.swagger-ui .opblock .opblock-summary-description { color:#d1d5db !important; }
+.swagger-ui .opblock .opblock-summary { border-color:#30363d !important; }
+.swagger-ui section.models { border-color:#30363d !important; background:transparent !important; }
+.swagger-ui section.models h4,
+.swagger-ui .model-title,
+.swagger-ui .model,
+.swagger-ui table thead tr td,
+.swagger-ui .response-col_status,
+.swagger-ui .tab li { color:#d1d5db !important; }
+.swagger-ui .model-box, .swagger-ui .model-container { background:#161b22 !important; }
+.swagger-ui .opblock-body pre.microlight { background:#0d1117 !important; color:#e6eaf2 !important; }
+.swagger-ui .btn { color:#e6eaf2 !important; }
+.swagger-ui select { background:#161b22 !important; color:#e6eaf2 !important; }
+.swagger-ui input[type=text], .swagger-ui textarea {
+  background:#0d1117 !important; color:#e6eaf2 !important; border-color:#30363d !important;
+}`;
+  }
+  return `
+html, body { background:#ffffff !important; color:#1f2937 !important; color-scheme:light !important; }
+.swagger-ui { background:#ffffff !important; color:#1f2937 !important; }
+.swagger-ui .topbar { background:#f8fafc !important; }
+.swagger-ui .info .title { color:#111827 !important; }
+.swagger-ui .info p, .swagger-ui .info li, .swagger-ui .info table,
+.swagger-ui .info .base-url, .swagger-ui .markdown p, .swagger-ui .markdown li,
+.swagger-ui .renderedMarkdown p { color:#374151 !important; }
+.swagger-ui .scheme-container { background:#ffffff !important; }
+.swagger-ui .opblock-tag { color:#111827 !important; }
+.swagger-ui .opblock { background:#ffffff !important; }
+.swagger-ui .opblock .opblock-summary-path,
+.swagger-ui .opblock .opblock-summary-description { color:#1f2937 !important; }
+.swagger-ui section.models h4,
+.swagger-ui .model-title { color:#111827 !important; }
+.swagger-ui .model-box, .swagger-ui .model-container { background:#f8fafc !important; }`;
+}
+
+let swaggerThemeObserver = null;
+let swaggerThemeRetryTimer = null;
+
+function applySwaggerIframeTheme(iframe) {
+  if (!iframe) return false;
+  try {
+    const doc = iframe.contentDocument;
+    if (!doc?.head) return false;
+    let el = doc.getElementById("kb-swagger-theme");
+    if (!el) {
+      el = doc.createElement("style");
+      el.id = "kb-swagger-theme";
+      doc.head.appendChild(el);
+    }
+    const theme = getTheme();
+    el.textContent = swaggerThemeCss(theme);
+    doc.documentElement.style.colorScheme = theme === "dark" ? "dark" : "light";
+    if (doc.body) doc.body.style.background = theme === "dark" ? "#0b0f19" : "#ffffff";
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function bindSwaggerThemeSync(iframe) {
+  if (swaggerThemeObserver) {
+    swaggerThemeObserver.disconnect();
+    swaggerThemeObserver = null;
+  }
+  if (swaggerThemeRetryTimer) {
+    clearInterval(swaggerThemeRetryTimer);
+    swaggerThemeRetryTimer = null;
+  }
+  if (!iframe) return;
+
+  const paint = () => applySwaggerIframeTheme(iframe);
+  iframe.addEventListener("load", () => {
+    paint();
+    let n = 0;
+    if (swaggerThemeRetryTimer) clearInterval(swaggerThemeRetryTimer);
+    swaggerThemeRetryTimer = setInterval(() => {
+      paint();
+      n += 1;
+      if (n >= 12) {
+        clearInterval(swaggerThemeRetryTimer);
+        swaggerThemeRetryTimer = null;
+      }
+    }, 400);
+  });
+  paint();
+  swaggerThemeObserver = new MutationObserver(paint);
+  swaggerThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+
+function getApiGuideTab() {
+  const q = location.hash.split("?")[1] || "";
+  return new URLSearchParams(q).get("tab") === "guide" ? "guide" : "fastapi";
+}
+
+function apiGuidePath(tab) {
+  return tab === "guide" ? "/admin/fastapi?tab=guide" : "/admin/fastapi";
+}
+
+/** API 接入指南：FastAPI 页（Swagger）+ 第三方接入说明 */
 async function pageFastApi() {
   if (!requirePerm("system:read", "API 接入指南")) return;
+  const tab = getApiGuideTab();
   document.getElementById("pageRoot").innerHTML = `
     ${pageHead({
       title: "API 接入指南",
-      desc: "面向 Android / 其他业务系统的接口功能说明与联调指引。",
+      desc: "FastAPI 接口浏览与第三方业务系统联调说明。",
       actions: `
-        <a class="btn btn-secondary btn-sm" href="/assets/docs/API_INTEGRATION_GUIDE.md" target="_blank" rel="noopener">打开 Markdown</a>
-        <a class="btn btn-text btn-sm" href="/docs" target="_blank" rel="noopener">Swagger UI</a>
+        <a class="btn btn-secondary btn-sm" href="/assets/vendor/swagger-ui/index.html" target="_blank" rel="noopener">新窗口打开 Swagger</a>
         <a class="btn btn-text btn-sm" href="/openapi.json" target="_blank" rel="noopener">OpenAPI JSON</a>
+        <a class="btn btn-text btn-sm" href="/assets/docs/API_INTEGRATION_GUIDE.md" target="_blank" rel="noopener">打开 Markdown</a>
       `,
     })}
+    <nav class="api-guide-bar" aria-label="API 接入指南">
+      <div class="kb-ws-tabs" role="tablist">
+        <button type="button" class="kb-ws-tab ${tab === "fastapi" ? "is-active" : ""}" data-api-tab="fastapi">FastAPI</button>
+        <button type="button" class="kb-ws-tab ${tab === "guide" ? "is-active" : ""}" data-api-tab="guide">接入说明</button>
+      </div>
+    </nav>
+    <div id="apiGuidePanel"></div>`;
+
+  document.querySelectorAll("[data-api-tab]").forEach((btn) => {
+    btn.onclick = () => {
+      const next = btn.getAttribute("data-api-tab");
+      if (next !== tab) navigate(apiGuidePath(next));
+    };
+  });
+
+  const panel = document.getElementById("apiGuidePanel");
+  if (tab === "fastapi") {
+    panel.innerHTML = `
+      <div class="card panel-fill fastapi-swagger-card">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">FastAPI 接口界面</h3>
+          </div>
+          <div class="card-header-actions">
+            <a class="btn btn-secondary btn-sm" href="/assets/vendor/swagger-ui/index.html" target="_blank" rel="noopener">新窗口打开</a>
+            <a class="btn btn-text btn-sm" href="/docs" target="_blank" rel="noopener">官方 /docs</a>
+          </div>
+        </div>
+        <div class="fastapi-swagger-frame">
+          <iframe
+            id="fastapiSwaggerFrame"
+            title="FastAPI Swagger UI"
+            src="/assets/vendor/swagger-ui/index.html"
+            class="fastapi-swagger-iframe"
+            loading="eager"
+            referrerpolicy="same-origin"
+            allow="fullscreen"
+          ></iframe>
+        </div>
+      </div>`;
+    bindSwaggerThemeSync(document.getElementById("fastapiSwaggerFrame"));
+    return;
+  }
+
+  panel.innerHTML = `
     <div class="card panel-fill fastapi-docs-card">
       <div class="card-header">
         <div class="card-header-text">

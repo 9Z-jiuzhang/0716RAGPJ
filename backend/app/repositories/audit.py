@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditLog, User
@@ -25,6 +25,14 @@ class AuditRepository:
     async def get_by_id(self, log_id: UUID) -> AuditLog | None:
         result = await self.db.execute(select(AuditLog).where(AuditLog.id == log_id))
         return result.scalar_one_or_none()
+
+    async def delete_by_ids(self, ids: Sequence[UUID]) -> int:
+        """按 ID 批量删除；返回实际删除行数。"""
+        if not ids:
+            return 0
+        result = await self.db.execute(delete(AuditLog).where(AuditLog.id.in_(list(ids))))
+        await self.db.flush()
+        return int(result.rowcount or 0)
 
     async def resolve_user_name(self, user_id: UUID | None) -> str | None:
         """解析操作者展示名（昵称优先，其次账号）。"""
