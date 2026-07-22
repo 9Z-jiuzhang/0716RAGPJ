@@ -368,6 +368,9 @@
   padding: var(--card-pad);
   transition: var(--transition), var(--theme-transition);
   min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .card:hover,
@@ -449,6 +452,8 @@
   align-self: flex-start;
   width: 100%;
   flex-grow: 0 !important;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .panel-fill > .table-wrap,
@@ -668,12 +673,10 @@ html[data-theme="dark"] select.form-control option {
   color: var(--color-danger);
 }
 
-/* ---------- 表格（方案 C：可收缩换行 + 超出横滑兜底） ---------- */
+/* ---------- 表格（全局约束：不超出容器，列可挤压省略） ---------- */
 .table-wrap {
-  overflow-x: auto;
+  overflow-x: hidden; /* 禁止横向超出；靠列挤压适配 */
   overflow-y: visible;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
   max-width: 100%;
   min-width: 0;
   width: 100%;
@@ -685,14 +688,15 @@ html[data-theme="dark"] select.form-control option {
   box-shadow: var(--glass-inset);
   height: auto;
   flex: 0 1 auto;
+  box-sizing: border-box;
 }
 
-/* 含表卡片不裁切横滑；在 flex 布局中允许收缩 */
+/* 含表卡片在 flex 布局中允许收缩，且不横向溢出 */
 .card:has(> .table-wrap),
 .panel-fill:has(> .table-wrap) {
   min-width: 0;
   max-width: 100%;
-  overflow: visible;
+  overflow-x: hidden;
 }
 
 .card > .table-wrap {
@@ -706,17 +710,19 @@ html[data-theme="dark"] select.form-control option {
 
 .table {
   width: 100%;
+  max-width: 100%;
   min-width: 0;
   border-collapse: collapse;
   background: transparent;
-  table-layout: auto;
+  table-layout: fixed; /* 强制按容器分配列宽，避免内容撑破 */
 }
 
 .table th,
 .table td {
   min-height: 0;
   height: auto;
-  padding: 14px 16px;
+  min-width: 0; /* 允许在 fixed 布局下被挤压 */
+  padding: 12px 10px;
   border-bottom: 1px solid var(--table-divider);
   border-right: none;
   vertical-align: middle;
@@ -726,13 +732,16 @@ html[data-theme="dark"] select.form-control option {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-normal);
   line-height: var(--line-height-tight);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: clip; /* 默认不出现「…」；需省略的列单独声明 */
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  max-width: none;
+  box-sizing: border-box;
 }
 
 .table td {
-  white-space: normal;
   height: auto;
 }
 
@@ -742,18 +751,14 @@ html[data-theme="dark"] select.form-control option {
 
 .table th.col-check,
 .table td.col-check {
-  width: 48px;
-  min-width: 48px;
-  max-width: 48px;
-  padding-left: 10px;
-  padding-right: 10px;
+  width: 2.75rem;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .table th.col-index,
 .table td.col-index {
-  width: 64px;
-  min-width: 48px;
-  max-width: 64px;
+  width: 3.25rem;
 }
 
 .table th {
@@ -766,12 +771,26 @@ html[data-theme="dark"] select.form-control option {
   letter-spacing: var(--letter-spacing-label);
   text-align: center;
   text-transform: uppercase;
-  white-space: nowrap;
   border-bottom: 1px solid var(--table-divider);
 }
 
 .table thead {
   background: transparent;
+}
+
+/* 含操作按钮 / 状态徽章的单元格：禁止裁切成「…」 */
+.table td:has(.table-actions),
+.table td:has(> .btn),
+.table td:has(.badge),
+.table th.col-actions,
+.table td.col-actions,
+.table th.col-status,
+.table td.col-status,
+.table th.col-builtin,
+.table td.col-builtin {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
 }
 
 .table tbody tr {
@@ -819,6 +838,7 @@ html[data-theme="dark"] select.form-control option {
   align-items: center;
   justify-content: center;
   gap: 2px;
+  max-width: 100%;
   white-space: normal;
   line-height: 1.35;
   text-align: center;
@@ -827,6 +847,9 @@ html[data-theme="dark"] select.form-control option {
 .table .cell-time-stack .cell-time-date,
 .table .cell-time-stack .cell-time-clock {
   display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -847,29 +870,36 @@ html[data-theme="dark"] select.form-control option {
 
 .table th.col-time,
 .table td.col-time {
-  white-space: normal;
-  width: 110px;
-  min-width: 96px;
-  max-width: 120px;
+  width: 7rem;
+  white-space: nowrap;
   vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table th.col-status,
 .table td.col-status {
-  white-space: normal;
-  width: 100px;
-  min-width: 88px;
-  max-width: 120px;
+  width: 5.5rem;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+.table th.col-builtin,
+.table td.col-builtin {
+  width: 4.5rem;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
 }
 
 .table th.col-desc,
 .table td.col-desc {
-  min-width: 0;
   width: auto;
-  max-width: 28rem;
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
+  text-overflow: clip;
 }
 
 .table td.col-desc .cell-clamp {
@@ -879,78 +909,146 @@ html[data-theme="dark"] select.form-control option {
   overflow: hidden;
   line-height: 1.45;
   max-height: none;
+  white-space: normal;
 }
 
 .table th.col-name,
 .table td.col-name {
-  width: auto;
-  min-width: 0;
-  max-width: 20rem;
-  white-space: normal;
+  width: 8rem;
   color: var(--color-text);
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table th.col-code,
 .table td.col-code {
-  width: auto;
-  min-width: 0;
-  max-width: 14rem;
-  white-space: normal;
-  word-break: break-all;
-  overflow-wrap: anywhere;
+  width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.table th.col-actions,
-.table td.col-actions {
-  width: 1%;
-  min-width: 140px;
-  max-width: 280px;
-  white-space: normal;
+.table th.col-actions:not(.col-actions-detail),
+.table td.col-actions:not(.col-actions-detail) {
+  width: 12.5rem;
+  white-space: normal !important;
   vertical-align: middle;
   text-align: center;
+  overflow: visible !important;
+  text-overflow: clip;
 }
 
-.table th.col-builtin,
-.table td.col-builtin {
-  width: 88px;
-  min-width: 72px;
-  max-width: 96px;
+/* 单按钮「详情」：预留列宽，始终完整可见 */
+.table th.col-actions-detail,
+.table td.col-actions-detail {
+  width: 4.5rem;
+  padding-left: 6px;
+  padding-right: 6px;
   white-space: nowrap;
+  vertical-align: middle;
+  text-align: center;
+  overflow: hidden;
 }
 
-.table-actions {
+.table td.col-actions-detail > .btn,
+.table td.col-actions.col-actions-detail > .btn {
   display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  align-content: center;
-  gap: 8px;
-  white-space: normal;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 0 10px !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+}
+
+/* 可压缩列：角色文案 */
+.table th.col-role,
+.table td.col-role {
+  width: 5.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 内容次要列：优先挤压 */
+.table th.col-shrink,
+.table td.col-shrink {
+  width: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table th.col-shrink-sm,
+.table td.col-shrink-sm {
+  width: 4.5rem;
+}
+
+.table.table-fit {
+  table-layout: fixed;
+  width: 100%;
   max-width: 100%;
 }
 
-/* 操作钮较多时折成上下两行（如角色缓存），整组居中 */
-.table-actions.table-actions-wrap {
-  flex-wrap: wrap;
+/* 全局：操作胶囊一行最多 2 列，超出自动换行；禁止省略号折叠 */
+.table-actions,
+.table-actions.table-actions-wrap,
+.table-actions.table-actions-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
   justify-content: center;
-  align-content: center;
-  max-width: 280px;
-  white-space: normal;
-  row-gap: 8px;
-  column-gap: 8px;
+  justify-items: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   margin-inline: auto;
+  box-sizing: border-box;
+  white-space: normal;
+  overflow: visible;
 }
 
-/* 列特别多、仍超出容器时：用最小内容宽触发横滑，避免裁切丢列 */
-@media (max-width: 1100px) {
-  .table {
-    min-width: max(100%, 860px);
-  }
+/* 嵌套行结构摊平到同一网格，保证仍是两列 */
+.table-actions-stack .table-actions-row {
+  display: contents;
 }
 
-/* 表格内状态标签与行内胶囊按钮同高同字重，避免“看起来不像一类” */
+.table-actions > .btn,
+.table-actions .table-actions-row > .btn,
+.table-actions > span,
+.table td.col-actions:not(.col-actions-detail) > .btn {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  justify-self: stretch;
+  white-space: normal;
+  line-height: 1.25;
+  height: auto;
+  min-height: 28px;
+  overflow: visible;
+  text-overflow: clip;
+  text-align: center;
+}
+
+/* 仅 1 个按钮时居中，不硬占半列 */
+.table-actions > .btn:only-child,
+.table td.col-actions:not(.col-actions-detail) > .btn:only-child {
+  grid-column: 1 / -1;
+  max-width: 7.5rem;
+  justify-self: center;
+}
+
+/* 未包 table-actions、但单元格内直接放多个按钮时，同样两列换行 */
+.table td.col-actions:not(.col-actions-detail):not(:has(.table-actions)) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
+  justify-items: stretch;
+}
+
+/* 表格内状态标签：完整显示，永不省略 */
 .table td .badge,
 .table .col-status .badge,
 .table .col-builtin .badge {
@@ -961,6 +1059,11 @@ html[data-theme="dark"] select.form-control option {
   font-weight: var(--font-weight-medium);
   font-size: var(--font-size-xs);
   line-height: 1;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .table td .btn,
@@ -969,9 +1072,9 @@ html[data-theme="dark"] select.form-control option {
 .table-actions .btn,
 .table-actions .btn-sm,
 .table-actions .btn-text {
-  height: 28px;
+  height: auto;
   min-height: 28px;
-  padding: 0 12px;
+  padding: 4px 8px;
   border: 1px solid var(--color-accent-gold);
   border-radius: var(--radius-pill);
   background: var(--btn-ghost-bg) !important;
@@ -980,8 +1083,11 @@ html[data-theme="dark"] select.form-control option {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   box-shadow: none;
-  white-space: nowrap;
-  flex-shrink: 0;
+  white-space: normal;
+  line-height: 1.25;
+  flex-shrink: 1;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .table td .btn:hover,
@@ -1581,6 +1687,39 @@ html[data-theme="dark"] .toast {
 .pager-center .btn[disabled] {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.pager-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0 6px;
+  color: var(--color-text-secondary);
+  user-select: none;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+button.pager-ellipsis:hover {
+  color: var(--color-text);
+}
+
+.pager-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-size: var(--font-size-sm, 0.875rem);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.pager-jump-input {
+  width: 4.25rem;
+  min-height: 28px;
+  padding: 2px 8px;
+  text-align: center;
 }
 
 code {

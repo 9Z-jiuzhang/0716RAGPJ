@@ -508,46 +508,37 @@ html[data-theme="dark"] .usage-notice {
   text-align: center;
 }
 
-.table-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  white-space: normal;
-  max-width: 100%;
-}
-
-.table-actions.table-actions-wrap {
-  flex-wrap: wrap;
-  justify-content: center;
-  max-width: 280px;
-  white-space: normal;
-  row-gap: 8px;
-  margin-inline: auto;
-}
-
-/* 用户管理操作栏：第一行角色，第二行禁用/删除 */
+/* 与全局 components.css 两列网格保持一致，避免 admin 覆盖回单列 flex */
+.table-actions,
+.table-actions.table-actions-wrap,
 .table-actions.table-actions-stack {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
+  margin-inline: auto;
+  box-sizing: border-box;
 }
 
 .table-actions-stack .table-actions-row {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  display: contents;
 }
 
-.table th.col-actions,
-.table td.col-actions {
+.table th.col-actions:not(.col-actions-detail),
+.table td.col-actions:not(.col-actions-detail) {
   text-align: center;
   vertical-align: middle;
+  width: 12.5rem;
+  white-space: normal;
+  overflow: visible;
+}
+
+.table th.col-actions-detail,
+.table td.col-actions-detail {
+  width: 4.5rem;
+  white-space: nowrap;
 }
 
 .table td.col-actions .table-actions {

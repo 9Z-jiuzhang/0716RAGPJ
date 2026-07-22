@@ -35,6 +35,109 @@ function formatPercentSafe(value, suffix) {
   return `（${cell}${suffix ? `，${suffix}` : ""}）`;
 }
 
+/**
+ * 方案 B：首页 + 当前±siblings + 末页；缺口用可点击省略号（跳转 ±jumpStep）。
+ * 相邻仅差 1 页时补全，避免「1 … 3」。
+ * @returns {({type:"page",page:number}|{type:"ellipsis",dir:"prev"|"next"})[]}
+ */
+function compactPageItems(totalPages, { current = 1, siblings = 1 } = {}) {
+  const total = Math.max(1, Number(totalPages) || 1);
+  const cur = Math.max(1, Math.min(total, Math.trunc(Number(current)) || 1));
+  const sib = Math.max(0, Math.trunc(Number(siblings)) || 0);
+
+  // 页数不多时全部展示（首+窗+尾+两侧省略的理论上限）
+  if (total <= sib * 2 + 5) {
+    return Array.from({ length: total }, (_, i) => ({ type: "page", page: i + 1 }));
+  }
+
+  const pages = new Set([1, total]);
+  for (let i = cur - sib; i <= cur + sib; i += 1) {
+    if (i >= 1 && i <= total) pages.add(i);
+  }
+
+  const sorted = [...pages].sort((a, b) => a - b);
+  /** 缺口只差 1 页则补上，少造省略号 */
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i] - sorted[i - 1] === 2) pages.add(sorted[i - 1] + 1);
+  }
+  const finalPages = [...pages].sort((a, b) => a - b);
+  const items = [];
+  finalPages.forEach((p, idx) => {
+    if (idx > 0 && p - finalPages[idx - 1] > 1) {
+      // 省略号在当前页左侧 → 向前跳；右侧 → 向后跳
+      const dir = p <= cur ? "prev" : "next";
+      items.push({ type: "ellipsis", dir });
+    }
+    items.push({ type: "page", page: p });
+  });
+  return items;
+}
+
+/** @returns {{ buttons: string, jump: string }} */
+function renderCompactPagerParts(currentPage, totalPages) {
+  const current = Math.max(1, Number(currentPage) || 1);
+  const total = Math.max(1, Number(totalPages) || 1);
+  const jumpStep = 5;
+  const buttons = compactPageItems(total, { current, siblings: 1 })
+    .map((item) => {
+      if (item.type === "ellipsis") {
+        const label = item.dir === "prev" ? `向前 ${jumpStep} 页` : `向后 ${jumpStep} 页`;
+        return `<button type="button" class="btn btn-secondary btn-sm pager-ellipsis" data-ellipsis-dir="${item.dir}" data-ellipsis-step="${jumpStep}" title="${label}" aria-label="${label}">…</button>`;
+      }
+      const active = item.page === current;
+      return `<button type="button" class="btn btn-sm ${active ? "" : "btn-secondary"}" data-goto-page="${item.page}" ${active ? 'aria-current="page"' : ""}>${item.page}</button>`;
+    })
+    .join("");
+  const jump = `<label class="pager-jump">
+      <span>前往</span>
+      <input type="number" class="form-control pager-jump-input" data-page-jump min="1" max="${total}" value="${current}" aria-label="跳转页码" />
+      <span>/ ${total} 页</span>
+      <button type="button" class="btn btn-secondary btn-sm" data-page-jump-go>跳转</button>
+    </label>`;
+  return { buttons, jump };
+}
+
+/** 兼容旧调用 */
+function renderCompactPagerButtons(currentPage, totalPages) {
+  const { buttons, jump } = renderCompactPagerParts(currentPage, totalPages);
+  return `${buttons}${jump}`;
+}
+
+/**
+ * 绑定上一页/下一页/页码/省略号跳段/跳转
+ * @param {{ page: number, totalPages: number, onGo: (p:number)=>void }} opts
+ */
+function bindCompactPager(pager, { page, totalPages, onGo }) {
+  if (!pager || typeof onGo !== "function") return;
+  const total = Math.max(1, Number(totalPages) || 1);
+  const go = (p) => {
+    const next = Math.trunc(Number(p));
+    if (!Number.isFinite(next) || next < 1 || next > total || next === page) return;
+    onGo(next);
+  };
+  pager.querySelector("[data-page-prev]")?.addEventListener("click", () => go(page - 1));
+  pager.querySelector("[data-page-next]")?.addEventListener("click", () => go(page + 1));
+  pager.querySelectorAll("[data-goto-page]").forEach((btn) => {
+    btn.addEventListener("click", () => go(btn.getAttribute("data-goto-page")));
+  });
+  pager.querySelectorAll("[data-ellipsis-dir]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const dir = btn.getAttribute("data-ellipsis-dir");
+      const step = Math.max(1, Math.trunc(Number(btn.getAttribute("data-ellipsis-step"))) || 5);
+      go(dir === "prev" ? Math.max(1, page - step) : Math.min(total, page + step));
+    });
+  });
+  const input = pager.querySelector("[data-page-jump]");
+  const jumpGo = () => go(input?.value);
+  pager.querySelector("[data-page-jump-go]")?.addEventListener("click", jumpGo);
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      jumpGo();
+    }
+  });
+}
+
 /** LLM Guard 意图码 → 中文展示 */
 const GUARD_INTENT_LABELS = {
   knowledge_query: "知识查询",
@@ -1459,13 +1562,15 @@ async function pageDepartmentDetail(deptId) {
                           <td>${escapeHtml(k.name)}</td>
                           <td>${k.visibility === "public" ? `<span class="badge badge-success">公开(访客可见)</span>` : `<span class="badge">部门内</span>`}</td>
                           <td>${escapeHtml(k.status || "-")}</td>
-                          <td style="white-space:nowrap">
-                            <button type="button" class="btn btn-text btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">打开</button>
-                            ${
-                              canWrite
-                                ? `<button type="button" class="btn btn-text btn-sm" data-rm-kb="${escapeHtml(k.id)}" style="color:var(--color-danger)">解除</button>`
-                                : ""
-                            }
+                          <td class="col-actions">
+                            <div class="table-actions">
+                              <button type="button" class="btn btn-text btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">打开</button>
+                              ${
+                                canWrite
+                                  ? `<button type="button" class="btn btn-text btn-sm" data-rm-kb="${escapeHtml(k.id)}" style="color:var(--color-danger)">解除</button>`
+                                  : ""
+                              }
+                            </div>
                           </td>
                         </tr>`
                       )
@@ -1793,7 +1898,7 @@ async function pageModels() {
           </div>
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>名称</th><th>类型</th><th>模型</th><th>URL</th><th>Key 环境变量</th><th>优先级</th><th>启用</th><th>默认</th><th>操作</th></tr></thead>
+          <thead><tr><th>名称</th><th>类型</th><th>模型</th><th>URL</th><th>Key 环境变量</th><th>优先级</th><th>启用</th><th>默认</th><th class="col-actions">操作</th></tr></thead>
           <tbody>
             ${items
               .map(
@@ -1806,7 +1911,7 @@ async function pageModels() {
                   <td>${escapeHtml(m.priority ?? 100)}</td>
                   <td>${m.is_enabled ? `<span class="badge badge-success">是</span>` : `<span class="badge badge-danger">否</span>`}</td>
                   <td>${m.is_default ? "✓" : ""}</td>
-                  <td>
+                  <td class="col-actions">
                     <div class="table-actions">
                       ${
                         canWrite
@@ -3430,11 +3535,7 @@ async function pageDocuments(kbId) {
         }, 4000);
       }
 
-      const pageButtons = Array.from({ length: totalPages }, (_, i) => {
-        const p = i + 1;
-        const active = p === listPage;
-        return `<button type="button" class="btn btn-sm ${active ? "" : "btn-secondary"}" data-goto-page="${p}" ${active ? "aria-current=\"page\"" : ""}>${p}</button>`;
-      }).join("");
+      const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
 
       const selectableCount = items.filter((d) => !DOC_BUSY_STATUSES.has(String(d.status || ""))).length;
 
@@ -3478,7 +3579,7 @@ async function pageDocuments(kbId) {
           <thead><tr>
             ${canWrite ? `<th class="col-check" style="width:44px"><input type="checkbox" id="docSelectAll" title="全选当前页" aria-label="全选当前页" ${selectableCount ? "" : "disabled"} /></th>` : ""}
             <th class="col-index" style="width:56px">序号</th>
-            <th>文件名</th><th>大小</th><th>分段</th><th>状态</th><th class="col-time">上传时间</th><th>操作</th>
+            <th>文件名</th><th>大小</th><th>分段</th><th>状态</th><th class="col-time">上传时间</th><th class="col-actions">操作</th>
           </tr></thead>
           <tbody>
             ${items
@@ -3499,7 +3600,7 @@ async function pageDocuments(kbId) {
                   <td>${escapeHtml(d.chunk_count ?? 0)}</td>
                   <td class="col-status">${docStatusBadge(st)}</td>
                   <td class="col-time">${formatDateTimeHtml(d.created_at)}</td>
-                  <td>
+                  <td class="col-actions">
                     <div class="table-actions">
                       <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">工作台</button>
                       ${canWrite && isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
@@ -3518,6 +3619,7 @@ async function pageDocuments(kbId) {
                 <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
                 ${pageButtons}
                 <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+                ${pageJump}
               </div>`
             : ""
         }
@@ -3588,23 +3690,13 @@ async function pageDocuments(kbId) {
 
       const pager = document.getElementById("docPager");
       if (pager) {
-        pager.querySelector("[data-page-prev]")?.addEventListener("click", () => {
-          if (listPage <= 1) return;
-          listPage -= 1;
-          renderList();
-        });
-        pager.querySelector("[data-page-next]")?.addEventListener("click", () => {
-          if (listPage >= totalPages) return;
-          listPage += 1;
-          renderList();
-        });
-        pager.querySelectorAll("[data-goto-page]").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const p = Number(btn.getAttribute("data-goto-page"));
-            if (!Number.isFinite(p) || p === listPage) return;
+        bindCompactPager(pager, {
+          page: listPage,
+          totalPages,
+          onGo: (p) => {
             listPage = p;
             renderList();
-          });
+          },
         });
       }
 
@@ -3806,25 +3898,23 @@ async function pageSnapshots(kbId) {
           items.length
             ? `<div class="table-wrap"><table class="table">
           <thead><tr>
-            <th>快照名称</th><th>触发方式</th><th>文档数</th><th>分段数</th><th>说明</th><th class="col-time">创建时间</th><th>操作</th>
+            <th>快照名称</th><th>触发方式</th><th>文档数</th><th>分段数</th><th>说明</th><th class="col-time">创建时间</th><th class="col-actions">操作</th>
           </tr></thead>
           <tbody>
             ${items
               .map((s) => {
                 const isProtection = s.trigger === "rollback_protection";
                 const ops = [
-                  `<button class="btn btn-text btn-sm" data-detail="${escapeHtml(s.id)}">详情</button>`,
+                  `<button type="button" class="btn btn-text btn-sm" data-detail="${escapeHtml(s.id)}">详情</button>`,
                   canRestore
-                    ? `<button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(s.id)}">差异预览/回退</button>`
+                    ? `<button type="button" class="btn btn-secondary btn-sm" data-preview="${escapeHtml(s.id)}">差异预览/回退</button>`
                     : "",
                   canWrite && !isProtection
-                    ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(s.id)}">删除</button>`
+                    ? `<button type="button" class="btn btn-danger btn-sm" data-del="${escapeHtml(s.id)}">删除</button>`
                     : isProtection
                       ? `<span class="text-muted" title="保护快照不可手动删除">不可删</span>`
                       : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ");
+                ].filter(Boolean);
                 return `<tr>
                   <td><strong>${escapeHtml(s.name || "-")}</strong></td>
                   <td>${triggerBadge(s.trigger)}</td>
@@ -3832,7 +3922,7 @@ async function pageSnapshots(kbId) {
                   <td>${escapeHtml(s.total_chunks ?? 0)}</td>
                   <td>${escapeHtml(s.description || "—")}</td>
                   <td class="col-time">${formatDateTimeHtml(s.created_at)}</td>
-                  <td style="white-space:nowrap">${ops}</td>
+                  <td class="col-actions"><div class="table-actions">${ops.join("")}</div></td>
                 </tr>`;
               })
               .join("")}
@@ -4406,7 +4496,7 @@ async function pageHitTest() {
             </div>
           </div>
           <div class="table-wrap"><table class="table" id="htCaseTable">
-            <thead><tr><th style="width:96px">选用</th><th>名称</th><th>题数</th><th>说明</th><th></th></tr></thead>
+            <thead><tr><th style="width:96px">选用</th><th>名称</th><th>题数</th><th>说明</th><th class="col-actions">操作</th></tr></thead>
             <tbody>
               ${
                 cases.length
@@ -4423,10 +4513,12 @@ async function pageHitTest() {
                           <td>${escapeHtml(c.name)}</td>
                           <td>${escapeHtml(c.question_count)}</td>
                           <td class="text-muted" style="max-width:180px">${escapeHtml(c.description || "-")}</td>
-                          <td style="white-space:nowrap">
-                            <button type="button" class="btn btn-secondary btn-sm" data-view-case="${escapeHtml(cid)}">查看</button>
-                            ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" data-edit-case="${escapeHtml(cid)}">编辑</button>` : ""}
-                            ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-case="${escapeHtml(cid)}">删除</button>` : ""}
+                          <td class="col-actions">
+                            <div class="table-actions">
+                              <button type="button" class="btn btn-secondary btn-sm" data-view-case="${escapeHtml(cid)}">查看</button>
+                              ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" data-edit-case="${escapeHtml(cid)}">编辑</button>` : ""}
+                              ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-case="${escapeHtml(cid)}">删除</button>` : ""}
+                            </div>
                           </td>
                         </tr>`;
                       })
@@ -4448,7 +4540,7 @@ async function pageHitTest() {
             </div>
           </div>
           <div class="table-wrap"><table class="table" id="htRunTable">
-            <thead><tr><th>用例</th><th>得分（相关度）</th><th>命中</th><th>策略</th><th class="col-time">时间</th><th></th></tr></thead>
+            <thead><tr><th>用例</th><th>得分（相关度）</th><th>命中</th><th>策略</th><th class="col-time">时间</th><th class="col-actions">操作</th></tr></thead>
             <tbody>
               ${
                 runs.length
@@ -4460,9 +4552,11 @@ async function pageHitTest() {
                           <td>${escapeHtml(r.hit_count)}/${escapeHtml(r.total_questions)}${r.hit_rate != null ? `（${pct(r.hit_rate)}）` : ""}</td>
                           <td>${escapeHtml(strategyLabel(r.strategy))}</td>
                           <td class="col-time">${formatDateTimeHtml(r.completed_at || r.created_at)}</td>
-                          <td style="white-space:nowrap">
-                            <button type="button" class="btn btn-secondary btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
-                            ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">清除</button>` : ""}
+                          <td class="col-actions">
+                            <div class="table-actions">
+                              <button type="button" class="btn btn-secondary btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
+                              ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">清除</button>` : ""}
+                            </div>
                           </td>
                         </tr>`;
                       })
@@ -5373,15 +5467,15 @@ async function pageRoleCaches() {
           </div>
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>缓存知识库</th><th>角色</th><th>缓存数</th><th>检测周期</th><th class="col-time">文档分析</th><th class="col-time">历史分析</th><th>状态</th><th class="col-actions">操作</th></tr></thead>
+          <thead><tr><th class="col-name">缓存知识库</th><th class="col-role">角色</th><th>缓存数</th><th>检测周期</th><th class="col-time">文档分析</th><th class="col-time">历史分析</th><th>状态</th><th class="col-actions">操作</th></tr></thead>
           <tbody>
             ${
               caches.length
                 ? caches
                     .map(
                       (cache) => `<tr data-role-cache-row="${escapeHtml(cache.role_id)}">
-                        <td><strong>${escapeHtml(cache.name)}</strong></td>
-                        <td>${escapeHtml(cache.role_description || cache.role_name)}</td>
+                        <td class="col-name" title="${escapeHtml(cache.name)}"><strong>${escapeHtml(cache.name)}</strong></td>
+                        <td class="col-role" title="${escapeHtml(cache.role_description || cache.role_name || "")}">${escapeHtml(cache.role_description || cache.role_name)}</td>
                         <td>${escapeHtml(cache.question_count ?? 0)}</td>
                         <td>
                           <label style="display:flex;align-items:center;gap:6px;white-space:nowrap">
@@ -5875,11 +5969,7 @@ async function pageAudit() {
     }
     pageItemMap = new Map(items.map((a) => [String(a.id), a]));
 
-    const pageButtons = Array.from({ length: totalPages }, (_, i) => {
-      const p = i + 1;
-      const active = p === listPage;
-      return `<button type="button" class="btn btn-sm ${active ? "" : "btn-secondary"}" data-goto-page="${p}" ${active ? 'aria-current="page"' : ""}>${p}</button>`;
-    }).join("");
+    const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
 
     document.getElementById("pageRoot").innerHTML = `
       ${pageHead({
@@ -5917,18 +6007,18 @@ async function pageAudit() {
             <button type="button" class="btn btn-sm" id="btnAuditBatchExport">批量导出 CSV</button>
           </div>
         </div>
-        <div class="table-wrap"><table class="table">
+        <div class="table-wrap"><table class="table table-fit">
           <thead><tr>
             <th class="col-check"><input type="checkbox" id="auditSelectAll" title="全选当前页" aria-label="全选当前页" ${items.length ? "" : "disabled"} /></th>
             <th class="col-index">序号</th>
             <th class="col-name">操作者</th>
-            <th style="width:14%">动作</th>
-            <th style="width:10%">资源</th>
-            <th style="width:10%">资源 ID</th>
-            <th style="width:12%">请求标识</th>
+            <th class="col-shrink">动作</th>
+            <th class="col-shrink col-shrink-sm">资源</th>
+            <th class="col-shrink col-shrink-sm">资源 ID</th>
+            <th class="col-shrink">请求标识</th>
             <th class="col-status">结果</th>
             <th class="col-time">时间</th>
-            <th class="col-actions" style="width:88px;min-width:88px;max-width:88px"></th>
+            <th class="col-actions col-actions-detail">操作</th>
           </tr></thead>
           <tbody>${
             items.length
@@ -5938,18 +6028,18 @@ async function pageAudit() {
                     return `<tr>
                 <td class="col-check"><input type="checkbox" class="audit-row-check" value="${escapeHtml(a.id)}" aria-label="选择第 ${seq} 条" /></td>
                 <td class="col-index">${seq}</td>
-                <td class="col-name">${escapeHtml(actorName(a))}</td>
-                <td title="${escapeHtml(a.action)}">${escapeHtml(actionLabel(a.action))}</td>
-                <td>${escapeHtml(resourceLabel(a.resource_type))}</td>
-                <td class="text-muted">${escapeHtml(a.resource_id ? String(a.resource_id).slice(0, 8) + "…" : "—")}</td>
-                <td class="text-muted">${escapeHtml(a.request_id ? String(a.request_id).slice(0, 10) + "…" : "—")}</td>
+                <td class="col-name" title="${escapeHtml(actorName(a))}">${escapeHtml(actorName(a))}</td>
+                <td class="col-shrink" title="${escapeHtml(a.action)}">${escapeHtml(actionLabel(a.action))}</td>
+                <td class="col-shrink col-shrink-sm" title="${escapeHtml(resourceLabel(a.resource_type))}">${escapeHtml(resourceLabel(a.resource_type))}</td>
+                <td class="col-shrink col-shrink-sm text-muted" title="${escapeHtml(a.resource_id || "")}">${escapeHtml(a.resource_id ? String(a.resource_id).slice(0, 8) + "…" : "—")}</td>
+                <td class="col-shrink text-muted" title="${escapeHtml(a.request_id || "")}">${escapeHtml(a.request_id ? String(a.request_id).slice(0, 10) + "…" : "—")}</td>
                 <td class="col-status">${
                   a.result === "success"
                     ? `<span class="badge badge-success">成功</span>`
                     : `<span class="badge badge-danger">${escapeHtml(a.result || "失败")}</span>`
                 }</td>
                 <td class="col-time">${formatDateTimeHtml(a.created_at)}</td>
-                <td class="col-actions" style="width:88px;min-width:88px;max-width:88px"><button class="btn btn-text btn-sm" data-audit="${escapeHtml(a.id)}">详情</button></td>
+                <td class="col-actions col-actions-detail"><button type="button" class="btn btn-text btn-sm" data-audit="${escapeHtml(a.id)}">详情</button></td>
               </tr>`;
                   })
                   .join("")
@@ -5962,6 +6052,7 @@ async function pageAudit() {
                 <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
                 ${pageButtons}
                 <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+                ${pageJump}
               </div>`
             : ""
         }
@@ -6028,23 +6119,13 @@ async function pageAudit() {
 
     const pager = document.getElementById("auditPager");
     if (pager) {
-      pager.querySelector("[data-page-prev]")?.addEventListener("click", async () => {
-        if (listPage <= 1) return;
-        listPage -= 1;
-        await load();
-      });
-      pager.querySelector("[data-page-next]")?.addEventListener("click", async () => {
-        if (listPage >= totalPages) return;
-        listPage += 1;
-        await load();
-      });
-      pager.querySelectorAll("[data-goto-page]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const p = Number(btn.getAttribute("data-goto-page"));
-          if (!Number.isFinite(p) || p === listPage) return;
+      bindCompactPager(pager, {
+        page: listPage,
+        totalPages,
+        onGo: async (p) => {
           listPage = p;
           await load();
-        });
+        },
       });
     }
 
@@ -6282,7 +6363,7 @@ async function pageGuardEvents() {
                         <td>${event.detector === "llm" ? "LLM 分类器" : "本地规则"}</td>
                         <td>${formatPercentCell(event.confidence)}</td>
                         <td class="text-muted" style="max-width:220px;font-size:12px">${escapeHtml(event.question_preview || "-")}</td>
-                        <td style="white-space:nowrap">${userBtn}</td>
+                        <td class="col-actions"><div class="table-actions">${userBtn}</div></td>
                       </tr>`;
                     })
                     .join("")
