@@ -2661,7 +2661,7 @@ async function pageDocuments(kbId) {
     await renderList();
   };
 
-  const openDocWorkbench = async (docId, filenameHint) => {
+  const openDocWorkbench = async (docId, filenameHint, initialTab = "normalized") => {
     try {
       const [detail, content, chunksPage] = await Promise.all([
         api.get(`/knowledge-bases/${kbId}/documents/${docId}`).catch(() => null),
@@ -2673,6 +2673,7 @@ async function pageDocuments(kbId) {
       let rules = { ...(content.segment_rules || detail?.segment_rules || {}) };
       let chunks = chunksPage.items || [];
       const status = detail?.status || content.status || "-";
+      const startTab = ["normalized", "raw", "chunks", "rules"].includes(initialTab) ? initialTab : "normalized";
 
       const mask = document.createElement("div");
       mask.className = "modal-mask";
@@ -2688,10 +2689,10 @@ async function pageDocuments(kbId) {
               ${content.error_message || detail?.error_message ? ` · <span class="text-danger">${escapeHtml(content.error_message || detail.error_message)}</span>` : ""}
             </p>
             <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-              <button type="button" class="btn btn-sm" data-tab="normalized">清洗正文</button>
+              <button type="button" class="btn btn-sm btn-secondary" data-tab="normalized">清洗正文</button>
               <button type="button" class="btn btn-sm btn-secondary" data-tab="raw">解析原文</button>
-              <button type="button" class="btn btn-sm btn-secondary" data-tab="chunks">分段列表</button>
-              <button type="button" class="btn btn-sm btn-secondary" data-tab="rules">分段规则</button>
+              <button type="button" class="btn btn-sm btn-secondary" data-tab="chunks">分块列表</button>
+              <button type="button" class="btn btn-sm btn-secondary" data-tab="rules">分块规则</button>
             </div>
             <pre id="docPreviewBody" style="background:var(--color-bg-tint,#f8f9fa);padding:12px;border-radius:8px;overflow:auto;max-height:360px;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;margin:0"></pre>
             <div id="docPreviewChunks" style="display:none;max-height:420px;overflow:auto"></div>
@@ -2822,6 +2823,7 @@ async function pageDocuments(kbId) {
           setActiveTab(btn.getAttribute("data-tab"));
         });
       });
+      setActiveTab(startTab);
 
       const btnNormalize = mask.querySelector("#btnNormalize");
       if (btnNormalize) {
@@ -2913,6 +2915,115 @@ async function pageDocuments(kbId) {
     }
   };
 
+  const openPreSegmentModal = () => {
+    const mask = document.createElement("div");
+    mask.className = "modal-mask";
+    mask.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(720px,calc(100vw - 24px));max-height:92vh;overflow:auto">
+        <h3 class="modal-title">分块预览（入库前）</h3>
+        <div class="modal-body">
+          <p class="text-muted" style="margin-top:0">配置分块规则并预览效果，确认后再上传入库。</p>
+          <input type="file" id="preSegFile" class="hidden" accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnPickPreSegFile">选择预览文件</button>
+            <span class="text-muted" id="preSegFileName">尚未选择文件</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div>
+              <label class="form-label text-muted">chunk_size（100–5000）</label>
+              <input class="form-control" id="preSegSize" type="number" min="100" max="5000" value="500" style="margin-top:6px" />
+            </div>
+            <div>
+              <label class="form-label text-muted">chunk_overlap（0–1000）</label>
+              <input class="form-control" id="preSegOverlap" type="number" min="0" max="1000" value="50" style="margin-top:6px" />
+            </div>
+          </div>
+          <label class="text-muted">split_mode</label>
+          <select class="form-control" id="preSegMode" style="margin:6px 0 12px">
+            <option value="fixed">fixed</option>
+            <option value="sliding">sliding</option>
+            <option value="paragraph">paragraph</option>
+            <option value="heading">heading</option>
+            <option value="markdown">markdown</option>
+          </select>
+          <div id="preSegResult" style="display:none;border:1px solid var(--color-border);border-radius:8px;padding:12px;max-height:320px;overflow:auto"></div>
+        </div>
+        <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
+          <button type="button" class="btn btn-sm" id="btnRunPreSeg">生成分块预览</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnUploadAfterPreSeg" disabled>确认上传此文件</button>
+          <button type="button" class="btn btn-secondary" data-close>关闭</button>
+        </div>
+      </div>`;
+    document.body.appendChild(mask);
+
+    let selectedFile = null;
+    const fileInput = mask.querySelector("#preSegFile");
+    const nameEl = mask.querySelector("#preSegFileName");
+    const resultEl = mask.querySelector("#preSegResult");
+    const uploadBtn = mask.querySelector("#btnUploadAfterPreSeg");
+
+    mask.querySelector("#btnPickPreSegFile").onclick = () => fileInput.click();
+    fileInput.onchange = () => {
+      selectedFile = fileInput.files?.[0] || null;
+      nameEl.textContent = selectedFile ? selectedFile.name : "尚未选择文件";
+      uploadBtn.disabled = !selectedFile;
+      resultEl.style.display = "none";
+      resultEl.innerHTML = "";
+    };
+
+    mask.querySelector("#btnRunPreSeg").onclick = async () => {
+      if (!selectedFile) return toast("请先在本界面选择预览文件", "error");
+      const chunk_size = Number(mask.querySelector("#preSegSize").value);
+      const chunk_overlap = Number(mask.querySelector("#preSegOverlap").value);
+      const split_mode = mask.querySelector("#preSegMode").value || "fixed";
+      if (!Number.isFinite(chunk_size) || chunk_size < 100 || chunk_size > 5000) {
+        return toast("分段长度须在 100–5000", "error");
+      }
+      if (!Number.isFinite(chunk_overlap) || chunk_overlap < 0 || chunk_overlap > 1000) {
+        return toast("分段重叠须在 0–1000", "error");
+      }
+      const fd = new FormData();
+      fd.append("file", selectedFile);
+      fd.append("chunk_size", String(chunk_size));
+      fd.append("chunk_overlap", String(chunk_overlap));
+      fd.append("split_mode", split_mode);
+      try {
+        const preview = await api.upload(`/knowledge-bases/${kbId}/documents/segment-preview-file`, fd);
+        resultEl.style.display = "block";
+        resultEl.innerHTML = `
+          <p class="text-muted" style="margin-top:0">共 ${escapeHtml(preview.total_chunks ?? 0)} 段 · ${escapeHtml(preview.total_chars ?? 0)} 字（不写库）</p>
+          ${(preview.chunks || [])
+            .slice(0, 40)
+            .map(
+              (c) => `<div style="border:1px solid var(--color-border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px">
+                <div class="text-muted">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字</div>
+                <div style="white-space:pre-wrap">${escapeHtml((c.content || "").slice(0, 360))}</div>
+              </div>`
+            )
+            .join("") || `<p class="text-muted">无分段</p>`}`;
+        uploadBtn.disabled = false;
+        toast("分块预览已生成", "success");
+      } catch (e) {
+        toast(e.message || "预览失败", "error");
+      }
+    };
+
+    uploadBtn.onclick = async () => {
+      if (!selectedFile) return toast("请先选择文件", "error");
+      try {
+        await doUploadFiles([selectedFile]);
+        mask.remove();
+      } catch (e) {
+        toast(e.message || "上传失败", "error");
+      }
+    };
+
+    mask.querySelector("[data-close]").onclick = () => mask.remove();
+    mask.addEventListener("click", (e) => {
+      if (e.target === mask) mask.remove();
+    });
+  };
+
   const wireDropzone = () => {
     const zone = document.getElementById("kbDropzone");
     const fileInput = document.getElementById("adminFile");
@@ -2956,13 +3067,13 @@ async function pageDocuments(kbId) {
       document.getElementById("pageRoot").innerHTML = `
       ${pageHead({
         title: "文档管理",
-        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown。可拖拽上传；失败可重试；预览可改分段。",
+        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown。可拖拽上传；失败可重试；预览可改分块。",
         actions: `
           <button class="btn btn-secondary btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(kbId)}">返回详情</button>
           ${
             canUpload
               ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
-                 ${canSegment ? `<button class="btn btn-secondary btn-sm" id="btnPreviewUpload">入库前预分段</button>` : ""}
+                 ${canSegment ? `<button class="btn btn-secondary btn-sm" id="btnPreviewUpload">分块预览</button>` : ""}
                  <button class="btn btn-sm" id="btnAdminUpload">选择并上传</button>`
               : ""
           }
@@ -2981,19 +3092,18 @@ async function pageDocuments(kbId) {
               <li>一次可批量上传多个文件</li>
             </ul>
           </div>
-        </div>
-        <div id="uploadPreviewPanel" class="card" style="display:none;margin-bottom:12px"></div>`
+        </div>`
           : ""
       }
       <div class="card panel-fill">
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">文档列表</h3>
-            <p class="card-sub">分段 / 预处理 / 向量化状态 · 共 ${items.length} 份${busy ? " · 处理中自动刷新" : ""}</p>
+            <p class="card-sub">分块 / 预处理 / 向量化状态 · 共 ${items.length} 份${busy ? " · 处理中自动刷新" : ""}</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>文件名</th><th>大小</th><th>分段</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>文件名</th><th>大小</th><th>分块</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead>
           <tbody>
             ${items
               .map((d) => {
@@ -3008,6 +3118,7 @@ async function pageDocuments(kbId) {
                   <td>${formatDateTime(d.created_at)}</td>
                   <td>
                     <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">工作台</button>
+                    ${canSegment ? `<button class="btn btn-secondary btn-sm" data-chunks="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">分块</button>` : ""}
                     ${canWrite && isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
                     ${canWrite && !isBusy ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
                   </td>
@@ -3025,59 +3136,13 @@ async function pageDocuments(kbId) {
       if (btnUpload) btnUpload.onclick = () => document.getElementById("adminFile")?.click();
 
       const btnPreviewUpload = document.getElementById("btnPreviewUpload");
-      if (btnPreviewUpload) {
-        const runPreview = async (f) => {
-          const fd = new FormData();
-          fd.append("file", f);
-          fd.append("chunk_size", "500");
-          fd.append("chunk_overlap", "50");
-          fd.append("split_mode", "fixed");
-          try {
-            const preview = await api.upload(`/knowledge-bases/${kbId}/documents/segment-preview-file`, fd);
-            const panel = document.getElementById("uploadPreviewPanel");
-            panel.style.display = "block";
-            panel.innerHTML = `
-              <div class="card-header"><div class="card-header-text">
-                <h3 class="card-title">入库前预分段 · ${escapeHtml(preview.filename || f.name)}</h3>
-                <p class="card-sub">共 ${escapeHtml(preview.total_chunks ?? 0)} 段 · ${escapeHtml(preview.total_chars ?? 0)} 字（不写库）</p>
-              </div></div>
-              <div style="max-height:280px;overflow:auto;padding:12px">
-                ${(preview.chunks || [])
-                  .slice(0, 40)
-                  .map(
-                    (c) => `<div style="border:1px solid var(--color-border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px">
-                      <div class="text-muted">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字</div>
-                      <div style="white-space:pre-wrap">${escapeHtml((c.content || "").slice(0, 360))}</div>
-                    </div>`
-                  )
-                  .join("") || `<p class="text-muted">无分段</p>`}
-              </div>
-              <div style="padding:0 12px 12px"><button type="button" class="btn btn-sm" id="btnConfirmUploadAfterPreview">确认上传此文件</button></div>`;
-            document.getElementById("btnConfirmUploadAfterPreview").onclick = () => doUploadFiles([f]);
-            toast("预分段完成", "success");
-          } catch (e) {
-            toast(e.message || "预分段失败", "error");
-          }
-        };
-        btnPreviewUpload.onclick = () => {
-          const input = document.getElementById("adminFile");
-          if (!input) return;
-          const existing = input.files?.[0];
-          if (existing) {
-            runPreview(existing);
-            return;
-          }
-          const once = () => {
-            input.removeEventListener("change", once);
-            if (input.files?.[0]) runPreview(input.files[0]);
-          };
-          input.addEventListener("change", once);
-          input.click();
-        };
-      }
+      if (btnPreviewUpload) btnPreviewUpload.onclick = () => openPreSegmentModal();
 
       document.querySelectorAll("[data-preview]").forEach((btn) => {
         btn.onclick = () => openDocWorkbench(btn.getAttribute("data-preview"), btn.getAttribute("data-name"));
+      });
+      document.querySelectorAll("[data-chunks]").forEach((btn) => {
+        btn.onclick = () => openDocWorkbench(btn.getAttribute("data-chunks"), btn.getAttribute("data-name"), "chunks");
       });
       document.querySelectorAll("[data-retry]").forEach((btn) => {
         btn.onclick = async () => {
