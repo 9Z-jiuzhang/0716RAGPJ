@@ -243,6 +243,158 @@
   box-shadow: 0 0 12px color-mix(in srgb, var(--color-primary) 40%, transparent);
 }
 
+#htRunDetailCard .ht-detail-table-wrap {
+  overflow: visible;
+}
+
+#htRunDetailCard .ht-detail-table {
+  border-collapse: collapse;
+}
+
+/* 极细蓝色表格竖线 */
+#htRunDetailCard .ht-detail-table th,
+#htRunDetailCard .ht-detail-table td {
+  border-right: 1px solid color-mix(in srgb, var(--color-primary, #3b82f6) 28%, transparent);
+}
+
+#htRunDetailCard .ht-detail-table th:last-child,
+#htRunDetailCard .ht-detail-table td:last-child {
+  border-right: none;
+}
+
+#htRunDetailCard .ht-detail-table th.ht-q-col,
+#htRunDetailCard .ht-detail-table td.ht-q-cell {
+  width: 52%;
+  min-width: 18rem;
+}
+
+#htRunDetailCard .ht-hit-cell {
+  width: 4.5rem;
+  vertical-align: middle;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+#htRunDetailCard .ht-q-cell {
+  text-align: left;
+  white-space: normal !important;
+  overflow: visible !important;
+  vertical-align: top;
+  padding-top: 14px;
+  padding-bottom: 16px;
+}
+
+#htRunDetailCard .ht-qa-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+#htRunDetailCard .ht-qa-label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+#htRunDetailCard .ht-qa-question {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+#htRunDetailCard .ht-qa-detail {
+  color: var(--color-text-body);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-height: none;
+  overflow: visible;
+}
+
+#htRunDetailCard .ht-recall-cell {
+  width: 14%;
+  white-space: normal !important;
+  font-size: var(--font-size-xs);
+  word-break: break-word;
+  vertical-align: middle;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+/* 命中 / 相关度 / 耗时 / 召回：上下居中；问题列仍顶对齐便于阅读长文 */
+#htRunDetailCard .ht-detail-table td:not(.ht-q-cell) {
+  white-space: normal;
+  vertical-align: middle;
+}
+
+#htRunDetailCard .ht-detail-table td.ht-q-cell {
+  vertical-align: top;
+}
+
+/* 运行记录：操作按钮上下两行，让出列宽 */
+#htRunTable td.col-actions {
+  width: 5.25rem;
+  min-width: 5.25rem;
+  max-width: 5.75rem;
+}
+
+#htRunTable .table-actions.table-actions-col {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  max-width: 5.25rem;
+  margin-inline: auto;
+}
+
+#htRunTable .table-actions.table-actions-col > .btn {
+  width: 100%;
+}
+
+.ht-case-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 4px;
+}
+
+.pager-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 0 4px 4px;
+}
+
+.pager-stack .pager-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.pager-stack .pager-row-jump {
+  gap: 6px;
+}
+
+.pager-stack .pager-jump {
+  margin-left: 0;
+}
+
 .ht-runs-toolbar {
   display: flex;
   align-items: center;
