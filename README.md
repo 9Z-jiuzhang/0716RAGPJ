@@ -197,7 +197,7 @@ app/
 | 角色与权限 | `/api/v1/roles` | — | 角色 CRUD、权限清单；**配置权限仅超管** |
 | 部门管理 | `/api/v1/departments` | `department.py` | 部门 CRUD、成员与知识库关联；GUEST 部门受保护 |
 | 大模型管理 | `/api/v1/models` | `model_config.py`、`model_usage.py` | LLM/Embedding/Rerank 配置、Langfuse 用量 |
-| 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py` | KB CRUD、重向量化、进度、KB 级 ACL |
+| 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py` | KB CRUD、重向量化、进度；`KBPermission` API（管理端不下发 ACL 编辑卡） |
 | 文档管理 | `/api/v1/knowledge-bases/{kb_id}/documents` | `document_service.py`、`document_pipeline.py` | 上传、解析、分段、规范化、chunk 编辑、重试 |
 | 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`llm_guard.py` | SSE 流式问答（含 Guard）、会话、反馈；访客可用 |
 | 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例、执行、多策略对比；得分=命中片段相关度均值 |
@@ -205,12 +205,12 @@ app/
 | RAGAS 评估 | `/api/v1/ragas` | `ragas_evaluation.py` | 样本预览/生成、评估运行与详情 |
 | 角色缓存 | `/api/v1/role-caches` | `role_cache.py` | 按角色缓存高频问题 |
 | Query 预处理 | `/api/v1/query-processing` | — | 改写/扩展/HyDE 策略配置 |
-| 审计日志 | `/api/v1/audit` | `audit.py` | 操作审计查询与详情 |
+| 审计日志 | `/api/v1/audit` | `audit.py` | 操作审计查询、详情与批量删除 |
 | 系统监控 | `/api/v1/monitor` | `monitor.py` | 健康检查、统计、**Guard 拦截事件列表**；`/metrics` |
 
 ### 2.3 访问控制模型（部门驱动）
 
-平台以**部门（department）作为知识库可见性的唯一控制轴**，`visibility` 字段仅由部门派生（`GUEST → public`，其余 `→ restricted`），用于展示与向后兼容。角色/权限控制「能做什么操作」，部门控制「能看到哪些知识库」。相关实现见 `core/constants.py`、`retrieval/scope.py`、`core/dependencies.py`、`services/knowledge_base.py`、`services/department.py`。
+平台以**部门（department）作为知识库可见性的主控制轴**，`visibility` 字段仅由部门派生（`GUEST → public`，其余 `→ restricted`），用于展示与向后兼容。**角色权限**（超管在「组织与权限」配置）控制「能做什么操作」；部门控制「能看到哪些知识库」。`KBPermission` 仍可作为 API 级补充闸门，但管理端知识库页不再提供 ACL 编辑入口，避免无法回看的隐式授权。相关实现见 `core/constants.py`、`retrieval/scope.py`、`core/dependencies.py`、`services/knowledge_base.py`、`services/department.py`。
 
 **知识库可见范围**（`status=active` 且未软删除为前提）：
 
@@ -275,7 +275,7 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 - **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度、置信提示）、登录/注册、对话历史、个人中心（含改密）、**多文件批量上传**（员工/管理员）。
 - **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势与错误分桶）与安全窗口、用户/角色/部门、大模型与用量、知识库/文档工作台/快照、命中率测试、RAGAS、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（Grafana）、**API 接入指南**。
-- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、主题/动效、公共 CSS；接入指南 Markdown 亦挂在 `/assets/docs/`。
+- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、主题/动效、公共 CSS、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
 
 ### 2.7 可观测性
 
@@ -386,12 +386,12 @@ pytest backend/tests -q
 
 | 脚本 | 位置 | 用途 |
 |------|------|------|
-| `e2e_real_stack.ps1` | `scripts/` | 真实全栈 E2E（health→登录→KB→上传→命中率→快照→SSE） |
-| `verify_qa_stack.ps1` | `scripts/` | QA 冒烟：核心栈与统一入口健康检查 |
 | `generate_openapi.py` | `scripts/` | 生成 `docs/openapi.json` |
 | `seed_qa_test_kb.py` | `scripts/` | 灌入测试知识库文档 |
 | `fix_unique_super_admin.py` | `scripts/` | 修正非固定账号上的超管角色 |
 | `reindex_chroma.py` | `backend/app/scripts/` | 将 `document_chunks` 回填 Chroma |
+
+单元/接口回归以 `backend/tests`（pytest）为准；上传解析样例见 `testdoc/`。
 
 **Windows 端口速查**：
 
@@ -414,9 +414,10 @@ docker compose ps
 | [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md) | 第三方 / Android 等接入指南 |
 | [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | 契约使用与变更流程 |
-| 运行时 Swagger | http://localhost:18080/docs |
+| 运行时 Swagger（官方） | http://localhost:18080/docs |
+| 管理端嵌入 Swagger | http://localhost:18080/assets/vendor/swagger-ui/index.html |
 
-重新生成契约：`python scripts/generate_openapi.py`。管理端「API 接入指南」页渲染接入文档；完整字段以 `API.md` / `openapi.json` 为准。
+重新生成契约：`python scripts/generate_openapi.py`。管理端「API 接入指南」页渲染接入文档并嵌入同源 Swagger；完整字段以 `API.md` / `openapi.json` 为准。
 
 ---
 
@@ -452,8 +453,10 @@ docker compose ps
 │   ├── API_INTEGRATION_GUIDE.md  # 第三方接入指南
 │   ├── CLOUD_DEPLOY.md           # 云端部署指南
 │   └── CONTRACT.md               # 契约说明
-├── scripts/                      # E2E / 契约生成 / 运维脚本
+├── scripts/                      # 契约生成 / 种子与运维脚本
 ├── testdoc/                      # 上传解析联调样例文档
+├── testdata/                     # 问答评测样例与用例说明
+├── frontend/                     # 管理端 / 访客端 / shared（含 vendor/swagger-ui）
 ├── docker-compose.yml            # 本机开发编排
 ├── docker-compose.prod.yml       # 云端覆盖
 ├── requirements.txt

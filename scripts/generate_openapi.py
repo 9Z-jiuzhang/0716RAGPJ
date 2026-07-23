@@ -1101,6 +1101,26 @@ schemas["AuditLogResponse"] = {
         },
     ]
 }
+schemas["AuditBatchDeleteRequest"] = {
+    "type": "object",
+    "required": ["ids"],
+    "properties": {
+        "ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {"type": "string", "format": "uuid"},
+            "description": "要删除的审计日志 ID 列表",
+        },
+    },
+}
+schemas["AuditBatchDeleteResult"] = {
+    "type": "object",
+    "required": ["deleted"],
+    "properties": {
+        "deleted": prop("integer", "实际删除条数"),
+    },
+}
 
 # ---- 监控 ----
 schemas["HealthResponse"] = {
@@ -2009,6 +2029,15 @@ paths["/audit/logs"] = {
             q("end_date", "结束时间", {"type": "string", "format": "date-time"}),
         ],
         responses={**resp("成功", page_of(ref("AuditLogListItem"))), **err_resps(401, 403, 500)},
+    )
+}
+paths["/audit/logs/batch-delete"] = {
+    "post": op(
+        "批量删除审计日志",
+        "按勾选 ID 批量删除审计记录（不可恢复）。需要 audit:read。",
+        ["审计日志"],
+        request_body=json_body("AuditBatchDeleteRequest"),
+        responses={**resp("成功", ref("AuditBatchDeleteResult")), **err_resps(401, 403, 422, 500)},
     )
 }
 paths["/audit/logs/{id}"] = {

@@ -26,7 +26,7 @@ def init_chroma() -> Any:
     """
     初始化 Chroma HTTP 客户端（Client-Server 模式）。
 
-    容器内通过服务名 chroma:8000 访问；宿主机调试时映射为 localhost:8001。
+    容器内通过服务名 chroma:8000 访问；宿主机调试时映射为 localhost:18001。
     tenant/database 参数与 Chroma 0.5+ 多租户模型对齐。
     """
     global _chroma_client

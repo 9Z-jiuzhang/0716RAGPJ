@@ -42,7 +42,6 @@ htmlcov/
 .tox/
 .mypy_cache/
 .ruff_cache/
-scripts/e2e_results.json
 testdata/**/_smoke_result.txt
 
 # Node（如前端引入构建工具）

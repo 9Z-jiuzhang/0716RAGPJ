@@ -327,7 +327,7 @@ Authorization: Bearer <access_token>
 | DELETE | `/knowledge-bases/{kb_id}` | `kb:write` | Query：`permanent`(默认false)；默认软删 |
 | POST | `/knowledge-bases/{kb_id}/re-vectorize` | `kb:vectorize` | 异步重向量化（Body 可选） |
 | GET | `/knowledge-bases/{kb_id}/vectorize-status` | `kb:vectorize` | 进度 |
-| PUT | `/knowledge-bases/{kb_id}/permissions` | `kb:write` | 配置用户/角色对库的权限 |
+| PUT | `/knowledge-bases/{kb_id}/permissions` | `kb:write` | 配置用户/角色对库的权限（**API 保留**；管理端知识库页已不下发 ACL 编辑 UI，日常授权请用部门归属 + 超管「角色权限」） |
 
 ### 8.1 创建知识库请求（`KnowledgeBaseCreate`）
 
@@ -526,6 +526,7 @@ Authorization: Bearer <access_token>
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
 | GET | `/audit/logs` | `audit:read` | 分页；筛选：`user_id`、`action`、`resource_type`、`resource_id`、`result`、`start_date`、`end_date` |
+| POST | `/audit/logs/batch-delete` | `audit:read` | 批量删除；body `{ids: uuid[]}`（1–200）；返回 `{deleted}`；不可恢复 |
 | GET | `/audit/logs/{log_id}` | `audit:read` | 详情，含 `detail` 变更对比、`ip_address`、`user_agent`、`error_message` |
 
 **列表项**（`AuditLogListItem`）：`id`、`user_id?`、`user_name?`、`action`、`resource_type`、`resource_id?`、`result`(默认success)、`request_id?`、`created_at`。`action` 示例：`kb.create`、`kb.update`、`kb.delete`、`kb.permissions`、`kb.re_vectorize`、`doc.upload`、`doc.delete`、`auth.login`、`auth.change_password`、`user.status`、`snapshot.rollback`。
@@ -617,6 +618,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.1 | 2026-07-23 | 补充审计批量删除 `POST /audit/logs/batch-delete`；注明 KB ACL 仅 API、管理端入口已下线 |
 | 2.1.0 | 2026-07-22 | 补充管理员会话分析 `/qa/admin/sessions*`；核对监控统计字段与登录文案 |
 | 2.1.0 | 2026-07-22 | `/monitor/stats` 补充 30 天趋势与 48h 错误分桶；登录失败文案对齐「用户名或密码错误」 |
 | 2.1.0 | 2026-07-21 | 对齐本机入口 `18080`；补充改密、Guard 事件、SSE Guard/预处理事件、命中率 `score`、Query/角色缓存/RAGAS 索引；重生成 openapi（61 paths） |

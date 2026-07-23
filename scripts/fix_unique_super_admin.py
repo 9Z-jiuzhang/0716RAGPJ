@@ -1,11 +1,17 @@
 """
 将非固定账号上的 super_admin 角色降级为 admin（若不存在 admin 角色则降为 guest）。
 
-用法（容器内）:
-  python -m scripts.fix_unique_super_admin
+用法（仓库根目录，需 Postgres 可达；详见 scripts/README_fix_unique_super.md）:
 
-或:
-  docker compose exec api python -m scripts.fix_unique_super_admin
+  # Windows PowerShell
+  $env:PYTHONPATH="backend"
+  python scripts/fix_unique_super_admin.py
+
+  # Linux / macOS
+  PYTHONPATH=backend python scripts/fix_unique_super_admin.py
+
+注意：根目录 scripts/ 默认未打入 API 镜像，请勿使用
+`docker compose exec api python -m scripts.fix_unique_super_admin`。
 """
 
 from __future__ import annotations

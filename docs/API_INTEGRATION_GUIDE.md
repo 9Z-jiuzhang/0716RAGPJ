@@ -2,7 +2,8 @@
 
 > 版本：与产品 `APP_VERSION`（当前 `2.1.0`）对齐  
 > 适用场景：将本系统接入 **Android / iOS / 桌面客户端 / 其他业务后台**  
-> 完整字段级契约另见 [`API.md`](./API.md)、[`openapi.json`](./openapi.json)、[`CONTRACT.md`](./CONTRACT.md)
+> 完整字段级契约另见仓库 `docs/API.md`、运行时 [`/openapi.json`](/openapi.json)、仓库 `docs/CONTRACT.md`
+
 
 本文面向「如何在别的应用里调用本知识库」，强调：**鉴权怎么做、问答怎么流式收、会话怎么管、常见坑怎么避**。管理端运维类接口仅作索引，细节请查 `API.md`。
 
@@ -209,7 +210,7 @@ Authorization: Bearer <access_token>
 1. 服务端先经 **LLM Guard** 做安全意图检查（提示注入、窃密、越权、破坏性指令等）；不通过则推送 `guard_blocked` 并结束。  
 2. 通过后在授权范围内做检索（向量 / 全文 / 混合），再调用大模型生成回答。  
 3. 回答以 **SSE（Server-Sent Events）** 分片推送，适合边收边显示。  
-4. 未登录也可调用（访客），但检索范围通常限于访客部门知识库；登录用户可访问其部门/ACL 授权的库。
+4. 未登录也可调用（访客），但检索范围通常限于访客部门知识库；登录用户可访问其部门知识库（以及创建者本人库）。功能权限由角色决定，请由超管在「组织与权限」配置。
 
 ### 6.2 请求
 
@@ -328,7 +329,7 @@ data: {"content":"……"}
 
 ## 10. 其他模块索引（管理 / 质量）
 
-以下模块完整字段说明见 [`API.md`](./API.md)。第三方业务 App **通常不需要**直接集成，除非你在做管理壳或自动化运维。
+以下模块完整字段说明见仓库 `docs/API.md`。第三方业务 App **通常不需要**直接集成，除非你在做管理壳或自动化运维。
 
 | 模块前缀 | 功能解说（中文） |
 |----------|------------------|
@@ -438,9 +439,9 @@ client.newCall(req).execute().use { resp ->
 | 文档 | 用途 |
 |------|------|
 | 本文 `API_INTEGRATION_GUIDE.md` | 第三方 / 移动端接入指南（功能解说向） |
-| [`API.md`](./API.md) | 全量接口字段与约束 |
-| [`openapi.json`](./openapi.json) | 机器可读契约，可导入 Postman / 代码生成 |
-| [`CONTRACT.md`](./CONTRACT.md) | 契约变更流程 |
-| [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
+| 仓库 `docs/API.md` | 全量接口字段与约束 |
+| 运行时 [`/openapi.json`](/openapi.json) | 机器可读契约，可导入 Postman / 代码生成 |
+| 仓库 `docs/CONTRACT.md` | 契约变更流程 |
+| 仓库 `docs/CLOUD_DEPLOY.md` | 云端生产部署与安全加固 |
 
-管理端「API 接入指南」页面展示本文内容；机器调试仍可打开运行中的 Swagger：`/docs`（本机默认 `http://localhost:18080/docs`），或导入 `openapi.json`。
+管理端「API 接入指南」页面展示本文内容，并内嵌同源 Swagger（`/assets/vendor/swagger-ui/index.html`）。机器调试也可打开官方 `/docs`（本机默认 `http://localhost:18080/docs`），或导入 `openapi.json`。
