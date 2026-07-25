@@ -72,6 +72,14 @@ class ModelConfigService:
         payload = data.model_dump(exclude_unset=True)
         # 默认模型必须保持“同类型唯一”。不能直接给当前行赋 True，否则会产生多个默认项。
         requested_default = payload.pop("is_default", None)
+        if "config" in payload and payload["config"] is not None:
+            from app.services.model_config_registry import validate_params
+
+            payload["config"] = validate_params(
+                payload.get("provider") or row.provider,
+                dict(payload["config"] or {}),
+                model_type=row.model_type,
+            )
         for key, value in payload.items():
             setattr(row, key, value)
         if requested_default is True:

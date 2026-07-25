@@ -7,6 +7,7 @@
 - **统一入口（本机 Docker 默认）**：`http://localhost:18080`（Nginx 反向代理；容器内监听 8080）
 - **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml`）
 - **接入第三方 / App**：见 [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md)
+- **六维优化落地状态**：见 [`docs/OPTIMIZATION_STATUS.md`](docs/OPTIMIZATION_STATUS.md)
 
 ---
 
@@ -199,14 +200,14 @@ app/
 | 大模型管理 | `/api/v1/models` | `model_config.py`、`model_usage.py` | LLM/Embedding/Rerank 配置、Langfuse 用量 |
 | 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py` | KB CRUD、重向量化、进度；`KBPermission` API（管理端不下发 ACL 编辑卡） |
 | 文档管理 | `/api/v1/knowledge-bases/{kb_id}/documents` | `document_service.py`、`document_pipeline.py` | 上传、解析、分段、规范化、chunk 编辑、重试 |
-| 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`llm_guard.py` | SSE 流式问答（含 Guard）、会话、反馈；访客可用 |
-| 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例、执行、多策略对比；得分=命中片段相关度均值 |
+| 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`conversation_router.py`、`qa_cache.py`、`llm_guard.py` | SSE 流式问答（Guard + 业务路由 + 多级缓存）、会话、反馈；访客可用 |
+| 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例、执行、多策略对比；默认 TopK=3；得分=命中片段相关度均值 |
 | 快照管理 | `/api/v1/knowledge-bases/{kb_id}/snapshots` | `snapshot.py` | 快照创建、回退预览与回退 |
 | RAGAS 评估 | `/api/v1/ragas` | `ragas_evaluation.py` | 样本预览/生成、评估运行与详情 |
 | 角色缓存 | `/api/v1/role-caches` | `role_cache.py` | 按角色缓存高频问题 |
-| Query 预处理 | `/api/v1/query-processing` | — | 改写/扩展/HyDE 策略配置 |
+| Query 预处理 | `/api/v1/query-processing` | — | 改写/扩展/HyDE 策略配置（默认改写关闭） |
 | 审计日志 | `/api/v1/audit` | `audit.py` | 操作审计查询、详情与批量删除 |
-| 系统监控 | `/api/v1/monitor` | `monitor.py` | 健康检查、统计、**Guard 拦截事件列表**；`/metrics` |
+| 系统监控 | `/api/v1/monitor` | `monitor.py` | 健康检查、统计、Guard 事件、**问答分析**（反馈/主题）；`/metrics` |
 
 ### 2.3 访问控制模型（部门驱动）
 
@@ -265,16 +266,18 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 `backend/app/retrieval/`：
 
 - **scope.py**：`resolve_kb_targets` 按 [2.3](#23-访问控制模型部门驱动) 计算可访问 KB，与请求 `kb_ids` 取交集，且**仅保留有 `current_index_version` 的 KB**（未建索引的库被跳过）。
-- **vector.py**：查询经 `embedding_service.embed_query` 向量化后调用 Chroma 跨库检索；cosine 空间下展示相关度 `score = 1 - distance`（夹到 0–1）。
+- **vector.py**：查询经 Embedding 后通过 **`VectorStorePort`**（默认 `ChromaAdapter`，`VECTOR_READ_PROVIDER=chroma`）跨库检索；cosine 空间下展示相关度 `score = 1 - distance`（夹到 0–1）。业务层不直接依赖阿里云 SDK。
 - **fulltext.py**：PostgreSQL 关键词检索。主路径 `plainto_tsquery('simple')` + `ts_rank_cd`；召回不足时叠加 trigram；中文查询展示分可取 `max(pg_trgm, 字面覆盖率)`。
 - **hybrid.py**：按策略分派。`hybrid` 多路命中时用 **RRF** 融合并归一化，再可选 **Rerank**，最后应用相关性阈值与软兜底。
+
+问答流水线在检索前经 **业务路由**（问候/帮助/越界模板、上一答案变换）与 **多级缓存**（L1 进程内 / L2 Redis 精确 / L3 语义门控 / L4 检索缓存，均受功能开关控制）。详见 [`docs/OPTIMIZATION_STATUS.md`](docs/OPTIMIZATION_STATUS.md)。
 
 ### 2.6 前端
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
 - **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度、置信提示）、登录/注册、对话历史、个人中心（含改密）、**多文件批量上传**（员工/管理员）。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势与错误分桶）与安全窗口、用户/角色/部门、大模型与用量、知识库/文档工作台/快照、命中率测试、RAGAS、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（Grafana）、**API 接入指南**。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势与错误分桶）与安全窗口、用户/角色/部门、大模型与用量（参数配置/版本发布）、知识库/文档工作台/快照、命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
 - **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、主题/动效、公共 CSS、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
 
 ### 2.7 可观测性

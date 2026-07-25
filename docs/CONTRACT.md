@@ -9,13 +9,14 @@
 | [`openapi.json`](./openapi.json) | 机器可读契约（OpenAPI 3.0.3）。由脚本生成，请勿手工直接编辑 |
 | [`API.md`](./API.md) | 中文接口文档（逐接口详解，与契约同步） |
 | [`API_INTEGRATION_GUIDE.md`](./API_INTEGRATION_GUIDE.md) | 第三方 / 移动端接入指南（功能解说与示例） |
+| [`OPTIMIZATION_STATUS.md`](./OPTIMIZATION_STATUS.md) | 六维核查优化落地状态与开关说明 |
 | [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md) | 云端 / 生产部署与安全加固 |
 | [`CONTRACT.md`](./CONTRACT.md) | 本文件：契约使用与变更流程 |
 | [`../scripts/generate_openapi.py`](../scripts/generate_openapi.py) | 契约生成脚本（契约的**代码来源**） |
 
 当前契约覆盖：**62 条路径 / 85 个操作 / 81 个数据模型**，涵盖认证、用户、角色、部门、大模型、知识库、文档、问答（SSE）、命中率测试、快照、审计、监控等核心模块。
 
-> 管理端扩展模块 **Query 预处理**（`/query-processing`）、**角色缓存**（`/role-caches`）、**RAGAS**（`/ragas`）、**管理员会话分析**（`/qa/admin/sessions*`）已在运行时 API 与 `API.md` 中说明；`/monitor/metrics` 为 Prometheus 别名（隐藏于 schema）。若需写入 `openapi.json`，请在生成脚本中补充后重跑。
+> 管理端扩展模块 **Query 预处理**（`/query-processing`）、**角色缓存**（`/role-caches`）、**RAGAS**（`/ragas`）、**管理员会话分析**（`/qa/admin/sessions*`）、**问答分析**（`/monitor/analytics/*`）、**模型版本**（`/models/{id}/publish|versions|rollback`）已在运行时 API 与 `API.md` 中说明；`/monitor/metrics` 为 Prometheus 别名（隐藏于 schema）。若需写入 `openapi.json`，请在生成脚本中补充后重跑。
 
 ## 契约要点
 
@@ -23,7 +24,7 @@
 - **认证**：`Authorization: Bearer <access_token>`（JWT）。标注为 `public` 或含可选 `BearerAuth`（如 `/qa/ask`）的接口允许匿名/可选认证。
 - **统一响应**：除 SSE、CSV 导出、Prometheus `/metrics` 外，JSON 接口统一包装为 `{code, message, data, request_id}`。
 - **分页**：`data` 为 `{items, total, page, page_size}`；查询参数 `page`（默认 1）、`page_size`（默认 20，部门列表 50、会话消息 50、Guard 事件 50，上限 100）。
-- **SSE**：`POST /qa/ask` 返回 `text/event-stream`。常见事件：`intent` / `guard_blocked` / `query_processing` / `cache_hit` / `chunk` / `citations` / `done` / `error`。不传 `session_id` 始终新建会话；`X-Guest-Id` 仅标识归属，不自动复用旧会话。
+- **SSE**：`POST /qa/ask` 返回 `text/event-stream`。常见事件：`intent` / `guard_blocked` / `route` / `query_processing` / `cache_hit` / `chunk` / `citations` / `done` / `error`。不传 `session_id` 始终新建会话；`X-Guest-Id` 仅标识归属，不自动复用旧会话。`AskRequest.top_k` 默认 **3**；`temperature` 默认不覆盖已发布模型配置。
 - **会话闲置过期**：超过 `QA_SESSION_IDLE_EXPIRE_MINUTES` 未问答 → `status=expired` 并清 Redis；历史列表仍可见；续聊携带 `session_id` 可重新激活。管理员「活跃会话」仅计 `active`。
 - **文件上传**：`multipart/form-data`（字段 `file`），上限 100MB（`413`）。
 - **访问控制**：知识库可见性以**部门**为主（`GUEST`=访客专用）；角色等级 `super_admin > admin > staff/guest`，仅可管理权限低于自己的用户。管理端日常授权入口为超管「组织与权限」；知识库页不再提供 ACL 编辑卡。

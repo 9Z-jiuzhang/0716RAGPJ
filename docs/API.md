@@ -307,10 +307,15 @@ Authorization: Bearer <access_token>
 | PUT | `/models/{model_id}` | `model:write` | 更新 |
 | PATCH | `/models/{model_id}/status` | `model:write` | Body：`is_enabled` |
 | PUT | `/models/{model_id}/default` | `model:write` | Body：`is_default`（默认 true）；同类型仅一个默认 |
+| POST | `/models/{model_id}/publish` | 超管 | 发布不可变参数版本；需 `MODEL_CONFIG_REGISTRY_V2_ENABLED=true`；Body：`params`/`config`、`note?` |
+| GET | `/models/{model_id}/versions` | `model:read` | 已发布版本列表（≤50） |
+| POST | `/models/{model_id}/rollback/{version_id}` | 超管 | 以历史参数重新发布为新版本 |
 
 **创建请求**（`CreateModelConfigRequest`）：`name`(1–100)、`model_type`、`provider`(1–50)、`model_name`(1–200)、`base_url?`(≤500)、`config`(dict)、`timeout_seconds`(5–600,默认60)、`api_key_env?`(≤100)、`is_default`(默认false)、`is_enabled`(默认true)、`priority`(0–10000,默认100)。更新请求同字段均可选。
 
 **响应**（`ModelConfigResponse`）：以上字段 + `id`、`has_api_key`、`created_at`、`updated_at`（不含密钥明文）。
+
+> 管理端「大模型管理」支持配置参数表单与版本/发布/回滚；注册表关闭时发布接口返回 400。
 
 **`GET /models/usage` 响应 `data`**：`{ enabled, host, range:{from,to,days}, totals:{total_tokens,input_tokens,output_tokens,total_observations,total_traces,total_cost}, models:[{model, input_tokens, output_tokens, total_tokens, total_observations, total_traces, total_cost, daily:[...]}], notice? }`。`notice` 用于限流/缓存降级提示（如 Langfuse 429 时展示缓存数据）。Langfuse 未启用 → `enabled=false`；上游异常且无缓存 → `502`。
 
@@ -416,8 +421,8 @@ Authorization: Bearer <access_token>
 | session_id | 否 | 不传则**始终新建会话**（不按 `X-Guest-Id` 自动复用）；传入则可多轮续聊（含已闲置过期的会话，会重新激活） |
 | kb_ids | 否 | 限定知识库；默认全部可访问范围（与可访问集取交集） |
 | strategy | 否 | `hybrid`(默认) / `vector` / `fulltext` |
-| top_k | 否 | 默认 5（1–20） |
-| temperature | 否 | 默认 0.7（0–2） |
+| top_k | 否 | 默认 3（1–20） |
+| temperature | 否 | 字段保留；**默认不覆盖**已发布/环境模型配置（记兼容意图），仅在模型注册表允许覆盖时生效 |
 
 **SSE 事件**：
 
@@ -425,6 +430,7 @@ Authorization: Bearer <access_token>
 |-------|------|
 | `intent` | Guard 放行后的意图识别结果 |
 | `guard_blocked` | 被安全策略拒绝；含 `message`、`intent`、`reason_code`；流结束 |
+| `route` | 业务路由决策（`CONVERSATION_ROUTER_V2_ENABLED`）：`intent`、`should_retrieve`、`should_clarify`、`should_use_last_answer`、`transform_type` 等 |
 | `query_processing` | Query 改写 / 扩展 / HyDE 等预处理元信息（可关） |
 | `cache_hit` | 命中角色缓存问题，可直接返回答案 |
 | `chunk` | 增量文本，字段 `content` |
@@ -432,7 +438,9 @@ Authorization: Bearer <access_token>
 | `done` | 结束，含 `session_id`、`message_id`、`request_id`、`performance`、`confidence`(high/medium/low) |
 | `error` | 错误信息 |
 
-典型顺序：`intent` →（可选 `query_processing` / `cache_hit`）→ `chunk*` → `citations` → `done`；被拦截时为 `guard_blocked`。
+典型顺序：`intent` →（可选 `route`）→（可选 `query_processing` / `cache_hit`）→ `chunk*` → `citations` → `done`；被拦截时为 `guard_blocked`。
+
+> 多级缓存 L1–L4 由功能开关控制；命中多级缓存时走短路径（无独立 `cache_hit` 事件名，元数据写入 `retrieval_meta`）。角色缓存仍发 `cache_hit`。
 
 **引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`（向量相关度一般为 `1 - cosine_distance`）。
 
@@ -492,7 +500,7 @@ Authorization: Bearer <access_token>
 
 **用例请求**（`CreateTestCaseRequest`）：`name`、`description?`、`questions[]`；每个 `TestQuestion`：`question`、`expected_doc_ids?[]`、`expected_chunk_ids?[]`。
 
-**执行请求**（`TestRunRequest`）：`case_id?`、`kb_ids[]`(≥1，须在授权范围)、`doc_ids?[]`、`strategy`(vector\|fulltext\|hybrid)、`top_k`(默认5,1–20)、`similarity_threshold`(默认0.5,0–1)、`questions?[]`。
+**执行请求**（`TestRunRequest`）：`case_id?`、`kb_ids[]`(≥1，须在授权范围)、`doc_ids?[]`、`strategy`(vector\|fulltext\|hybrid)、`top_k`(默认3,1–20)、`similarity_threshold`(默认0.5,0–1)、`questions?[]`。
 
 **对比请求**（`CompareTestRequest`）：`case_id`、`kb_ids[]`、`doc_ids?[]`、`strategies[]`(默认三种,≥2)、`top_k`、`similarity_threshold`。
 
@@ -542,9 +550,13 @@ Authorization: Bearer <access_token>
 | GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`uptime_seconds`；`checks` 含 postgres/redis/chroma/langfuse/minio 连通性 |
 | GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d` / `qa_trend_30d`、`hit_rate_trend_7d` / `hit_rate_trend_30d`、`error_24h`（4 桶）、`error_hourly_48h`（48 点）、`guard_blocked_24h`、`guard_blocked_7d`、`guard_recent_events` |
 | GET | `/monitor/guard-events` | `system:read` | 分页 Guard 拦截明细；默认 `page_size=50` |
+| GET | `/monitor/analytics/feedback` | `system:read` | 反馈汇总 + 路由/缓存分布 + 近 N 日趋势（Query：`days` 1–90，默认 14）；仅聚合 |
+| GET | `/monitor/analytics/topics` | `system:read` | 主题簇列表（关键词粗聚类，聚合） |
+| POST | `/monitor/analytics/topics/rebuild` | `system:read` | 从近期问答事件重建主题簇 |
 | GET | `/metrics`（应用根，非 `/api/v1`） | 内部 | Prometheus 文本指标，**不走统一包装**；云端可借 `METRICS_PUBLIC=false` 限制暴露 |
 
-> `/api/v1/monitor/metrics` 为 `307` 重定向到 `/metrics`（隐藏于 schema）。
+> `/api/v1/monitor/metrics` 为 `307` 重定向到 `/metrics`（隐藏于 schema）。  
+> 管理端：**系统监控**页仅健康/系统统计/Grafana；**质量评测 → 问答统计**页展示反馈与主题图表。
 
 **Guard 事件项**（`GuardBlockedEventItem`）：`id`、`created_at`、`intent`、`reason_code`、`detector`、`confidence`、`actor_label`（用户名或「访客」）、`client_ip?`、`user_id?`、`is_registered`、`question_preview?`（脱敏短摘要，不含完整原文）。
 
@@ -606,7 +618,7 @@ Authorization: Bearer <access_token>
 3. 知识库列表不得返回未授权库；访客仅见 GUEST 部门库。
 4. `/qa/ask` 覆盖：未登录仅 GUEST 库、登录后授权范围、非法 `kb_ids`、`guard_blocked`。
 5. 上传超大文件 → `413`；不支持格式 → `400` 且 message 明确。
-6. SSE 至少覆盖 `intent → chunk → citations → done`；拦截场景覆盖 `guard_blocked`。
+6. SSE 至少覆盖 `intent →（可选 route）→ chunk → citations → done`；拦截场景覆盖 `guard_blocked`。
 7. 回退：`confirm=false` 必拒；`true` 后创建 `rollback_rebuild` 向量化任务，可通过 `GET /knowledge-bases/{kb_id}/vectorize-status` 查询进度；重建成功后原子激活新索引，失败则用保护快照补偿库表且不切换版本。
 8. 部门：GUEST 部门不可删除/改 code；员工访问 GUEST 库不应被拒。
 9. 用户：管理员不可删除/禁用同级或更高级用户；不可将他人设为 admin/超管；角色权限配置仅超管可调。
@@ -618,6 +630,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.2 | 2026-07-25 | 六维优化落地说明：SSE `route`、模型发布/版本/回滚、命中测试 TopK 默认 3、监控分析反馈/主题 API；见 `OPTIMIZATION_STATUS.md` |
 | 2.1.1 | 2026-07-23 | 补充审计批量删除 `POST /audit/logs/batch-delete`；注明 KB ACL 仅 API、管理端入口已下线 |
 | 2.1.0 | 2026-07-22 | 补充管理员会话分析 `/qa/admin/sessions*`；核对监控统计字段与登录文案 |
 | 2.1.0 | 2026-07-22 | `/monitor/stats` 补充 30 天趋势与 48h 错误分桶；登录失败文案对齐「用户名或密码错误」 |

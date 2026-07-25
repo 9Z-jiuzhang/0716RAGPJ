@@ -123,6 +123,100 @@ async def ensure_schema_patches() -> None:
         )
         """,
         "CREATE INDEX IF NOT EXISTS ix_departments_code ON departments (code)",
+        # 问答 strategy 需容纳 route/transform 等短路径标识
+        "ALTER TABLE qa_messages ALTER COLUMN strategy TYPE VARCHAR(64)",
+        # 六维优化：问答事件 / 反馈 / 主题簇 / 模型发布版本
+        """
+        CREATE TABLE IF NOT EXISTS qa_request_events (
+          id UUID PRIMARY KEY,
+          request_id VARCHAR(64) NOT NULL,
+          trace_id VARCHAR(64) NULL,
+          conversation_id UUID NULL,
+          message_id UUID NULL,
+          actor_hash VARCHAR(128) NULL,
+          tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+          role_ids JSONB NULL,
+          question_hash VARCHAR(64) NULL,
+          question_preview VARCHAR(240) NULL,
+          route_intent VARCHAR(64) NULL,
+          route_confidence DOUBLE PRECISION NULL,
+          should_retrieve BOOLEAN NULL,
+          top_k INTEGER NULL,
+          rewrite_enabled BOOLEAN NULL,
+          cache_level VARCHAR(16) NULL,
+          cache_hit_id VARCHAR(64) NULL,
+          normalized_similarity DOUBLE PRECISION NULL,
+          miss_reason VARCHAR(128) NULL,
+          retrieval_hit_count INTEGER NULL,
+          citation_count INTEGER NULL,
+          model_snapshot_id VARCHAR(64) NULL,
+          latency_ms INTEGER NULL,
+          result_status VARCHAR(32) NOT NULL DEFAULT 'ok',
+          error_code VARCHAR(64) NULL,
+          detail JSONB NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_qa_request_events_request_id ON qa_request_events (request_id)",
+        "CREATE INDEX IF NOT EXISTS ix_qa_request_events_created_at ON qa_request_events (created_at)",
+        """
+        CREATE TABLE IF NOT EXISTS qa_feedback_events (
+          id UUID PRIMARY KEY,
+          message_id UUID NOT NULL,
+          actor_hash VARCHAR(128) NOT NULL,
+          rating VARCHAR(16) NOT NULL,
+          reason VARCHAR(64) NULL,
+          comment TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT uq_qa_feedback_message_actor UNIQUE (message_id, actor_hash)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS qa_topic_clusters (
+          id UUID PRIMARY KEY,
+          name VARCHAR(200) NOT NULL,
+          keywords JSONB NULL,
+          representative_question TEXT NULL,
+          sample_count INTEGER NOT NULL DEFAULT 0,
+          embedding_model_version VARCHAR(100) NULL,
+          cluster_version VARCHAR(64) NOT NULL DEFAULT 'v1',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_config_versions (
+          id UUID PRIMARY KEY,
+          model_id UUID NOT NULL,
+          version VARCHAR(64) NOT NULL,
+          model_type VARCHAR(32) NOT NULL,
+          provider VARCHAR(50) NOT NULL,
+          model_name VARCHAR(200) NOT NULL,
+          params JSONB NOT NULL DEFAULT '{}'::jsonb,
+          is_published BOOLEAN NOT NULL DEFAULT TRUE,
+          published_by UUID NULL,
+          published_at TIMESTAMPTZ NULL,
+          note VARCHAR(500) NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_model_config_versions_model_id ON model_config_versions (model_id)",
+        "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS matching_mode VARCHAR(32) NOT NULL DEFAULT 'exact'",
+        "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS quality_score DOUBLE PRECISION NULL",
+        "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS observe_only BOOLEAN NOT NULL DEFAULT FALSE",
+        # Wave1：仅旧默认 rewrite=true 且未开启扩展/HyDE 的单例配置迁到关闭
+        """
+        UPDATE query_processing_configs
+        SET rewrite_enabled = FALSE, updated_at = NOW()
+        WHERE config_key = 'default'
+          AND rewrite_enabled = TRUE
+          AND expansion_enabled = FALSE
+          AND hyde_enabled = FALSE
+          AND expansion_count = 1
+        """,
     ]
     async with engine.begin() as conn:
         for stmt in statements:

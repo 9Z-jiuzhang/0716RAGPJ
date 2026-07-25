@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -111,5 +111,14 @@ class RoleCachedQuestion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="历史问题出现次数")
     hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="缓存命中次数")
     last_hit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 六维优化：匹配模式 / 质量分 / 观察态（默认精确匹配）
+    matching_mode: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="exact",
+        comment="exact | semantic",
+    )
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True, comment="人工或自动质量分 0-1")
+    observe_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="仅观察不计正式命中")
 
     cache: Mapped[RoleCacheConfig] = relationship("RoleCacheConfig", back_populates="questions")

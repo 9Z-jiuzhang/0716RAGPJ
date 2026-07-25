@@ -1,6 +1,7 @@
 """FastAPI 应用入口：生命周期、种子数据、可观测性与模块路由挂载。"""
 
 import asyncio
+import logging
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -337,7 +338,7 @@ async def seed_role_cache_configs() -> None:
 
 
 async def seed_query_processing_config() -> None:
-    """创建全局 Query 预处理默认策略，默认仅启用低成本改写。"""
+    """创建全局 Query 预处理默认策略；默认关闭改写/扩展/HyDE。"""
     async with SessionLocal() as db:
         await ensure_query_processing_config(db, commit=True)
 
@@ -369,7 +370,12 @@ async def lifespan(_: FastAPI):
     retention_task: asyncio.Task | None = None
     role_cache_task: asyncio.Task | None = None
     # 测试环境不启后台扫描，避免干扰用例与连接生命周期
-    if "pytest" not in sys.modules and not os.environ.get("PYTEST_CURRENT_TEST"):
+    # SCHEDULER_EXTERNAL_ENABLED 时由独立 Worker 跑周期任务，API 副本不启动循环
+    if (
+        "pytest" not in sys.modules
+        and not os.environ.get("PYTEST_CURRENT_TEST")
+        and not settings.SCHEDULER_EXTERNAL_ENABLED
+    ):
         expiry_task = asyncio.create_task(session_expiry_loop(stop_expiry), name="session-expiry")
         retention_task = asyncio.create_task(
             history_retention_loop(stop_expiry),
@@ -378,6 +384,10 @@ async def lifespan(_: FastAPI):
         role_cache_task = asyncio.create_task(
             role_cache_loop(stop_expiry),
             name="role-cache-scheduler",
+        )
+    elif settings.SCHEDULER_EXTERNAL_ENABLED:
+        logging.getLogger("app.main").info(
+            "SCHEDULER_EXTERNAL_ENABLED=true：API 进程不启动周期任务循环"
         )
 
     yield

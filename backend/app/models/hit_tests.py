@@ -93,7 +93,7 @@ class TestRuns(TimestampMixin, Base):
     kb_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=False)
     doc_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
     strategy: Mapped[str] = mapped_column(String(50), nullable=False)
-    top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     similarity_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
     total_questions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

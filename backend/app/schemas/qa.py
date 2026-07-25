@@ -27,7 +27,7 @@ class AskRequest(BaseModel):
     session_id: UUID | None = Field(default=None, description="不传则创建新会话")
     kb_ids: list[UUID] | None = Field(default=None, description="限定检索知识库")
     strategy: Literal["vector", "fulltext", "hybrid"] = Field(default="hybrid", description="检索策略")
-    top_k: int = Field(default=5, ge=1, le=20, description="返回片段数量")
+    top_k: int = Field(default=3, ge=1, le=20, description="返回片段数量")
     temperature: float = Field(default=0.7, ge=0, le=2, description="生成温度")
 
 

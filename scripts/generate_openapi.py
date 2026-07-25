@@ -765,7 +765,7 @@ schemas["AskRequest"] = {
             "description": "限定检索知识库；默认全部可访问范围（取交集）",
         },
         "strategy": prop("string", enum=_STRATEGIES, default="hybrid"),
-        "top_k": prop("integer", minimum=1, maximum=20, default=5),
+        "top_k": prop("integer", minimum=1, maximum=20, default=3),
         "temperature": prop("number", minimum=0, maximum=2, default=0.7),
     },
 }

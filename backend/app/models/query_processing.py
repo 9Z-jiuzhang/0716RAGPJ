@@ -22,7 +22,7 @@ class QueryProcessingConfig(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         default="default",
         comment="单例配置键，当前固定为 default",
     )
-    rewrite_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    rewrite_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     expansion_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     expansion_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     hyde_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

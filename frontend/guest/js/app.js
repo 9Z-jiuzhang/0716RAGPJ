@@ -710,6 +710,18 @@ function bindMsgActions(row) {
       }
       if (act === "up" || act === "down") {
         setRate(act);
+        const messageId = row.dataset.messageId;
+        // 已登录且有 message_id 时同步到后端；访客仍仅本地态
+        if (messageId && isLoggedIn()) {
+          try {
+            await api.post("/qa/feedback", {
+              message_id: messageId,
+              rating: act === "up" ? "useful" : "useless",
+            });
+          } catch (err) {
+            toast(err.message || "反馈提交失败", "error");
+          }
+        }
         return;
       }
       if (act === "regen") {
@@ -1434,7 +1446,21 @@ async function sendQuestion(presetQuestion) {
             setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(rawAssistantText)}</span>`);
             return;
           }
-          // 流水线事件（intent / query_processing / reasoning / trace 等）不再展示在回答气泡中
+          // 流水线事件：路由意图用轻提示；其余不写入回答气泡
+          if (event === "route") {
+            const tipHost = bubble.closest(".msg-row")?.querySelector(".msg-meta") || null;
+            const intent = data.intent || "";
+            let tip = "";
+            if (data.should_clarify) tip = "需要澄清后继续";
+            else if (data.should_use_last_answer || intent === "PREVIOUS_ANSWER_TRANSFORM") tip = "基于上一答案改写";
+            else if (intent === "GREETING_CHAT" || intent === "THANKS_GOODBYE") tip = "闲聊问候";
+            else if (intent === "OUT_OF_SCOPE" || intent === "SYSTEM_HELP") tip = "不检索知识库";
+            if (tip && tipHost) {
+              tipHost.dataset.routeTip = tip;
+              tipHost.setAttribute("title", tip);
+            }
+            return;
+          }
           if (
             event === "reasoning" ||
             event === "trace" ||
@@ -1482,7 +1508,11 @@ async function sendQuestion(presetQuestion) {
                 forceCollapseReasoning: true,
               })
             );
-            attachAssistantActions(bubble.closest(".msg-row"));
+            const row = bubble.closest(".msg-row");
+            if (row && data.message_id) {
+              row.dataset.messageId = data.message_id;
+            }
+            attachAssistantActions(row);
             highlightSidebarSession(currentSessionId);
             loadChatSidebar();
           }

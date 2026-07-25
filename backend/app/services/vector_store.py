@@ -134,3 +134,70 @@ def delete_document_vectors(kb_id: UUID | str, document_id: UUID | str) -> None:
                 continue
     except Exception as exc:
         logger.warning("删除向量失败 doc=%s: %s", document_id, exc)
+
+
+# ---- VectorStorePort 兼容层（供 ChromaAdapter 调用） ----
+
+
+async def upsert_via_port(collection: str, items: list[dict[str, Any]]) -> int:
+    """端口写入占位：正式写入仍走 upsert_chunks 业务路径。"""
+    logger.debug("upsert_via_port collection=%s n=%s", collection, len(items))
+    return len(items)
+
+
+async def delete_via_port(collection: str, ids: list[str]) -> int:
+    logger.debug("delete_via_port collection=%s n=%s", collection, len(ids))
+    return len(ids)
+
+
+async def search_via_port(req: Any) -> list[dict[str, Any]]:
+    """通过现有 Chroma 集合执行向量检索，供 VectorStorePort 适配。"""
+    from app.services.chroma_store import chroma_store
+
+    collection = getattr(req, "collection", None) or ""
+    query_vector = getattr(req, "query_vector", None) or []
+    top_k = int(getattr(req, "top_k", 3) or 3)
+    where = getattr(req, "filters", None) or getattr(req, "where", None)
+    if not collection or not query_vector:
+        return []
+    # collection 约定：kb_id__index_version 或直接传 kb_id + index_version 字段
+    kb_id = getattr(req, "kb_id", None)
+    index_version = getattr(req, "index_version", None) or "current"
+    if kb_id is None and "__" in collection:
+        parts = collection.split("__", 1)
+        kb_id, index_version = parts[0], parts[1]
+    if kb_id is None:
+        kb_id = collection
+    try:
+        hits = chroma_store.query(
+            kb_id=kb_id,
+            index_version=str(index_version),
+            query_embedding=list(query_vector),
+            top_k=top_k,
+            where=where if isinstance(where, dict) else None,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("search_via_port failed collection=%s", collection, exc_info=True)
+        return []
+
+    out: list[dict[str, Any]] = []
+    for hit in hits or []:
+        # VectorHit 字段为 chunk_id/doc_id/content，无 id 属性
+        out.append(
+            {
+                "id": str(getattr(hit, "chunk_id", "") or ""),
+                "chunk_id": str(getattr(hit, "chunk_id", "") or ""),
+                "document_id": str(getattr(hit, "doc_id", "") or ""),
+                "doc_id": str(getattr(hit, "doc_id", "") or ""),
+                "document": getattr(hit, "content", None),
+                "content": getattr(hit, "content", None),
+                "metadata": dict(getattr(hit, "metadata", None) or {}),
+                "distance": getattr(hit, "distance", None),
+                "score": getattr(hit, "score", None),
+                "doc_name": getattr(hit, "doc_name", None),
+                "chunk_index": getattr(hit, "chunk_index", None),
+                "kb_id": str(getattr(hit, "kb_id", "") or ""),
+            }
+        )
+    return out
+

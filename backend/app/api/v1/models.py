@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from app.core.database import get_db
-from app.core.dependencies import require_permission
+from app.core.dependencies import require_permission, require_super_admin
 from app.core.exceptions import APIException
 from app.models import User
 from app.schemas.common import APIResponse, PageResponse
@@ -58,7 +58,7 @@ async def list_models(
 @router.post("", response_model=APIResponse[ModelConfigResponse], status_code=201)
 async def create_model(
     body: CreateModelConfigRequest = Body(...),
-    _: User = Depends(require_permission("model:write")),
+    _: User = Depends(require_super_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -72,13 +72,15 @@ async def create_model(
 async def update_model(
     model_id: UUID = Path(...),
     body: UpdateModelConfigRequest = Body(...),
-    _: User = Depends(require_permission("model:write")),
+    _: User = Depends(require_super_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     try:
         data = await ModelConfigService(db).update(model_id, body)
     except APIException as exc:
         _raise(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return APIResponse(data=data)
 
 
@@ -86,7 +88,7 @@ async def update_model(
 async def patch_model_status(
     model_id: UUID = Path(...),
     body: ModelStatusRequest = Body(...),
-    _: User = Depends(require_permission("model:write")),
+    _: User = Depends(require_super_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -100,7 +102,7 @@ async def patch_model_status(
 async def set_model_default(
     model_id: UUID = Path(...),
     body: SetDefaultRequest = Body(SetDefaultRequest()),
-    _: User = Depends(require_permission("model:write")),
+    _: User = Depends(require_super_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -108,3 +110,97 @@ async def set_model_default(
     except APIException as exc:
         _raise(exc)
     return APIResponse(data=data)
+
+
+@router.post("/{model_id}/publish", response_model=APIResponse[dict], status_code=201)
+async def publish_model_version(
+    model_id: UUID = Path(...),
+    body: dict = Body(default_factory=dict),
+    user: User = Depends(require_super_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """发布不可变配置版本（MODEL_CONFIG_REGISTRY_V2_ENABLED）。"""
+    from app.core.config import settings
+    from app.services.model_config_registry import model_config_registry
+
+    if not settings.MODEL_CONFIG_REGISTRY_V2_ENABLED:
+        raise HTTPException(status_code=400, detail="模型配置注册表未启用")
+    try:
+        row = await model_config_registry.publish(
+            db,
+            model_id=model_id,
+            params=dict(body.get("params") or body.get("config") or {}),
+            published_by=user.id,
+            note=body.get("note"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return APIResponse(
+        data={
+            "id": str(row.id),
+            "version": row.version,
+            "model_id": str(row.model_id),
+            "params": row.params,
+            "published_at": row.published_at.isoformat() if row.published_at else None,
+        }
+    )
+
+
+@router.get("/{model_id}/versions", response_model=APIResponse[list])
+async def list_model_versions(
+    model_id: UUID = Path(...),
+    _: User = Depends(require_permission("model:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import select
+
+    from app.models.analytics import ModelConfigVersion
+
+    rows = (
+        await db.scalars(
+            select(ModelConfigVersion)
+            .where(ModelConfigVersion.model_id == model_id)
+            .order_by(ModelConfigVersion.published_at.desc())
+            .limit(50)
+        )
+    ).all()
+    return APIResponse(
+        data=[
+            {
+                "id": str(r.id),
+                "version": r.version,
+                "params": r.params,
+                "is_published": r.is_published,
+                "published_at": r.published_at.isoformat() if r.published_at else None,
+                "note": r.note,
+            }
+            for r in rows
+        ]
+    )
+
+
+@router.post("/{model_id}/rollback/{version_id}", response_model=APIResponse[dict])
+async def rollback_model_version(
+    model_id: UUID = Path(...),
+    version_id: UUID = Path(...),
+    user: User = Depends(require_super_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键回滚：将历史版本参数重新发布为新版本。"""
+    from app.core.config import settings
+    from app.models.analytics import ModelConfigVersion
+    from app.services.model_config_registry import model_config_registry
+
+    if not settings.MODEL_CONFIG_REGISTRY_V2_ENABLED:
+        raise HTTPException(status_code=400, detail="模型配置注册表未启用")
+    version = await db.get(ModelConfigVersion, version_id)
+    if version is None or version.model_id != model_id:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    row = await model_config_registry.publish(
+        db,
+        model_id=model_id,
+        params=dict(version.params or {}),
+        published_by=user.id,
+        note=f"rollback from {version.version}",
+    )
+    return APIResponse(data={"id": str(row.id), "version": row.version})

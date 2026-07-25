@@ -231,7 +231,7 @@ X-Request-Id: <建议>
 | session_id | UUID | 否 | 不传则新建会话；多轮请带上一次返回的会话 ID |
 | kb_ids | UUID[] | 否 | 限定检索的知识库；不传则按权限可见范围检索 |
 | strategy | string | 否 | `vector` / `fulltext` / `hybrid`，默认 `hybrid` |
-| top_k | int | 否 | 引用片段数，1–20，默认 5 |
+| top_k | int | 否 | 引用片段数，1–20，默认 3 |
 | temperature | float | 否 | 生成温度 0–2，默认 0.7 |
 
 > **不要用普通 EventSource GET**：本接口是 **POST + body**，请用 OkHttp / HttpURLConnection 读流。
@@ -250,6 +250,7 @@ data: {"content":"……"}
 |--------|------|-----------|
 | `intent` | Guard 识别的意图（已放行） | intent、confidence、detector |
 | `guard_blocked` | 被安全策略拒绝 | message、intent、reason_code |
+| `route` | 业务路由决策（若启用） | intent、should_retrieve、should_clarify、transform_type 等 |
 | `cache_hit` | 命中角色/问题缓存（若启用） | 可能直接给出缓存回答相关信息 |
 | `query_processing` | Query 预处理结果 | 改写/扩展等元数据 |
 | `chunk` | 回答正文增量 | 字段 `content`；前端拼接到气泡 |
@@ -262,7 +263,10 @@ data: {"content":"……"}
 1. 收到 `chunk` → 追加到当前助手气泡（注意思考内容若带 `<think>` 可折叠展示）  
 2. 收到 `citations` → 展示「引用来源」与检索相关度  
 3. 收到 `done` → 保存 `session_id` / `message_id`，解锁输入框  
-4. 收到 `guard_blocked` / `error` → 展示 message，结束流
+4. 收到 `guard_blocked` / `error` → 展示 message，结束流  
+5. `route` / `intent` 等流水线事件可忽略或用于轻提示，不必写入回答正文
+
+> 六维优化开关与模块状态见 [`OPTIMIZATION_STATUS.md`](./OPTIMIZATION_STATUS.md)。
 
 ### 6.4 会话与访客说明
 
@@ -376,7 +380,7 @@ client.newCall(req).execute().use { resp ->
 val payload = JSONObject()
   .put("question", question)
   .put("strategy", "hybrid")
-  .put("top_k", 5)
+  .put("top_k", 3)
 sessionId?.let { payload.put("session_id", it) }
 
 val req = Request.Builder()

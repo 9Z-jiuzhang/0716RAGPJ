@@ -123,7 +123,7 @@ def _normalize_sse_payload(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     summary="发送问题（SSE）",
     description=(
         "流式问答。Content-Type: text/event-stream。"
-        "事件：guard_blocked / intent / cache_hit / query_processing / chunk / citations / done / error。"
+        "事件：guard_blocked / intent / route / cache_hit / query_processing / chunk / citations / done / error。"
     ),
     response_class=StreamingResponse,
 )
@@ -284,7 +284,10 @@ async def submit_feedback(
     user: User = Depends(get_current_user),
     request_id: str = Depends(_request_id),
 ) -> BaseResponse:
-    """对助手消息标记有用/无用，写入 retrieval_meta.feedback。"""
+    """对助手消息标记有用/无用；同步 Upsert 到 qa_feedback_events。"""
+    from app.schemas.optimization_contracts import QAFeedbackUpsert
+    from app.services.analytics_events import actor_hash_for, analytics_event_service
+
     msg = await db.scalar(
         select(QAMessage)
         .join(QASession, QASession.id == QAMessage.session_id)
@@ -306,6 +309,20 @@ async def submit_feedback(
     }
     msg.retrieval_meta = meta
     await db.commit()
+
+    try:
+        await analytics_event_service.upsert_feedback(
+            db,
+            QAFeedbackUpsert(
+                message_id=body.message_id,
+                actor_hash=actor_hash_for(str(user.id), None),
+                rating=body.rating,  # type: ignore[arg-type]
+                comment=body.comment,
+            ),
+        )
+    except Exception:  # noqa: BLE001
+        # 反馈事实表失败不影响消息侧已写入的兼容字段
+        pass
     return BaseResponse(message="反馈已记录", request_id=request_id)
 
 

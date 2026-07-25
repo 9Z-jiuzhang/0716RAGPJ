@@ -1,0 +1,26 @@
+# 多副本样例：API 水平扩展 + 外部 Scheduler 单实例
+# 用法：docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale api=2
+
+services:
+  api:
+    environment:
+      SCHEDULER_EXTERNAL_ENABLED: "true"
+      MODEL_MAX_CONCURRENT_GENERATIONS: "20"
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "app.worker_scheduler"]
+    env_file:
+      - .env
+    environment:
+      SCHEDULER_EXTERNAL_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - kb-network

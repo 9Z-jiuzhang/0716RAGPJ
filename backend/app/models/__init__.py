@@ -1,5 +1,6 @@
 """导出 ORM 模型，供 Alembic / create_all 发现。"""
 
+from .analytics import ModelConfigVersion, QAFeedbackEvent, QARequestEvent, QATopicCluster
 from .base import Base
 from .department import Department
 from .document import Document, DocumentChunk, KbChunkRule
@@ -45,4 +46,8 @@ __all__ = [
     "GuardBlockedEvent",
     "RagasEvaluationRun",
     "RagasEvaluationItem",
+    "QARequestEvent",
+    "QAFeedbackEvent",
+    "QATopicCluster",
+    "ModelConfigVersion",
 ]

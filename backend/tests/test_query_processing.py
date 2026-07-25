@@ -62,6 +62,7 @@ async def test_query_processor_returns_all_three_results(monkeypatch: pytest.Mon
 @pytest.mark.asyncio
 async def test_query_processor_falls_back_without_interrupting_qa(monkeypatch: pytest.MonkeyPatch) -> None:
     """LLM 不可用时必须使用原 Query，并返回稳定错误码而非敏感异常正文。"""
+    monkeypatch.setattr(settings, "QA_QUERY_REWRITE_ENABLED", True)
     monkeypatch.setattr(
         "app.services.query_processing.query_processing_llm_service.chat",
         AsyncMock(side_effect=LLMServiceError("上游错误，可能包含敏感响应")),
@@ -132,9 +133,9 @@ async def test_hybrid_retriever_fuses_expansion_and_hyde_hits(monkeypatch: pytes
 async def test_vector_retriever_batches_all_query_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
     """多个 Query 必须通过一次 embed_texts 调用提交，不能逐条调用远程向量接口。"""
     embed_call = AsyncMock(return_value=[[0.1], [0.2], [0.3]])
-    chroma_call = AsyncMock(return_value=[])
+    port_call = AsyncMock(return_value=[])
     monkeypatch.setattr("app.retrieval.vector.embedding_service.embed_texts", embed_call)
-    monkeypatch.setattr("app.retrieval.vector.chroma_store.aquery_multi_kb", chroma_call)
+    monkeypatch.setattr("app.retrieval.vector.vector_store_router.search", port_call)
     target = KBTarget(kb_id=uuid4(), name="制度库", index_version="v1")
 
     await VectorRetriever().search_many(
@@ -144,7 +145,7 @@ async def test_vector_retriever_batches_all_query_embeddings(monkeypatch: pytest
     )
 
     embed_call.assert_awaited_once_with(["主查询", "扩展查询", "假设答案"])
-    assert chroma_call.await_count == 3
+    assert port_call.await_count == 3
 
 
 def test_message_serializer_exposes_query_processing_meta() -> None:

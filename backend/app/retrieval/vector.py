@@ -1,7 +1,8 @@
-"""向量检索引擎：Embedding + Chroma 语义相似度检索。
+"""向量检索引擎：Embedding + VectorStorePort 语义相似度检索。
 
 适用场景：通用语义搜索、模糊意图、同义改写后的召回。
 权限边界由调用方传入的 KBTarget 列表保证，本模块不再二次鉴权。
+读提供方由 VECTOR_READ_PROVIDER 决定（默认 chroma，不切阿里云生产读）。
 """
 
 from __future__ import annotations
@@ -10,14 +11,14 @@ import logging
 from collections.abc import Sequence
 
 from app.retrieval.types import KBTarget, RetrievalHit
-from app.services.chroma_store import chroma_store
 from app.services.embedding import EmbeddingServiceError, embedding_service
+from app.services.vector_port import VectorSearchRequest, vector_store_router
 
 logger = logging.getLogger(__name__)
 
 
 class VectorRetriever:
-    """基于 Chroma 的语义向量检索器。"""
+    """基于统一向量端口的语义向量检索器。"""
 
     async def search_many(
         self,
@@ -26,7 +27,7 @@ class VectorRetriever:
         *,
         top_k: int = 5,
     ) -> list[tuple[str, list[RetrievalHit]]]:
-        """批量向量化多个 Query，再分别执行 Chroma 检索。
+        """批量向量化多个 Query，再分别执行向量检索。
 
         ``queries`` 使用 ``(通道标签, 查询文本)``，返回值保留相同标签供 RRF
         标记命中来源。所有 Query 在一次 ``embed_texts`` 调用中提交，避免主查询、
@@ -91,39 +92,48 @@ class VectorRetriever:
         *,
         top_k: int,
     ) -> list[RetrievalHit]:
-        """使用已生成的向量查询 Chroma，不再触发任何 Embedding 请求。"""
+        """使用已生成的向量经 VectorStorePort 查询，不再触发任何 Embedding 请求。"""
 
-        try:
-            kb_targets = [(t.kb_id, t.index_version) for t in targets]
-            # 每库多取一些候选，合并后再截断，提升跨库召回质量
-            per_kb_k = max(top_k, min(top_k * 2, 20))
-            raw_hits = await chroma_store.aquery_multi_kb(
-                kb_targets=kb_targets,
-                query_embedding=query_embedding,
-                top_k=per_kb_k,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("向量检索跳过：Chroma 查询失败 — %s", exc)
-            return []
-
-        # 用 targets 补全可能缺失的 doc_name（Chroma metadata 应已含 doc_name）
+        # 每库多取一些候选，合并后再截断，提升跨库召回质量
+        per_kb_k = max(top_k, min(top_k * 2, 20))
         name_map = {str(t.kb_id): t.name for t in targets}
         results: list[RetrievalHit] = []
-        for h in raw_hits:
-            results.append(
-                RetrievalHit(
-                    chunk_id=h.chunk_id,
-                    doc_id=h.doc_id,
-                    doc_name=h.doc_name or name_map.get(h.kb_id, ""),
-                    kb_id=h.kb_id,
-                    chunk_index=h.chunk_index,
-                    content=h.content,
-                    score=h.score,
-                    source="vector",
-                    raw_score=h.score,
-                    metadata=h.metadata,
+
+        try:
+            for t in targets:
+                if not t.index_version:
+                    continue
+                req = VectorSearchRequest(
+                    tenant_id="default",
+                    collection=f"{t.kb_id}__{t.index_version}",
+                    query_vector=list(query_embedding),
+                    top_k=per_kb_k,
+                    kb_id=str(t.kb_id),
+                    index_version=str(t.index_version),
                 )
-            )
+                hits = await vector_store_router.search(req)
+                for h in hits:
+                    meta = dict(h.metadata or {})
+                    kb_id = str(meta.get("kb_id") or t.kb_id)
+                    score = float(h.score.normalized_similarity) if h.score else 0.0
+                    chunk_index = int(meta.get("chunk_index") or 0)
+                    results.append(
+                        RetrievalHit(
+                            chunk_id=h.chunk_id,
+                            doc_id=h.document_id,
+                            doc_name=str(meta.get("doc_name") or name_map.get(kb_id, "")),
+                            kb_id=kb_id,
+                            chunk_index=chunk_index,
+                            content=h.content_ref or "",
+                            score=score,
+                            source="vector",
+                            raw_score=score,
+                            metadata=meta,
+                        )
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("向量检索跳过：端口查询失败 — %s", exc)
+            return []
 
         results.sort(key=lambda x: x.score, reverse=True)
         return results[: max(1, top_k)]

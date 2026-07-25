@@ -131,6 +131,7 @@ class RoleCacheService:
                         RoleCachedQuestion.role_id.in_(role_ids),
                         RoleCachedQuestion.normalized_question == normalized,
                         RoleCacheConfig.enabled.is_(True),
+                        RoleCachedQuestion.observe_only.is_(False),
                     )
                     .order_by(RoleCachedQuestion.updated_at.desc())
                 )

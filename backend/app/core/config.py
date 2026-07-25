@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,12 +11,39 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILE = _PROJECT_ROOT / ".env"
 
 
+def _hydrate_env_from_file(path: Path) -> None:
+    """将 .env 键值注入 os.environ（不覆盖已有环境变量）；容忍非 UTF-8 编码。"""
+    if not path.exists():
+        return
+    raw = path.read_bytes()
+    text: str | None = None
+    for enc in ("utf-8", "utf-8-sig", "gb18030", "cp936", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        return
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = value.strip().strip('"').strip("'")
+
+
+_hydrate_env_from_file(_ENV_FILE)
+
+
 class Settings(BaseSettings):
-    """从项目根目录 .env 加载环境变量，供全局单例使用。"""
+    """从环境变量加载配置；启动时已尝试从项目根 .env 注入。"""
 
     model_config = SettingsConfigDict(
-        env_file=str(_ENV_FILE) if _ENV_FILE.exists() else ".env",
-        env_file_encoding="utf-8",
+        env_file=None,
         extra="ignore",
     )
 
@@ -151,19 +179,42 @@ class Settings(BaseSettings):
     QA_HISTORY_MAX_TURNS: int = 20
     QA_HISTORY_RETENTION_SWEEP_SECONDS: int = 300
     QA_DEFAULT_STRATEGY: str = "hybrid"
-    QA_DEFAULT_TOP_K: int = 5
+    QA_DEFAULT_TOP_K: int = 3
     QA_RELEVANCE_THRESHOLD: float = 0.3
     QA_RRF_K: int = 60
     QA_GUEST_SESSION_TTL_MINUTES: int = 30
     # ---------- 用户 Query 预处理 ----------
-    # 默认仅开启改写；Query 扩展与 HyDE 属于高耗时增强项，管理员可在会话页随时开启。
-    QA_QUERY_REWRITE_ENABLED: bool = True
+    # 默认关闭改写；上下文追问可由业务路由按请求临时开启。
+    QA_QUERY_REWRITE_ENABLED: bool = False
     QA_QUERY_EXPANSION_ENABLED: bool = False
     # 扩展 Query 数量限制在 0-5；开启时默认只生成 1 条，减少检索与融合开销。
     QA_QUERY_EXPANSION_COUNT: int = 1
     QA_HYDE_ENABLED: bool = False
     # 改写、扩展和 HyDE 合并为一次结构化调用，限制输出长度以控制耗时与成本。
     QA_QUERY_PROCESSING_MAX_TOKENS: int = 768
+    # ---------- 六维优化功能开关（默认保守；语义直答默认仅观察） ----------
+    CONVERSATION_ROUTER_V2_ENABLED: bool = True
+    PREVIOUS_ANSWER_TRANSFORM_ENABLED: bool = True
+    SESSION_STORE_V2_ENABLED: bool = False
+    MODEL_CONFIG_REGISTRY_V2_ENABLED: bool = False
+    QA_EXACT_CACHE_ENABLED: bool = False
+    QA_SEMANTIC_CACHE_ENABLED: bool = False
+    QA_SEMANTIC_CACHE_OBSERVE_ONLY: bool = True
+    QA_RETRIEVAL_CACHE_ENABLED: bool = False
+    QA_QUEUE_ENABLED: bool = False
+    SCHEDULER_EXTERNAL_ENABLED: bool = False
+    ANALYTICS_PIPELINE_V2_ENABLED: bool = True
+    VECTOR_DUAL_WRITE_ENABLED: bool = False
+    VECTOR_SHADOW_READ_ENABLED: bool = False
+    # chroma | alibaba
+    VECTOR_READ_PROVIDER: str = "chroma"
+    # 语义直答统一相似度阈值与分差（可被角色/知识库覆盖，不低于组织下限）
+    QA_SEMANTIC_SIMILARITY_THRESHOLD: float = 0.80
+    QA_SEMANTIC_MIN_MARGIN: float = 0.05
+    QA_SEMANTIC_MIN_QUALITY: float = 0.60
+    # 模型并发有界信号量（0 表示不限制）
+    MODEL_MAX_CONCURRENT_GENERATIONS: int = 20
+    QA_MAX_QUEUE_WAIT_SECONDS: int = 60
     # ---------- 按角色缓存知识库 ----------
     ROLE_CACHE_DEFAULT_INTERVAL_DAYS: int = 7
     ROLE_CACHE_DOCUMENT_QUESTION_COUNT: int = 20

@@ -102,6 +102,17 @@ def require_permission(permission: str) -> Callable:
     return checker
 
 
+def require_super_admin() -> Callable:
+    """模型等敏感配置：仅固定超级管理员账号可写。"""
+
+    async def checker(user: User = Depends(get_current_user)) -> User:
+        if not is_super_admin(user):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅超级管理员可执行该操作")
+        return user
+
+    return checker
+
+
 async def assert_kb_access(db: AsyncSession, user: User, kb_id: uuid.UUID, permission: str) -> KnowledgeBase:
     """校验用户对指定知识库的访问权（创建者 / kb_permissions / 平台管理员）。"""
     codes = _permission_codes(user)

@@ -158,9 +158,9 @@ class QAMessage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="请求追踪 ID，与日志/SSE done 事件对齐",
     )
     strategy: Mapped[str | None] = mapped_column(
-        String(20),
+        String(64),
         nullable=True,
-        comment="本轮实际使用的检索策略: vector/fulltext/hybrid",
+        comment="本轮实际使用的检索策略: vector/fulltext/hybrid/route/transform/cache",
     )
     latency_ms: Mapped[int | None] = mapped_column(
         Integer,

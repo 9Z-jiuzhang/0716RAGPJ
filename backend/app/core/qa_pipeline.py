@@ -37,15 +37,28 @@ from app.services.langfuse_service import get_langfuse
 from app.services.llm import LLMServiceError, llm_service
 from app.services.llm_guard import llm_guard_service
 from app.services.query_processing import (
+    QueryProcessingOptions,
     _sanitize_rewrite_output as _sanitize_rewrite_output,
-)
-from app.services.query_processing import (
     _strip_model_reasoning,
     get_query_processing_options,
     query_processor,
 )
 from app.services.role_cache import role_cache_service
 from app.services.web_search import format_web_results, search_web
+from app.services.conversation_router import conversation_router
+from app.services.analytics_events import analytics_event_service, actor_hash_for, question_hash
+from app.services.model_config_registry import model_config_registry
+from app.services.model_concurrency import model_concurrency_gate
+from app.services.qa_cache import qa_cache_service
+from app.services.qa_queue import qa_queue_service
+from app.core.redis import get_redis_client
+from app.schemas.optimization_contracts import (
+    CacheLookupRequest,
+    ConversationIntent,
+    ConversationRouteDecision,
+    QARequestEventCreate,
+)
+from app.memory.session_store_v2 import session_store_v2
 from app.utils.confidence import aggregate_retrieval_confidence, clamp_display_score
 from app.utils.tracing import PerformanceTracker, new_request_id
 from sqlalchemy import select
@@ -114,6 +127,31 @@ class QAPipelineError(Exception):
         self.status_code = status_code
 
 
+# strategy 列历史长度为 20，现已扩到 64；统一短码，避免再因标识过长落库失败
+_STRATEGY_SOURCE_ALIASES = {
+    "previous_answer_transform": "transform",
+    "qa_multilevel_cache": "cache",
+    "role_cache": "cache",
+}
+_STRATEGY_MAX_LEN = 20
+
+
+def normalize_qa_strategy(raw: str | None, *, source: str | None = None) -> str:
+    """将任意策略/来源标识规范为可安全写入 qa_messages.strategy 的短码。"""
+    text = (raw or source or "hybrid").strip() or "hybrid"
+    text = _STRATEGY_SOURCE_ALIASES.get(text, text)
+    if text in {"vector", "fulltext", "hybrid", "cache", "route", "transform"}:
+        return text
+    return text[:_STRATEGY_MAX_LEN]
+
+
+def _clip(value: str | None, max_len: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if len(text) <= max_len else text[:max_len]
+
+
 class QAPipeline:
     """智能问答编排器：对外暴露异步事件流。"""
 
@@ -169,6 +207,20 @@ class QAPipeline:
                 detector=guard_decision.detector,
             )
 
+            # 可选：问答队列观察入队（不替代同步 SSE 生成路径）
+            if qa_queue_service.enabled():
+                try:
+                    await qa_queue_service.enqueue(
+                        {
+                            "request_id": tracker.request_id,
+                            "user_id": str(user.id) if user else None,
+                            "guest_id": guest_id,
+                            "question_len": len(question),
+                        }
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("qa queue observe enqueue failed", exc_info=True)
+
             # Langfuse 全链路追踪：记录模型用量（token/次数），供模型管理页展示
             lf_trace = lf.start_trace(
                 name="qa_ask",
@@ -181,7 +233,7 @@ class QAPipeline:
                 input_text=question,
             )
 
-            # [1] 会话解析与隔离校验
+            # [1] 会话解析与隔离校验（路由需要上一答案时依赖会话）
             with tracker.track("session"):
                 session = await self._resolve_session(
                     db,
@@ -196,6 +248,82 @@ class QAPipeline:
                     guest_id=guest_id if is_guest else None,
                 )
 
+            last_assistant = await self._load_last_assistant_answer(db, session.id)
+            route = None
+            if settings.CONVERSATION_ROUTER_V2_ENABLED:
+                with tracker.track("conversation_route"):
+                    # 用 PG 会话轮次估算历史深度，避免依赖不存在的 get_context
+                    history_turns = max(0, int(session.message_count or 0) // 2)
+                    route = conversation_router.route(
+                        question=question,
+                        has_last_answer=bool(last_assistant),
+                        history_turns=history_turns,
+                    )
+                yield self._event(
+                    "route",
+                    intent=route.intent.value,
+                    confidence=route.confidence,
+                    should_retrieve=route.should_retrieve,
+                    should_clarify=route.should_clarify,
+                    should_use_last_answer=route.should_use_last_answer,
+                    transform_type=route.transform_type,
+                    reason_code=route.reason_code,
+                    classifier_version=route.classifier_version,
+                )
+
+                # 非知识库模板路径
+                template = conversation_router.template_reply(route)
+                if template and not route.should_retrieve and not route.should_use_last_answer:
+                    async for ev in self._emit_direct_answer(
+                        db,
+                        session=session,
+                        user=user,
+                        guest_id=guest_id,
+                        is_guest=is_guest,
+                        question=question,
+                        answer_text=template,
+                        tracker=tracker,
+                        lf_trace=lf_trace,
+                        route=route,
+                        request=request,
+                        citations=[],
+                        retrieval_meta={"route": route.model_dump(), "source": "route"},
+                    ):
+                        yield ev
+                    return
+
+                # 上一答案变换
+                if (
+                    settings.PREVIOUS_ANSWER_TRANSFORM_ENABLED
+                    and route.intent == ConversationIntent.PREVIOUS_ANSWER_TRANSFORM
+                    and route.should_use_last_answer
+                ):
+                    transformed = conversation_router.transform_answer(
+                        last_answer=last_assistant or "",
+                        transform_type=route.transform_type,
+                    )
+                    async for ev in self._emit_direct_answer(
+                        db,
+                        session=session,
+                        user=user,
+                        guest_id=guest_id,
+                        is_guest=is_guest,
+                        question=question,
+                        answer_text=transformed,
+                        tracker=tracker,
+                        lf_trace=lf_trace,
+                        route=route,
+                        request=request,
+                        citations=[],
+                        retrieval_meta={
+                            "route": route.model_dump(),
+                            "transform_type": route.transform_type,
+                            "source": "previous_answer_transform",
+                        },
+                    ):
+                        yield ev
+                    return
+
             # [2] 知识库权限过滤
             with tracker.track("scope"):
                 targets = await resolve_kb_targets(db, user=user, kb_ids=request.kb_ids)
@@ -204,6 +332,56 @@ class QAPipeline:
                         "指定的知识库不可检索：无权限，或尚未完成向量化（缺少生效索引版本）",
                         status_code=403,
                     )
+
+            scope_fp = ",".join(sorted(str(t.kb_id) for t in targets)) or "empty"
+            cache_req = CacheLookupRequest(
+                request_id=tracker.request_id,
+                user_id=str(user.id) if user else None,
+                scope_fingerprint=scope_fp,
+                normalized_question=question,
+                top_k=request.top_k,
+            )
+            with tracker.track("qa_cache_lookup"):
+                redis_client = None
+                try:
+                    redis_client = get_redis_client()
+                except Exception:  # noqa: BLE001
+                    redis_client = None
+                # L3 语义候选由外部索引注入；当前无独立语义库时保持空列表
+                cache_hit = await qa_cache_service.lookup(
+                    cache_req,
+                    redis_client=redis_client,
+                    semantic_candidates=[],
+                    permission_ok=True,
+                )
+            if cache_hit.status == "hit" and cache_hit.answer:
+                async for ev in self._emit_direct_answer(
+                    db,
+                    session=session,
+                    user=user,
+                    guest_id=guest_id,
+                    is_guest=is_guest,
+                    question=question,
+                    answer_text=cache_hit.answer,
+                    tracker=tracker,
+                    lf_trace=lf_trace,
+                    route=route,
+                    request=request,
+                    citations=list(cache_hit.citations or []),
+                    retrieval_meta={
+                        "cache": cache_hit.model_dump(),
+                        "source": "qa_multilevel_cache",
+                    },
+                ):
+                    yield ev
+                return
+            if cache_hit.status == "observe":
+                logger.info(
+                    "semantic cache observe request_id=%s similarity=%s reason=%s",
+                    tracker.request_id,
+                    cache_hit.normalized_similarity,
+                    cache_hit.miss_reason,
+                )
 
             # [3] 角色缓存精确命中：权限复核通过后直接返回，跳过预处理、检索、Rerank 与 LLM。
             with tracker.track("role_cache_lookup"):
@@ -221,6 +399,7 @@ class QAPipeline:
                     "authorized_kb_count": len(targets),
                     "authorized_kb_ids": [str(target.kb_id) for target in targets],
                     "cache_hit": True,
+                    "source": "role_cache",
                     "intent": {
                         "name": guard_decision.intent,
                         "confidence": guard_decision.confidence,
@@ -231,6 +410,7 @@ class QAPipeline:
                         "role_id": str(cache_match.role_id),
                         "source": cache_match.source,
                         "source_kb_ids": [str(kb_id) for kb_id in cache_match.source_kb_ids],
+                        "level": "L5",
                     },
                 }
                 yield self._event(
@@ -251,7 +431,7 @@ class QAPipeline:
                         answer=answer_text,
                         citations=citations,
                         retrieval_meta=retrieval_meta,
-                        strategy="cache",
+                        strategy=normalize_qa_strategy("cache", source="role_cache"),
                         request_id=tracker.request_id,
                         tracker=tracker,
                         user_msg_id=user_msg_id,
@@ -260,6 +440,12 @@ class QAPipeline:
                         guest_id=guest_id,
                         kb_ids=request.kb_ids,
                     )
+                await qa_cache_service.put_exact(
+                    cache_req,
+                    answer=answer_text,
+                    citations=citations,
+                    redis_client=redis_client,
+                )
                 try:
                     lf_trace.update(output=answer_text[:500])
                 except Exception:
@@ -277,6 +463,15 @@ class QAPipeline:
                 )
                 return
 
+            # 模型配置快照：普通用户 temperature 默认不覆盖已发布/环境配置
+            model_snap = await model_config_registry.resolve_chat_snapshot(
+                db,
+                request_temperature=request.temperature,
+                allow_request_override=False,
+            )
+            gen_temperature = float(model_snap.temperature if model_snap.temperature is not None else 0.7)
+            gen_max_tokens = int(model_snap.max_tokens) if model_snap.max_tokens else None
+
             # [4] 未命中缓存时加载会话记忆
             with tracker.track("memory"):
                 memory = await session_store.load_memory(session.id, pg_summary=session.summary)
@@ -288,6 +483,18 @@ class QAPipeline:
             with tracker.track("query_processing"):
                 # 管理员策略按请求读取，修改后无需重启；缓存命中已在此步骤之前直接返回。
                 query_options = await get_query_processing_options(db)
+                # 上下文追问：临时开启改写以补全指代，不改动全局默认开关
+                if (
+                    route is not None
+                    and route.intent == ConversationIntent.CONTEXT_FOLLOWUP_KB
+                    and not query_options.rewrite_enabled
+                ):
+                    query_options = QueryProcessingOptions(
+                        rewrite_enabled=True,
+                        expansion_enabled=query_options.expansion_enabled,
+                        expansion_count=query_options.expansion_count,
+                        hyde_enabled=query_options.hyde_enabled,
+                    )
                 query_processing = await query_processor.process(
                     question,
                     memory.to_llm_messages(),
@@ -305,6 +512,8 @@ class QAPipeline:
                     "detector": guard_decision.detector,
                 },
                 "query_processing": query_processing.to_meta(),
+                "model_snapshot_id": model_snap.snapshot_id,
+                "route": route.model_dump() if route is not None else None,
             }
             # SSE 事件允许前端即时展示；管理员页面仍以落库元数据作为审计依据。
             yield self._event("query_processing", **query_processing.to_meta())
@@ -320,7 +529,7 @@ class QAPipeline:
                     question=question,
                     rewritten_query=rewritten,
                     history_messages=memory.to_llm_messages(),
-                    temperature=request.temperature,
+                    temperature=gen_temperature,
                     retrieval_meta=retrieval_meta,
                     tracker=tracker,
                     lf=lf,
@@ -381,7 +590,7 @@ class QAPipeline:
                         question=question,
                         rewritten_query=rewritten,
                         history_messages=memory.to_llm_messages(),
-                        temperature=request.temperature,
+                        temperature=gen_temperature,
                         retrieval_meta=retrieval_meta,
                         tracker=tracker,
                         lf=lf,
@@ -393,29 +602,39 @@ class QAPipeline:
                     citations = [self._hit_to_citation(h) for h in retrieval.hits]
                     yield self._event("citations", citations=citations)
 
-                    # [6] 组装提示并流式生成
-                    with tracker.track("generation"):
-                        messages = self._build_generation_messages(
-                            question=question,
-                            rewritten_query=rewritten,
-                            hits=retrieval.hits,
-                            history_messages=memory.to_llm_messages(),
+                    # [6] 组装提示并流式生成（有界并发）
+                    acquired = await model_concurrency_gate.acquire()
+                    if not acquired:
+                        raise QAPipelineError(
+                            "模型服务繁忙，请稍后重试",
+                            status_code=503,
                         )
-                        usage_sink: dict[str, Any] = {}
-                        async for delta in llm_service.stream_chat(
-                            messages,
-                            temperature=request.temperature,
-                            usage_sink=usage_sink,
-                        ):
-                            answer_text += delta
-                            yield self._event("chunk", content=delta)
-                        self._record_generation(
-                            lf,
-                            lf_trace,
-                            messages=messages,
-                            completion=answer_text,
-                            usage=usage_sink,
-                        )
+                    try:
+                        with tracker.track("generation"):
+                            messages = self._build_generation_messages(
+                                question=question,
+                                rewritten_query=rewritten,
+                                hits=retrieval.hits,
+                                history_messages=memory.to_llm_messages(),
+                            )
+                            usage_sink: dict[str, Any] = {}
+                            async for delta in llm_service.stream_chat(
+                                messages,
+                                temperature=gen_temperature,
+                                max_tokens=gen_max_tokens,
+                                usage_sink=usage_sink,
+                            ):
+                                answer_text += delta
+                                yield self._event("chunk", content=delta)
+                            self._record_generation(
+                                lf,
+                                lf_trace,
+                                messages=messages,
+                                completion=answer_text,
+                                usage=usage_sink,
+                            )
+                    finally:
+                        model_concurrency_gate.release()
 
             if not answer_text.strip():
                 answer_text = _NO_EVIDENCE_REPLY
@@ -432,7 +651,7 @@ class QAPipeline:
                     answer=answer_text,
                     citations=citations,
                     retrieval_meta=retrieval_meta,
-                    strategy=request.strategy,
+                    strategy=normalize_qa_strategy(request.strategy),
                     request_id=tracker.request_id,
                     tracker=tracker,
                     user_msg_id=user_msg_id,
@@ -440,6 +659,30 @@ class QAPipeline:
                     is_guest=is_guest,
                     guest_id=guest_id,
                     kb_ids=request.kb_ids,
+                )
+                await self._record_analytics_event(
+                    db,
+                    request_id=tracker.request_id,
+                    session=session,
+                    message_id=assistant_msg_id,
+                    user=user,
+                    guest_id=guest_id,
+                    question=question,
+                    route=route,
+                    request=request,
+                    retrieval_meta=retrieval_meta,
+                    citations=citations,
+                    tracker=tracker,
+                    rewrite_enabled=query_options.rewrite_enabled,
+                    model_snapshot_id=model_snap.snapshot_id,
+                )
+            # L2 精确缓存回写（开关关闭或 Redis 不可用时 no-op）
+            if answer_text.strip() and answer_text != _NO_EVIDENCE_REPLY:
+                await qa_cache_service.put_exact(
+                    cache_req,
+                    answer=answer_text,
+                    citations=citations,
+                    redis_client=redis_client,
                 )
 
             try:
@@ -545,6 +788,157 @@ class QAPipeline:
             guest_id=guest_id if is_guest else None,
         )
         return session
+
+    async def _load_last_assistant_answer(self, db: AsyncSession, session_id: uuid.UUID) -> str | None:
+        """读取会话最近一条助手回答，供上一答案变换使用。"""
+        row = await db.scalar(
+            select(QAMessage)
+            .where(QAMessage.session_id == session_id, QAMessage.role == "assistant")
+            .order_by(QAMessage.created_at.desc())
+            .limit(1)
+        )
+        if row is None:
+            return None
+        text = (row.content or "").strip()
+        return text or None
+
+    async def _emit_direct_answer(
+        self,
+        db: AsyncSession,
+        *,
+        session: QASession,
+        user: User | None,
+        guest_id: str | None,
+        is_guest: bool,
+        question: str,
+        answer_text: str,
+        tracker: PerformanceTracker,
+        lf_trace: Any,
+        route: ConversationRouteDecision | None,
+        request: AskRequest,
+        citations: list[dict[str, Any]],
+        retrieval_meta: dict[str, Any],
+    ) -> AsyncIterator[dict[str, Any]]:
+        """问候/帮助/变换/缓存等不进检索的短路径。"""
+        # 完整来源保留在 retrieval_meta.source；strategy 只写短码
+        strategy_code = normalize_qa_strategy(
+            None,
+            source=str(retrieval_meta.get("source") or "route"),
+        )
+        yield self._event("citations", citations=citations)
+        yield self._event("chunk", content=answer_text)
+        with tracker.track("persist"):
+            user_msg_id = uuid.uuid4()
+            assistant_msg_id = uuid.uuid4()
+            await self._persist_turn(
+                db,
+                session=session,
+                question=question,
+                answer=answer_text,
+                citations=citations,
+                retrieval_meta=retrieval_meta,
+                strategy=strategy_code,
+                request_id=tracker.request_id,
+                tracker=tracker,
+                user_msg_id=user_msg_id,
+                assistant_msg_id=assistant_msg_id,
+                is_guest=is_guest,
+                guest_id=guest_id,
+                kb_ids=request.kb_ids,
+            )
+            await self._record_analytics_event(
+                db,
+                request_id=tracker.request_id,
+                session=session,
+                message_id=assistant_msg_id,
+                user=user,
+                guest_id=guest_id,
+                question=question,
+                route=route,
+                request=request,
+                retrieval_meta=retrieval_meta,
+                citations=citations,
+                tracker=tracker,
+                rewrite_enabled=False,
+                model_snapshot_id=None,
+            )
+        try:
+            lf_trace.update(output=answer_text[:500])
+        except Exception:  # noqa: BLE001
+            pass
+        get_langfuse().flush()
+        yield self._event(
+            "done",
+            session_id=str(session.id),
+            message_id=str(assistant_msg_id),
+            request_id=tracker.request_id,
+            performance=tracker.to_dict(),
+            confidence="high",
+            confidence_score=1.0,
+            route_intent=route.intent.value if route else None,
+        )
+
+    async def _record_analytics_event(
+        self,
+        db: AsyncSession,
+        *,
+        request_id: str,
+        session: QASession,
+        message_id: uuid.UUID,
+        user: User | None,
+        guest_id: str | None,
+        question: str,
+        route: ConversationRouteDecision | None,
+        request: AskRequest,
+        retrieval_meta: dict[str, Any],
+        citations: list[dict[str, Any]],
+        tracker: PerformanceTracker,
+        rewrite_enabled: bool | None,
+        model_snapshot_id: str | None,
+    ) -> None:
+        cache_meta = retrieval_meta.get("cache") if isinstance(retrieval_meta.get("cache"), dict) else {}
+        payload = QARequestEventCreate(
+            request_id=_clip(request_id, 64) or request_id,
+            conversation_id=session.id,
+            message_id=message_id,
+            actor_hash=actor_hash_for(str(user.id) if user else None, guest_id),
+            question_hash=question_hash(question),
+            question_preview=_clip(question, 120),
+            route_intent=_clip(route.intent.value if route else None, 64),
+            route_confidence=route.confidence if route else None,
+            should_retrieve=route.should_retrieve if route else True,
+            top_k=request.top_k,
+            rewrite_enabled=rewrite_enabled,
+            cache_level=_clip(
+                str(cache_meta.get("level") or retrieval_meta.get("cache_level") or "") or None,
+                16,
+            ),
+            cache_hit_id=_clip(
+                str(cache_meta.get("entry_id") or cache_meta.get("cache_entry_id") or "") or None,
+                64,
+            ),
+            miss_reason=_clip(
+                str(retrieval_meta.get("reason")) if retrieval_meta.get("reason") is not None else None,
+                128,
+            ),
+            retrieval_hit_count=int(retrieval_meta.get("hit_count") or len(citations) or 0),
+            citation_count=len(citations),
+            model_snapshot_id=_clip(
+                str(model_snapshot_id or retrieval_meta.get("model_snapshot_id") or "") or None,
+                64,
+            ),
+            latency_ms=int(tracker.total_ms),
+            result_status="ok",
+            detail={"source": retrieval_meta.get("source")},
+        )
+        # 独立会话写入，避免污染问答事务
+        from app.core.database import SessionLocal
+
+        try:
+            async with SessionLocal() as event_db:
+                await analytics_event_service.record_request(event_db, payload)
+        except Exception:  # noqa: BLE001
+            logger.exception("analytics event schedule failed request_id=%s", request_id)
 
     async def _hydrate_context_from_db(
         self,
@@ -757,12 +1151,14 @@ class QAPipeline:
         """写入 PG 消息记录并更新 Redis 热记忆。"""
         from app.models.base import utcnow
 
+        safe_strategy = normalize_qa_strategy(strategy)
+
         user_row = QAMessage(
             id=user_msg_id,
             session_id=session.id,
             role="user",
             content=question,
-            request_id=request_id,
+            request_id=_clip(request_id, 64),
         )
         assistant_row = QAMessage(
             id=assistant_msg_id,
@@ -771,8 +1167,8 @@ class QAPipeline:
             content=answer,
             citations=citations or None,
             retrieval_meta=retrieval_meta,
-            request_id=request_id,
-            strategy=strategy,
+            request_id=_clip(request_id, 64),
+            strategy=safe_strategy,
             latency_ms=int(tracker.total_ms),
         )
         db.add(user_row)
@@ -825,6 +1221,24 @@ class QAPipeline:
                 is_guest=is_guest,
                 db=db,
                 pg_session=session,
+            )
+        # Session V2 双写（开关开启时）；失败不阻断主路径
+        if session_store_v2.enabled():
+            cid = str(session.id)
+            await session_store_v2.append_message(
+                tenant="default",
+                conversation_id=cid,
+                message={"role": "user", "content": question, "message_id": str(user_msg_id)},
+            )
+            await session_store_v2.append_message(
+                tenant="default",
+                conversation_id=cid,
+                message={
+                    "role": "assistant",
+                    "content": _strip_model_reasoning(answer) or answer[:2000],
+                    "message_id": str(assistant_msg_id),
+                    "citation_ids": [str(c.get("doc_id") or "") for c in (citations or [])],
+                },
             )
         await db.commit()
 

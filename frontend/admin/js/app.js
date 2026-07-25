@@ -188,6 +188,7 @@ const MENU_GROUPS = [
     items: [
       { path: "/admin/ragas", label: "RAGAS 评估", perm: "system:read" },
       { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
+      { path: "/admin/qa-analytics", label: "问答统计", perm: "system:read" },
     ],
   },
   {
@@ -467,6 +468,7 @@ async function dispatchRender() {
   if (path === "/admin/qa-sessions") return pageQaSessions();
   if (path === "/admin/role-caches") return pageRoleCaches();
   if (path === "/admin/hit-test") return pageHitTest();
+  if (path === "/admin/qa-analytics") return pageQaAnalytics();
   if (path === "/admin/audit") return pageAudit();
   if (path === "/admin/guard") return pageGuardEvents();
   if (path === "/admin/monitor") return pageMonitor();
@@ -510,6 +512,7 @@ function renderDashboardShortcuts() {
     { path: "/admin/knowledge-bases", label: "知识库", perm: "kb:read", desc: "文档与向量" },
     { path: "/admin/users", label: "用户", perm: "user:read", desc: "账号与角色" },
     { path: "/admin/hit-test", label: "命中测试", perm: "test:read", desc: "检索评测" },
+    { path: "/admin/qa-analytics", label: "问答统计", perm: "system:read", desc: "反馈与主题" },
     { path: "/admin/qa-sessions", label: "会话分析", perm: "system:read", desc: "问答洞察" },
     { path: "/admin/monitor", label: "系统监控", perm: "system:read", desc: "Grafana" },
     { path: "/admin/audit", label: "审计日志", perm: "audit:read", desc: "操作追踪" },
@@ -1908,7 +1911,8 @@ function openModelForm({ title, model = null, onSave }) {
 
 async function pageModels() {
   if (!requirePerm("model:read", "大模型管理")) return;
-  const canWrite = hasPermission("model:write");
+  // 模型增删改与参数配置仅超级管理员
+  const canWrite = isSuperAdmin();
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载模型配置…</div>`;
   try {
     const data = await api.get("/models?page=1&page_size=50");
@@ -1926,7 +1930,11 @@ async function pageModels() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">LLM / Embedding / Rerank</h3>
-            <p class="card-sub">${canWrite ? "可编辑密钥引用与优先级" : "仅超级管理员可配置密钥与优先级（需 model:write）"}</p>
+            <p class="card-sub">${
+              canWrite
+                ? "可编辑连接信息与生成参数（仅超级管理员）"
+                : "当前账号只读；模型设置仅超级管理员可修改"
+            }</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-models">
@@ -1975,6 +1983,11 @@ async function pageModels() {
                         ? `<div class="table-actions table-actions-stack models-actions">
                       <div class="table-actions-row">
                         <button class="btn btn-text btn-sm" data-edit="${escapeHtml(m.id)}">编辑</button>
+                        <button class="btn btn-text btn-sm" data-params="${escapeHtml(m.id)}">配置参数</button>
+                      </div>
+                      <div class="table-actions-row">
+                        <button class="btn btn-text btn-sm" data-versions="${escapeHtml(m.id)}">版本</button>
+                        <button class="btn btn-text btn-sm" data-publish="${escapeHtml(m.id)}">发布版本</button>
                       </div>
                       <div class="table-actions-row">
                         <button class="btn ${m.is_enabled ? "btn-danger" : "btn-success"} btn-sm" data-toggle="${escapeHtml(m.id)}" data-on="${m.is_enabled ? 1 : 0}">${m.is_enabled ? "停用" : "启用"}</button>
@@ -2052,6 +2065,45 @@ async function pageModels() {
       };
     });
 
+    document.querySelectorAll("[data-params]").forEach((btn) => {
+      btn.onclick = () => {
+        const model = items.find((x) => String(x.id) === String(btn.getAttribute("data-params")));
+        if (!model) return;
+        openModelParamsForm({
+          model,
+          onSave: async (payload) => {
+            await api.put(`/models/${model.id}`, payload);
+            toast("模型参数已保存", "success");
+            pageModels();
+          },
+        });
+      };
+    });
+
+    document.querySelectorAll("[data-versions]").forEach((btn) => {
+      btn.onclick = () => {
+        const model = items.find((x) => String(x.id) === String(btn.getAttribute("data-versions")));
+        if (!model) return;
+        openModelVersionsModal(model);
+      };
+    });
+
+    document.querySelectorAll("[data-publish]").forEach((btn) => {
+      btn.onclick = async () => {
+        const model = items.find((x) => String(x.id) === String(btn.getAttribute("data-publish")));
+        if (!model) return;
+        const note = window.prompt("发布说明（可选）", "") ?? null;
+        if (note === null) return;
+        try {
+          const params = model.config && typeof model.config === "object" ? model.config : {};
+          const res = await api.post(`/models/${model.id}/publish`, { params, note: note || undefined });
+          toast(`已发布版本 ${res?.version || ""}`.trim(), "success");
+        } catch (e) {
+          toast(e.message || "发布失败（需启用 MODEL_CONFIG_REGISTRY_V2_ENABLED）", "error");
+        }
+      };
+    });
+
     document.querySelectorAll("[data-toggle]").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.getAttribute("data-toggle");
@@ -2067,6 +2119,176 @@ async function pageModels() {
     });
   } catch (e) {
     document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+/** 按模型类型生成可编辑参数表单字段定义。 */
+function modelParamFields(modelType) {
+  if (modelType === "embedding") {
+    return [
+      { key: "dimensions", label: "向量维度 dimensions", type: "number", min: 1, max: 8192, step: 1, placeholder: "如 1024，可留空" },
+      { key: "encoding_format", label: "编码格式 encoding_format", type: "text", placeholder: "float / base64" },
+    ];
+  }
+  if (modelType === "rerank") {
+    return [
+      {
+        key: "candidate_multiplier",
+        label: "候选倍数 candidate_multiplier",
+        type: "number",
+        min: 1,
+        max: 20,
+        step: 0.5,
+        placeholder: "如 3",
+      },
+      { key: "top_n", label: "返回条数 top_n", type: "number", min: 1, max: 50, step: 1, placeholder: "如 10" },
+    ];
+  }
+  // llm / chat
+  return [
+    { key: "temperature", label: "温度 temperature", type: "number", min: 0, max: 2, step: 0.1, placeholder: "0–2，默认 0.7" },
+    { key: "top_p", label: "核采样 top_p", type: "number", min: 0.01, max: 1, step: 0.05, placeholder: "0–1" },
+    { key: "max_tokens", label: "最大 Token max_tokens", type: "number", min: 1, max: 128000, step: 1, placeholder: "如 2048" },
+    {
+      key: "presence_penalty",
+      label: "存在惩罚 presence_penalty",
+      type: "number",
+      min: -2,
+      max: 2,
+      step: 0.1,
+      placeholder: "可选",
+    },
+    {
+      key: "frequency_penalty",
+      label: "频率惩罚 frequency_penalty",
+      type: "number",
+      min: -2,
+      max: 2,
+      step: 0.1,
+      placeholder: "可选",
+    },
+  ];
+}
+
+function openModelParamsForm({ model, onSave }) {
+  closeAllModals();
+  const dialogId = `modelParams-${Date.now()}`;
+  const cfg = model.config || {};
+  const fields = modelParamFields(model.model_type);
+  const fieldHtml = fields
+    .map((f) => {
+      const val = cfg[f.key] == null ? "" : String(cfg[f.key]);
+      return `
+          <label class="form-label" style="margin-top:10px">${escapeHtml(f.label)}</label>
+          <input class="form-control" name="${escapeHtml(f.key)}" type="${escapeHtml(f.type)}"
+            ${f.min != null ? `min="${f.min}"` : ""} ${f.max != null ? `max="${f.max}"` : ""}
+            ${f.step != null ? `step="${f.step}"` : ""}
+            value="${escapeHtml(val)}" placeholder="${escapeHtml(f.placeholder || "")}" />`;
+    })
+    .join("");
+
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div id="${dialogId}" class="modal-backdrop" style="display:flex">
+      <form class="modal" style="max-width:520px;width:92%">
+        <div class="modal-header"><h3>配置参数 · ${escapeHtml(model.name || "")}</h3></div>
+        <div class="modal-body">
+          <p class="text-muted" style="margin-top:0">类型 <code>${escapeHtml(model.model_type)}</code> · 提供方 <code>${escapeHtml(model.provider || "-")}</code>。留空表示不覆盖该项。</p>
+          ${fieldHtml}
+          <label class="form-label" style="margin-top:10px">请求超时（秒）</label>
+          <input class="form-control" name="timeout_seconds" type="number" min="5" max="600" step="1"
+            value="${escapeHtml(String(model.timeout_seconds ?? 60))}" />
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close>取消</button>
+          <button class="btn btn-primary" type="submit">保存参数</button>
+        </div>
+      </form>
+    </div>`
+  );
+  const root = document.getElementById(dialogId);
+  root.querySelector("[data-close]").onclick = () => root.remove();
+  root.addEventListener("click", (e) => {
+    if (e.target === root) root.remove();
+  });
+  root.querySelector("form").onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const config = {};
+    for (const f of fields) {
+      const raw = form.elements[f.key]?.value;
+      if (raw == null || String(raw).trim() === "") continue;
+      config[f.key] = f.type === "number" ? Number(raw) : String(raw).trim();
+    }
+    const timeoutRaw = form.elements.timeout_seconds?.value;
+    const payload = { config };
+    if (timeoutRaw != null && String(timeoutRaw).trim() !== "") {
+      payload.timeout_seconds = Number(timeoutRaw);
+    }
+    try {
+      await onSave(payload);
+      root.remove();
+    } catch (err) {
+      toast(err.message || "保存失败", "error");
+    }
+  };
+}
+
+/** 模型已发布版本列表与一键回滚（需 MODEL_CONFIG_REGISTRY_V2_ENABLED）。 */
+async function openModelVersionsModal(model) {
+  closeAllModals();
+  const root = document.createElement("div");
+  root.className = "modal-mask";
+  root.innerHTML = `<div class="modal-card" style="max-width:720px">
+    <div class="modal-header"><h3>「${escapeHtml(model.name)}」版本</h3>
+      <button type="button" class="btn btn-text btn-sm" data-close>关闭</button></div>
+    <div class="modal-body"><div class="loading">加载版本…</div></div>
+  </div>`;
+  document.body.appendChild(root);
+  root.querySelector("[data-close]").onclick = () => root.remove();
+  root.addEventListener("click", (e) => {
+    if (e.target === root) root.remove();
+  });
+  const body = root.querySelector(".modal-body");
+  try {
+    const versions = (await api.get(`/models/${model.id}/versions`)) || [];
+    const list = Array.isArray(versions) ? versions : versions.items || [];
+    if (!list.length) {
+      body.innerHTML = `<p class="text-muted">暂无已发布版本。可先「配置参数」后点击「发布版本」。（需启用 MODEL_CONFIG_REGISTRY_V2_ENABLED）</p>`;
+      return;
+    }
+    body.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>版本</th><th>发布时间</th><th>说明</th><th></th></tr></thead>
+      <tbody>${list
+        .map(
+          (v) => `<tr>
+            <td><code>${escapeHtml(v.version || "")}</code></td>
+            <td class="text-muted">${escapeHtml(v.published_at || "—")}</td>
+            <td class="text-muted">${escapeHtml(v.note || "—")}</td>
+            <td><button type="button" class="btn btn-text btn-sm" data-rollback="${escapeHtml(v.id)}">回滚</button></td>
+          </tr>`
+        )
+        .join("")}</tbody></table></div>`;
+    body.querySelectorAll("[data-rollback]").forEach((btn) => {
+      btn.onclick = async () => {
+        const ok = await confirmDialog({
+          title: "回滚版本",
+          message: "将以该历史参数重新发布为新版本，确定？",
+          confirmText: "回滚",
+        });
+        if (!ok) return;
+        try {
+          const res = await api.post(`/models/${model.id}/rollback/${btn.getAttribute("data-rollback")}`, {});
+          toast(`已回滚并发布 ${res?.version || ""}`.trim(), "success");
+          root.remove();
+          pageModels();
+        } catch (e) {
+          toast(e.message || "回滚失败（需启用 MODEL_CONFIG_REGISTRY_V2_ENABLED）", "error");
+        }
+      };
+    });
+  } catch (e) {
+    body.innerHTML = `<p class="text-danger">${escapeHtml(e.message || "加载失败")}</p>`;
   }
 }
 
@@ -4663,7 +4885,7 @@ async function pageHitTest() {
           </div>
           <div>
             <label class="form-label">Top K</label>
-            <input class="form-control" id="htTopK" type="number" min="1" max="20" value="5" />
+            <input class="form-control" id="htTopK" type="number" min="1" max="20" value="3" />
           </div>
           <div>
             <label class="form-label">相似度阈值</label>
@@ -5048,7 +5270,7 @@ async function pageHitTest() {
       return {
         kb_ids: [kbId],
         strategy: document.getElementById("htStrategy").value || "hybrid",
-        top_k: Number(document.getElementById("htTopK").value || 5),
+        top_k: Number(document.getElementById("htTopK").value || 3),
         similarity_threshold: Number(document.getElementById("htThreshold").value || 0.15),
       };
     };
@@ -5671,7 +5893,7 @@ async function pageQaSessions() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">Query 预处理策略</h3>
-            <p class="card-sub">默认仅开启 Query 改写；扩展与 HyDE 会增加模型开销</p>
+            <p class="card-sub">默认关闭改写、扩展与 HyDE；开启后会增加模型开销。上下文追问可由业务路由临时启用改写。</p>
           </div>
           ${canWrite ? `<div class="card-header-actions"><button type="button" class="btn btn-primary btn-sm" data-query-config-save>保存策略</button></div>` : ""}
         </div>
@@ -5944,7 +6166,8 @@ async function openRoleCacheQuestions(roleId, cacheName, options = {}) {
       detectBtn.onclick = async () => {
         detectBtn.disabled = true;
         try {
-          await runRoleCacheAnalysis(roleId, "history");
+          // 「检测文档」应对齐文档分析接口，而非历史分析
+          await runRoleCacheAnalysis(roleId, "documents");
         } finally {
           detectBtn.disabled = false;
         }
@@ -6523,7 +6746,166 @@ async function pageAudit() {
   }
 }
 
-/* ========== 系统监控（Grafana 嵌入） ========== */
+/* ========== 问答统计（质量评测） ========== */
+async function pageQaAnalytics() {
+  if (!requirePerm("system:read", "问答统计")) return;
+  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载问答统计…</div>`;
+
+  let feedback = null;
+  let topics = { items: [] };
+  try {
+    feedback = await api.get("/monitor/analytics/feedback?days=14");
+  } catch {
+    feedback = null;
+  }
+  try {
+    topics = (await api.get("/monitor/analytics/topics")) || { items: [] };
+  } catch {
+    topics = { items: [] };
+  }
+
+  const useful = Number(feedback?.useful || 0);
+  const useless = Number(feedback?.useless || 0);
+  const fbTotal = useful + useless;
+  const usefulPct = fbTotal ? Math.round((useful / fbTotal) * 100) : 0;
+  const feedbackPieHtml = feedback
+    ? `<div class="monitor-feedback-chart">
+        <div class="monitor-pie" style="--useful:${usefulPct}" title="有用 ${useful} / 无用 ${useless}" aria-label="反馈占比"></div>
+        <ul class="list-plain monitor-stats-list">
+          <li><span class="monitor-stat-label">问答事件</span><span class="monitor-stat-value">${feedback.request_events ?? 0}</span></li>
+          <li><span class="monitor-stat-label">独立会话</span><span class="monitor-stat-value">${feedback.unique_conversations ?? 0}</span></li>
+          <li><span class="monitor-stat-label">反馈率</span><span class="monitor-stat-value">${Math.round(Number(feedback.feedback_rate || 0) * 1000) / 10}%</span></li>
+          <li><span class="monitor-stat-label"><span class="legend-dot legend-useful"></span>有用</span><span class="monitor-stat-value">${useful}</span></li>
+          <li><span class="monitor-stat-label"><span class="legend-dot legend-useless"></span>无用</span><span class="monitor-stat-value">${useless}</span></li>
+          ${
+            feedback.avg_latency_ms != null
+              ? `<li><span class="monitor-stat-label">平均耗时</span><span class="monitor-stat-value">${feedback.avg_latency_ms} ms</span></li>`
+              : ""
+          }
+        </ul>
+      </div>`
+    : `<p class="text-muted">暂无反馈统计（需已产生问答事件与点赞/点踩）</p>`;
+
+  const trend = Array.isArray(feedback?.trend) ? feedback.trend : [];
+  const trendHtml = trend.length
+    ? renderBars(
+        trend.map((x) => x.requests || 0),
+        {
+          labels: trend.map((x) => {
+            const d = String(x.date || "");
+            return d.length >= 10 ? d.slice(5) : d;
+          }),
+        }
+      )
+    : `<p class="text-muted">暂无近 14 日问答趋势</p>`;
+
+  const routeDist = Array.isArray(feedback?.route_distribution) ? feedback.route_distribution : [];
+  const cacheDist = Array.isArray(feedback?.cache_distribution) ? feedback.cache_distribution : [];
+  const routeHtml = routeDist.length
+    ? renderBars(
+        routeDist.map((x) => x.count),
+        { labels: routeDist.map((x) => x.label) }
+      )
+    : `<p class="text-muted">暂无路由分布</p>`;
+  const cacheHtml = cacheDist.length
+    ? renderBars(
+        cacheDist.map((x) => x.count),
+        { labels: cacheDist.map((x) => x.label) }
+      )
+    : `<p class="text-muted">暂无缓存分布</p>`;
+
+  const topicItems = Array.isArray(topics?.items) ? topics.items : [];
+  const topicChartHtml = topicItems.length
+    ? renderBars(
+        topicItems.slice(0, 12).map((x) => x.sample_count || 0),
+        { labels: topicItems.slice(0, 12).map((x) => x.name || "—") }
+      )
+    : `<p class="text-muted">暂无主题簇。可点击「重建主题」从近期问答事件聚合关键词。</p>`;
+  const topicTableHtml = topicItems.length
+    ? `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>主题</th><th>关键词</th><th>样本数</th><th>代表问题</th></tr></thead>
+        <tbody>${topicItems
+          .map((t) => {
+            const kws = Array.isArray(t.keywords) ? t.keywords.join("、") : "";
+            return `<tr>
+              <td>${escapeHtml(t.name || "—")}</td>
+              <td class="text-muted">${escapeHtml(kws || "—")}</td>
+              <td>${Number(t.sample_count || 0)}</td>
+              <td class="text-muted" title="${escapeHtml(t.representative_question || "")}">${escapeHtml(
+                (t.representative_question || "—").slice(0, 80)
+              )}</td>
+            </tr>`;
+          })
+          .join("")}</tbody></table></div>`
+    : "";
+
+  document.getElementById("pageRoot").innerHTML = `
+    ${pageHead({
+      title: "问答统计",
+      desc: "反馈占比、问答趋势、路由/缓存分布与问题主题（聚合数据）。",
+      actions: `<button type="button" class="btn btn-secondary btn-sm" id="btnQaAnalyticsRefresh">刷新</button>`,
+    })}
+    <div class="page-grid monitor-page-grid">
+    <div class="card span-6 monitor-equal-card">
+      <div class="card-header">
+        <div class="card-header-text"><h3 class="card-title">问答反馈</h3>
+        <p class="card-sub">点赞 / 点踩占比（聚合）</p></div>
+      </div>
+      <div class="monitor-stats-body">${feedbackPieHtml}</div>
+    </div>
+    <div class="card span-6 monitor-equal-card">
+      <div class="card-header">
+        <div class="card-header-text"><h3 class="card-title">近 14 日问答量</h3>
+        <p class="card-sub">按日请求事件数</p></div>
+      </div>
+      <div class="dash-chart-body monitor-chart-body">${trendHtml}</div>
+    </div>
+    <div class="card span-6">
+      <div class="card-header">
+        <div class="card-header-text"><h3 class="card-title">路由分布</h3>
+        <p class="card-sub">意图路由计数</p></div>
+      </div>
+      <div class="dash-chart-body monitor-chart-body">${routeHtml}</div>
+    </div>
+    <div class="card span-6">
+      <div class="card-header">
+        <div class="card-header-text"><h3 class="card-title">缓存层分布</h3>
+        <p class="card-sub">命中层级计数</p></div>
+      </div>
+      <div class="dash-chart-body monitor-chart-body">${cacheHtml}</div>
+    </div>
+    <div class="card span-12">
+      <div class="card-header">
+        <div class="card-header-text"><h3 class="card-title">问题主题分布</h3>
+        <p class="card-sub">关键词粗聚类 · 仅聚合数据，不含完整问答原文</p></div>
+        <div class="card-header-actions">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnTopicsRebuild">重建主题</button>
+        </div>
+      </div>
+      <div class="dash-chart-body monitor-chart-body" id="qaTopicChart">${topicChartHtml}</div>
+      <div id="qaTopicTable" style="margin-top:16px">${topicTableHtml}</div>
+    </div>
+    </div>`;
+
+  document.getElementById("btnQaAnalyticsRefresh")?.addEventListener("click", () => pageQaAnalytics());
+  const btnRebuild = document.getElementById("btnTopicsRebuild");
+  if (btnRebuild) {
+    btnRebuild.onclick = async () => {
+      btnRebuild.disabled = true;
+      try {
+        const res = await api.post("/monitor/analytics/topics/rebuild", {});
+        const n = Array.isArray(res?.created) ? res.created.length : 0;
+        toast(`已重建 ${n} 个主题簇`, "success");
+        pageQaAnalytics();
+      } catch (e) {
+        toast(e.message || "重建失败", "error");
+        btnRebuild.disabled = false;
+      }
+    };
+  }
+}
+
+/* ========== 系统监控（健康检查 / 系统统计 / Grafana） ========== */
 let monitorHealthTimer = null;
 
 async function pageMonitor() {
@@ -6621,6 +7003,7 @@ async function pageMonitor() {
   } catch (e) {
     stats = { error: e.message };
   }
+
   const statsHtml =
     stats && !stats.error
       ? `<ul class="list-plain monitor-stats-list">
@@ -7099,6 +7482,7 @@ async function pageFastApi() {
   "/admin/qa-sessions",
   "/admin/role-caches",
   "/admin/hit-test",
+  "/admin/qa-analytics",
   "/admin/audit",
   "/admin/guard",
   "/admin/monitor",
