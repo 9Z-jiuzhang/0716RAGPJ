@@ -30,6 +30,12 @@ data/*
 data/logs/*
 !data/logs/.gitkeep
 
+# 本地灌数产物与说明（制造业测试等）— 禁止入库
+data/local_seed/
+
+# 仅本地制造业公司灌数脚本（写入 Postgres，勿 push）
+scripts/seed_mfg_company_local.py
+
 # 操作系统
 .DS_Store
 Thumbs.db

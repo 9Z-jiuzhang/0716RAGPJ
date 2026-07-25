@@ -8,7 +8,7 @@
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=gap-opt-0721i";
-import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=bug-ui-palette-0721ek";
+import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=ask-auth-refresh-0725a";
 import {
   isLoggedIn,
   getUser,
@@ -39,6 +39,8 @@ initMotion();
 let currentSessionId = null;
 /** 流式请求控制器 */
 let askAbort = null;
+/** 是否正在流式回答 */
+let isAskStreaming = false;
 /** 待从历史打开的会话 ID（跳转问答页后由 pageChat 加载） */
 let pendingOpenSessionId = null;
 /** 会话消息分页（上拉加载更早历史） */
@@ -72,6 +74,7 @@ function resetLocalChatContext() {
     }
     askAbort = null;
   }
+  isAskStreaming = false;
 }
 
 /**
@@ -193,12 +196,13 @@ function redirectAfterLogin(landingHref) {
 
 /** 按角色生成顶栏导航项（访客仅问答） */
 function buildNavItems(path, role) {
+  const logged = isLoggedIn();
   const items = [];
   items.push({ path: "/chat", label: "智能问答", show: true });
-  // 员工与管理员可上传
+  items.push({ path: "/history", label: "历史会话", show: logged });
+  items.push({ path: "/favorites", label: "收藏", show: logged });
   items.push({ path: "/upload", label: "文档上传", show: canUpload() });
-  // 已登录才有个人中心（访客不可见）；历史会话在问答页侧栏
-  items.push({ path: "/profile", label: "个人中心", show: role !== "guest" });
+  items.push({ path: "/profile", label: "个人中心", show: logged && role !== "guest" });
   return items
     .filter((i) => i.show)
     .map(
@@ -216,7 +220,7 @@ function renderShell(activeTitle, { wide = false } = {}) {
   const path = currentPath();
   const roleText = logged
     ? `${escapeHtml(user?.nickname || user?.username || "")} · ${getRoleLabel(role)}`
-    : "访客 · 仅公开知识库问答";
+    : "访客 · 仅可检索访客部门知识库";
 
   document.getElementById("app").innerHTML = `
     <div class="ambient-orbs" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -284,7 +288,13 @@ function dispatchRender() {
   if (path === "/history") return pageHistory();
   if (path === "/profile") return pageProfile();
   if (path === "/upload") return pageUpload();
-  return pageChat();
+  renderShell("页面不存在");
+  document.getElementById("pageRoot").innerHTML = `
+    <div class="card empty-state">
+      <p>未找到页面「${escapeHtml(path)}」。</p>
+      <button type="button" class="btn btn-sm" id="btnGoChat404">返回智能问答</button>
+    </div>`;
+  document.getElementById("btnGoChat404")?.addEventListener("click", () => navigate("/chat"));
 }
 
 /* ========================= 问答首页 / ========================= */
@@ -298,14 +308,15 @@ function pageChat() {
     }
     askAbort = null;
   }
+  isAskStreaming = false;
 
   renderShell("智能问答", { wide: true });
   const role = getPrimaryRole();
   const tip =
-    role === "guest"
-      ? "当前为<strong>访客</strong>：仅检索公开知识库，不能上传；登录后按角色开放更多能力。"
+    role === "guest" || !isLoggedIn()
+      ? "当前为<strong>访客</strong>：仅检索访客部门知识库，不能上传；登录后按角色开放更多能力。点赞/收藏需登录后计入账号与监测。"
       : role === "staff"
-        ? `当前为<strong>${getRoleLabel()}</strong>：可问答并上传至本部门授权知识库（手册 §3.4 隔离）。`
+        ? `当前为<strong>${getRoleLabel()}</strong>：可问答并上传至本部门授权知识库。`
         : role === "admin"
           ? `当前为<strong>${getRoleLabel()}</strong>：可使用问答；完整管理请进入管理端。`
           : "当前为<strong>注册用户</strong>：可问答与查看本人历史；上传需员工权限。";
@@ -321,13 +332,13 @@ function pageChat() {
             <button type="button" class="qa-sidebar-toggle" id="btnSidebarToggle" title="${sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}" aria-label="${sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}" aria-expanded="${sidebarCollapsed ? "false" : "true"}">‹</button>
           </div>
           <button type="button" class="btn btn-secondary btn-sm qa-sidebar-new" id="btnNewChat">新对话</button>
-          <button type="button" class="qa-sidebar-favs" id="btnOpenFavorites">已收藏的会话</button>
+          <button type="button" class="qa-sidebar-favs" id="btnOpenFavorites" title="收藏保存在本浏览器本地">已收藏的会话（本机）</button>
         </div>
         <div class="qa-sidebar-list" id="qaSidebarList">
           ${
             isLoggedIn()
               ? `<div class="qa-sidebar-empty">加载中…</div>`
-              : `<p class="qa-sidebar-hint">登录后可在此查看并继续历史会话。<a href="#/login">去登录</a></p>`
+              : `<p class="qa-sidebar-hint">登录后可在此查看并继续历史会话（侧栏最多展示最近一批）。<a href="#/login">去登录</a> · <a href="#/history">历史页</a></p>`
           }
         </div>
       </aside>
@@ -339,7 +350,7 @@ function pageChat() {
             <div class="qa-welcome-mark">AI</div>
               <h1>有什么我能帮你检索？</h1>
             <p>${tip}</p>
-            <div class="qa-welcome-note">回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。</div>
+            <div class="qa-welcome-note">回答将展示引用来源；无法命中时不会编造来源。未登录点赞不计监测；收藏仅存本浏览器。</div>
             <div class="qa-suggestions">
               <button type="button" data-question="请介绍当前可访问的知识库内容">了解知识库内容</button>
               <button type="button" data-question="如何上传并管理文档？">如何管理文档</button>
@@ -351,7 +362,11 @@ function pageChat() {
           <div class="qa-composer" id="qaComposer">
             <div class="qa-composer-resize" id="qaComposerResize" title="拖拽调整高度" role="separator" aria-orientation="horizontal"></div>
           <textarea class="form-control" id="questionInput" placeholder="请输入问题，Enter 发送，Shift+Enter 换行"></textarea>
-          <button type="button" class="btn" id="btnSend">发送</button>
+          <div class="qa-composer-actions">
+            <button type="button" class="btn btn-stop-ask" id="btnStop" hidden aria-label="中止回答">中止</button>
+            <button type="button" class="btn" id="btnSend">发送</button>
+          </div>
+          </div>
         </div>
       </div>
       </div>
@@ -360,7 +375,10 @@ function pageChat() {
 
   const input = document.getElementById("questionInput");
   const btn = document.getElementById("btnSend");
+  const btnStop = document.getElementById("btnStop");
   btn.addEventListener("click", () => sendQuestion());
+  btnStop?.addEventListener("click", () => stopAskStream());
+  setAskStreaming(isAskStreaming);
   document.querySelectorAll("[data-question]").forEach((item) => {
     item.addEventListener("click", () => {
       input.value = item.getAttribute("data-question") || "";
@@ -370,6 +388,10 @@ function pageChat() {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (isAskStreaming) {
+        stopAskStream();
+        return;
+      }
       sendQuestion();
     }
   });
@@ -579,8 +601,16 @@ function toggleFavoriteSession(sessionId) {
   const on = ids.includes(id);
   ids = on ? ids.filter((x) => x !== id) : [id, ...ids.filter((x) => x !== id)];
   setFavoritedSessionIds(ids);
-  toast(on ? "已取消收藏" : "已加入收藏", "success");
+  toast(on ? "已取消收藏（本机）" : "已加入本机收藏（换设备/清缓存会丢失）", "success");
   return !on;
+}
+
+/** 删除会话后同步清掉本地置顶 / 收藏 */
+function removeLocalSessionMarks(sessionId) {
+  const id = String(sessionId || "");
+  if (!id) return;
+  setPinnedSessionIds(getPinnedSessionIds().filter((x) => x !== id));
+  setFavoritedSessionIds(getFavoritedSessionIds().filter((x) => x !== id));
 }
 
 const MSG_ACTION_ICONS = {
@@ -589,7 +619,6 @@ const MSG_ACTION_ICONS = {
   down: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 13V4a1 1 0 0 0-1-1H7.8a2 2 0 0 0-1.95 1.55l-1.6 6.4A1.8 1.8 0 0 0 6 14h5.2l-.9 4.1A1.7 1.7 0 0 0 12 20.1L17 13z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M17 13h2.5A1.5 1.5 0 0 1 21 14.5v6A1.5 1.5 0 0 1 19.5 22H17" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>`,
   star: `<svg viewBox="0 0 24 24" aria-hidden="true"><path class="msg-star-path" d="M12 3.2l2.4 5.4 5.9.6-4.4 3.9 1.3 5.7L12 15.9 6.8 18.8l1.3-5.7-4.4-3.9 5.9-.6L12 3.2z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>`,
   regen: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.3" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><path d="M21 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  more: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18" cy="12" r="1.6" fill="currentColor"/></svg>`,
 };
 
 function syncFavoriteActionButtons() {
@@ -610,14 +639,26 @@ function buildMsgActionsHtml() {
     <button type="button" class="msg-action-btn" data-msg-act="down" title="无用" aria-label="无用" aria-pressed="false">${MSG_ACTION_ICONS.down}</button>
     <button type="button" class="msg-action-btn${favOn ? " is-favorited" : ""}" data-msg-act="favorite" title="${favOn ? "取消收藏" : "收藏"}" aria-label="${favOn ? "取消收藏" : "收藏"}" aria-pressed="${favOn ? "true" : "false"}">${MSG_ACTION_ICONS.star}</button>
     <button type="button" class="msg-action-btn" data-msg-act="regen" title="重新生成" aria-label="重新生成">${MSG_ACTION_ICONS.regen}</button>
-    <div class="msg-action-more">
-      <button type="button" class="msg-action-btn" data-msg-act="more" title="更多" aria-label="更多" aria-expanded="false">${MSG_ACTION_ICONS.more}</button>
-      <div class="msg-action-menu" role="menu" hidden>
-        <button type="button" role="menuitem" data-msg-menu="feedback">反馈</button>
-        <button type="button" role="menuitem" data-msg-menu="delete" class="is-danger">删除</button>
-      </div>
-    </div>
   </div>`;
+}
+
+/** 将服务端 rating（useful/useless）同步到拇指按钮态 */
+function applyMsgRatingUi(row, rating) {
+  const bar = row?.querySelector(".msg-actions");
+  if (!bar) return;
+  const up = bar.querySelector('[data-msg-act="up"]');
+  const down = bar.querySelector('[data-msg-act="down"]');
+  up?.classList.remove("is-active");
+  down?.classList.remove("is-active");
+  up?.setAttribute("aria-pressed", "false");
+  down?.setAttribute("aria-pressed", "false");
+  if (rating === "useful" && up) {
+    up.classList.add("is-active");
+    up.setAttribute("aria-pressed", "true");
+  } else if (rating === "useless" && down) {
+    down.classList.add("is-active");
+    down.setAttribute("aria-pressed", "true");
+  }
 }
 
 function getAssistantAnswerText(row) {
@@ -662,37 +703,15 @@ async function copyTextToClipboard(text) {
   }
 }
 
-function closeAllMsgActionMenus(except = null) {
-  document.querySelectorAll(".msg-action-menu").forEach((menu) => {
-    if (except && menu === except) return;
-    menu.hidden = true;
-    menu.classList.remove("is-open");
-    const btn = menu.parentElement?.querySelector('[data-msg-act="more"]');
-    if (btn) btn.setAttribute("aria-expanded", "false");
-  });
-}
-
 function bindMsgActions(row) {
   if (!row || row.dataset.actionsBound === "1") return;
   const bar = row.querySelector(".msg-actions");
   if (!bar) return;
   row.dataset.actionsBound = "1";
 
+  /** 点赞/点踩互斥；再次点击同侧可取消（rating=null） */
   const setRate = (kind) => {
-    const up = bar.querySelector('[data-msg-act="up"]');
-    const down = bar.querySelector('[data-msg-act="down"]');
-    const target = kind === "up" ? up : down;
-    const other = kind === "up" ? down : up;
-    const on = target?.classList.contains("is-active");
-    up?.classList.remove("is-active");
-    down?.classList.remove("is-active");
-    up?.setAttribute("aria-pressed", "false");
-    down?.setAttribute("aria-pressed", "false");
-    if (!on && target) {
-      target.classList.add("is-active");
-      target.setAttribute("aria-pressed", "true");
-    }
-    other?.classList.remove("is-active");
+    applyMsgRatingUi(row, kind === "up" ? "useful" : "useless");
   };
 
   bar.querySelectorAll("[data-msg-act]").forEach((btn) => {
@@ -704,15 +723,21 @@ function bindMsgActions(row) {
         return;
       }
       if (act === "favorite") {
+        if (!isLoggedIn()) {
+          toast("登录后可收藏会话（当前收藏仅存本浏览器）", "info");
+          navigate("/login");
+          return;
+        }
         toggleFavoriteSession(currentSessionId);
         syncFavoriteActionButtons();
         return;
       }
       if (act === "up" || act === "down") {
         const wasActive = btn.classList.contains("is-active");
-        setRate(act);
+        // 取消：清高亮；新选：点亮（可取消 + 宽松未登录，与远端一致）
+        if (wasActive) applyMsgRatingUi(row, null);
+        else setRate(act);
         const messageId = row.dataset.messageId;
-        // 已登录且有 message_id 时同步到后端；再次点击同一按钮为取消（rating=null）
         if (messageId && isLoggedIn()) {
           try {
             await api.post("/qa/feedback", {
@@ -720,16 +745,10 @@ function bindMsgActions(row) {
               rating: wasActive ? null : act === "up" ? "useful" : "useless",
             });
           } catch (err) {
-            // 回滚本地态，避免 UI 与后台不一致
             if (wasActive) {
               setRate(act);
             } else {
-              const up = bar.querySelector('[data-msg-act="up"]');
-              const down = bar.querySelector('[data-msg-act="down"]');
-              up?.classList.remove("is-active");
-              down?.classList.remove("is-active");
-              up?.setAttribute("aria-pressed", "false");
-              down?.setAttribute("aria-pressed", "false");
+              applyMsgRatingUi(row, null);
             }
             toast(err.message || "反馈提交失败", "error");
           }
@@ -739,45 +758,14 @@ function bindMsgActions(row) {
       if (act === "regen") {
         const q = getPrevUserQuestion(row);
         if (!q) return toast("找不到上一问，无法重新生成", "error");
-        const input = document.getElementById("questionInput");
-        if (input) input.value = q;
-        sendQuestion(q);
-        return;
-      }
-      if (act === "more") {
-        const menu = bar.querySelector(".msg-action-menu");
-        if (!menu) return;
-        const open = menu.hidden;
-        closeAllMsgActionMenus(open ? menu : null);
-        menu.hidden = !open;
-        menu.classList.toggle("is-open", open);
-        btn.setAttribute("aria-expanded", open ? "true" : "false");
-      }
-    });
-  });
-
-  bar.querySelectorAll("[data-msg-menu]").forEach((item) => {
-    item.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const act = item.getAttribute("data-msg-menu");
-      closeAllMsgActionMenus();
-      if (act === "feedback") {
-        const note = window.prompt("请输入反馈内容（仅本地记录，暂不上传）", "");
-        if (note == null) return;
-        if (!String(note).trim()) return toast("未填写反馈", "error");
-        toast("感谢反馈", "success");
-        return;
-      }
-      if (act === "delete") {
-        const ok = await confirmDialog({
-          title: "删除回答",
-          message: "将从当前页面移除此条 AI 回答（不影响服务端历史）。确定继续？",
-          confirmText: "删除",
-          danger: true,
-        });
-        if (!ok) return;
+        // 去掉本条回答及其上一问，避免 sendQuestion 再叠一份
+        let prev = row.previousElementSibling;
+        while (prev && !(prev.classList.contains("msg-row") && prev.classList.contains("user"))) {
+          prev = prev.previousElementSibling;
+        }
         row.remove();
-        toast("已移除", "success");
+        prev?.remove();
+        sendQuestion(q);
       }
     });
   });
@@ -793,11 +781,6 @@ function attachAssistantActions(row) {
   }
   row.insertAdjacentHTML("beforeend", buildMsgActionsHtml());
   bindMsgActions(row);
-}
-
-if (!window.__msgActionMenuBound) {
-  window.__msgActionMenuBound = true;
-  document.addEventListener("click", () => closeAllMsgActionMenus());
 }
 
 function applySidebarCollapsed(collapsed) {
@@ -923,8 +906,7 @@ async function deleteSidebarSession(sessionId, title) {
   if (!ok) return;
   try {
     await api.delete(`/qa/sessions/${sessionId}`);
-    const pins = getPinnedSessionIds().filter((id) => id !== String(sessionId));
-    setPinnedSessionIds(pins);
+    removeLocalSessionMarks(sessionId);
     if (String(currentSessionId) === String(sessionId)) {
       startNewChat();
     }
@@ -940,10 +922,10 @@ function togglePinSidebarSession(sessionId) {
   let pins = getPinnedSessionIds();
   if (pins.includes(id)) {
     pins = pins.filter((x) => x !== id);
-    toast("已取消置顶", "success");
+    toast("已取消置顶（仅本浏览器）", "success");
   } else {
     pins = [id, ...pins.filter((x) => x !== id)];
-    toast("已置顶", "success");
+    toast("已置顶（仅本浏览器，换设备不同步）", "success");
   }
   setPinnedSessionIds(pins);
   loadChatSidebar();
@@ -991,7 +973,7 @@ function renderChatSidebarItems(items) {
           <span class="qa-sidebar-more-dots" aria-hidden="true">⋯</span>
         </button>
         <div class="qa-sidebar-menu" role="menu">
-          <button type="button" role="menuitem" data-act="pin" data-id="${id}">${isPinned ? "取消置顶" : "置顶"}</button>
+          <button type="button" role="menuitem" data-act="pin" data-id="${id}">${isPinned ? "取消置顶（本机）" : "置顶（本机）"}</button>
           <button type="button" role="menuitem" data-act="rename" data-id="${id}" data-title="${title}">重命名</button>
           <button type="button" role="menuitem" data-act="delete" data-id="${id}" data-title="${title}" class="is-danger">删除</button>
         </div>
@@ -1041,6 +1023,8 @@ async function loadChatSidebar() {
   try {
     const data = await api.get("/qa/sessions?page=1&page_size=50");
     const items = data.items || data || [];
+    // 仅清理「已不在当前页且也不在置顶集合对应会话」不安全：列表分页会误删。
+    // 置顶 / 收藏失效统一在「删除会话」与收藏页校验时处理。
     renderChatSidebarItems(items);
     highlightSidebarSession(currentSessionId);
   } catch (e) {
@@ -1058,6 +1042,7 @@ async function openChatSession(sessionId) {
     }
     askAbort = null;
   }
+  setAskStreaming(false);
   currentSessionId = sessionId;
   highlightSidebarSession(sessionId);
   await loadSessionMessages(sessionId);
@@ -1074,6 +1059,7 @@ function startNewChat() {
     }
     askAbort = null;
   }
+  setAskStreaming(false);
   currentSessionId = null;
   resetSessionHistory(null);
   highlightSidebarSession(null);
@@ -1275,7 +1261,15 @@ function buildMessageRowFromApi(m) {
       ? renderAssistantBubbleHtml(m.content || "", buildCitationsHtml(m.citations))
       : escapeHtml(m.content || "");
   const row = buildMessageRow(role, html);
-  if (role === "assistant") attachAssistantActions(row);
+  if (role === "assistant") {
+    if (m.id) row.dataset.messageId = String(m.id);
+    attachAssistantActions(row);
+    const rating = m.retrieval_meta?.feedback?.rating;
+    if (rating === "useful" || rating === "useless") {
+      row.dataset.rating = rating;
+      applyMsgRatingUi(row, rating);
+    }
+  }
   return row;
 }
 
@@ -1439,8 +1433,60 @@ function clearThinkingState(bubble) {
   bubble?.classList.remove("is-thinking");
 }
 
+/** 发送 / 中止按钮切换 */
+function setAskStreaming(on) {
+  isAskStreaming = !!on;
+  const send = document.getElementById("btnSend");
+  const stop = document.getElementById("btnStop");
+  const input = document.getElementById("questionInput");
+  if (send) {
+    send.hidden = false;
+    send.disabled = isAskStreaming;
+  }
+  if (stop) {
+    stop.hidden = !isAskStreaming;
+    stop.disabled = !isAskStreaming;
+  }
+  if (input) {
+    input.placeholder = isAskStreaming
+      ? "正在回答…可点「中止」或按 Enter 停止"
+      : "请输入问题，Enter 发送，Shift+Enter 换行";
+  }
+}
+
+/** 中止当前流式回答 */
+function stopAskStream() {
+  if (!askAbort || !isAskStreaming) return;
+  try {
+    askAbort.abort();
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 中止后收尾气泡：保留已生成内容，并标注已中止 */
+function finalizeAbortedAsk(bubble, partialText) {
+  if (!bubble || !bubble.isConnected) return;
+  clearThinkingState(bubble);
+  bubble.classList.remove("streaming-cursor");
+  const text = String(partialText || "").trim();
+  if (!text) {
+    setAssistantStreamHtml(bubble, `<span class="text-muted">已中止，未生成内容</span>`);
+  } else {
+    setAssistantStreamHtml(
+      bubble,
+      `${renderAssistantBubbleHtml(text)}<div class="msg-aborted-tip">已中止</div>`
+    );
+  }
+  attachAssistantActions(bubble.closest(".msg-row"));
+}
+
 /** 发送问题并 SSE 流式展示（手册交互流程） */
 async function sendQuestion(presetQuestion) {
+  if (isAskStreaming) {
+    toast("请先中止当前回答", "info");
+    return;
+  }
   const input = document.getElementById("questionInput");
   const question = String(presetQuestion ?? input?.value ?? "").trim();
   // 空问题拦截
@@ -1457,9 +1503,8 @@ async function sendQuestion(presetQuestion) {
   const bubble = appendMessage("assistant", "");
   initAssistantBubbleShell(bubble);
   showThinkingPlaceholder(bubble);
-  // 取消上一次未完成请求
-  if (askAbort) askAbort.abort();
   askAbort = new AbortController();
+  setAskStreaming(true);
 
   let citationsHtml = "";
   let confidenceTip = "";
@@ -1569,21 +1614,38 @@ async function sendQuestion(presetQuestion) {
   try {
     await runAsk(currentSessionId);
   } catch (err) {
-    if (err.name === "AbortError") return;
+    if (err.name === "AbortError") {
+      if (bubble.isConnected) {
+        finalizeAbortedAsk(bubble, rawAssistantText);
+        toast("已中止回答", "info");
+      }
+      return;
+    }
     if (err.code === "SESSION_FORBIDDEN" || (typeof err.message === "string" && err.message.includes("无权访问"))) {
       currentSessionId = null;
       try {
         await runAsk(null);
         return;
       } catch (retryErr) {
-        if (retryErr.name === "AbortError") return;
+        if (retryErr.name === "AbortError") {
+          if (bubble.isConnected) {
+            finalizeAbortedAsk(bubble, rawAssistantText);
+            toast("已中止回答", "info");
+          }
+          return;
+        }
         clearThinkingState(bubble);
         setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(retryErr.message || "问答失败")}</span>`);
         return;
       }
     }
     clearThinkingState(bubble);
-    setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(err.message || "问答失败")}</span>`);
+    const failMsg =
+      err.message === "UNAUTHORIZED" ? "登录已失效，请重新登录后再试" : err.message || "问答失败";
+    setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(failMsg)}</span>`);
+  } finally {
+    askAbort = null;
+    setAskStreaming(false);
   }
 }
 
@@ -1834,25 +1896,41 @@ async function pageFavorites() {
     document.getElementById("pageRoot").innerHTML = `<div class="card empty-state">登录后可查看已收藏会话。<a href="#/login">去登录</a></div>`;
     return;
   }
-  const favIds = getFavoritedSessionIds();
+  let favIds = getFavoritedSessionIds();
   document.getElementById("pageRoot").innerHTML = `<div class="card"><div class="loading">加载中…</div></div>`;
   try {
-    const data = await api.get("/qa/sessions?page=1&page_size=100");
-    const all = data.items || data || [];
-    const byId = new Map(all.map((s) => [String(s.id), s]));
-    const items = favIds.map((id) => byId.get(String(id)) || { id, title: "（会话不可用或已删除）", missing: true });
+    // 拉取多页会话，尽量准确识别已删除收藏
+    const byId = new Map();
+    let page = 1;
+    const pageSize = 100;
+    let total = Infinity;
+    while ((page - 1) * pageSize < total && page <= 20) {
+      const data = await api.get(`/qa/sessions?page=${page}&page_size=${pageSize}`);
+      const batch = data.items || data || [];
+      total = Number(data.total ?? batch.length);
+      batch.forEach((s) => byId.set(String(s.id), s));
+      if (!batch.length) break;
+      page += 1;
+    }
+    const aliveIds = favIds.filter((id) => byId.has(String(id)));
+    const pruned = favIds.length - aliveIds.length;
+    if (pruned > 0) {
+      setFavoritedSessionIds(aliveIds);
+      favIds = aliveIds;
+    }
+    const items = favIds.map((id) => byId.get(String(id))).filter(Boolean);
     if (!favIds.length) {
       document.getElementById("pageRoot").innerHTML = `
-        <header class="page-head"><div class="page-head-text"><p class="page-desc">收藏的会话会出现在这里。</p></div>
+        <header class="page-head"><div class="page-head-text"><p class="page-desc">收藏保存在本浏览器本地，换设备或清缓存会丢失。</p></div>
           <div class="page-head-actions"><button type="button" class="btn btn-secondary btn-sm" data-go-chat>返回问答</button></div>
         </header>
-        <div class="card empty-state">暂无收藏会话。可在 AI 回答的「⋯ → 收藏」加入。</div>`;
+        <div class="card empty-state">${pruned > 0 ? `已清理 ${pruned} 条失效收藏。` : "暂无收藏会话。可在 AI 回答旁点星标加入。"}</div>`;
       document.querySelector("[data-go-chat]")?.addEventListener("click", () => navigate("/chat"));
       return;
     }
     document.getElementById("pageRoot").innerHTML = `
       <header class="page-head">
-        <div class="page-head-text"><p class="page-desc">共 ${favIds.length} 个已收藏会话</p></div>
+        <div class="page-head-text"><p class="page-desc">共 ${favIds.length} 个本机收藏会话${pruned > 0 ? ` · 已清理 ${pruned} 条失效` : ""} · 收藏仅存本浏览器</p></div>
         <div class="page-head-actions"><button type="button" class="btn btn-secondary btn-sm" id="btnFavBackChat">返回问答</button></div>
       </header>
       <div class="card panel-fill">
@@ -1863,10 +1941,10 @@ async function pageFavorites() {
               (s) => `<div class="history-item" data-id="${escapeHtml(s.id)}">
                 <div class="history-item-main">
                   <strong>${escapeHtml(s.title || "未命名会话")}</strong>
-                  <div class="text-muted">${s.missing ? "本地收藏记录" : `${formatDateTime(s.updated_at)} · ${escapeHtml(s.message_count || 0)} 条消息`}</div>
+                  <div class="text-muted">${formatDateTime(s.updated_at)} · ${escapeHtml(s.message_count || 0)} 条消息</div>
                 </div>
                 <div class="history-item-actions" style="display:flex;gap:6px;flex-wrap:wrap">
-                  ${s.missing ? "" : `<button class="btn btn-secondary btn-sm" data-open-fav="${escapeHtml(s.id)}">打开</button>`}
+                  <button class="btn btn-secondary btn-sm" data-open-fav="${escapeHtml(s.id)}">打开</button>
                   <button class="btn btn-danger btn-sm" data-unfav="${escapeHtml(s.id)}">取消收藏</button>
                 </div>
               </div>`
@@ -1905,6 +1983,7 @@ async function pageHistory() {
   try {
     const data = await api.get("/qa/sessions?page=1&page_size=50");
     const items = data.items || data || [];
+    const apiTotal = data.total != null ? Number(data.total) : items.length;
     if (!items.length) {
       document.getElementById("pageRoot").innerHTML = `
         <header class="page-head"><div class="page-head-text"><p class="page-desc">查看并继续你的问答会话。</p></div></header>
@@ -1913,7 +1992,7 @@ async function pageHistory() {
     }
     document.getElementById("pageRoot").innerHTML = `
       <header class="page-head">
-        <div class="page-head-text"><p class="page-desc">共 ${items.length} 个会话</p></div>
+        <div class="page-head-text"><p class="page-desc">本页展示 ${items.length} 个会话${apiTotal > items.length ? `（接口共 ${apiTotal}，仅加载最近 50）` : ""}</p></div>
       </header>
       <div class="card panel-fill">
         <div class="card-header">
@@ -1969,6 +2048,7 @@ async function pageHistory() {
         if (!ok) return;
         try {
           await api.delete(`/qa/sessions/${sid}`);
+          removeLocalSessionMarks(sid);
           if (currentSessionId && String(currentSessionId) === String(sid)) {
             currentSessionId = null;
             resetLocalChatContext?.();
@@ -2083,7 +2163,7 @@ async function pageUpload() {
     return;
   }
   if (!canUpload()) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card empty-state">当前为「${getRoleLabel()}」，无文档上传权限。请使用 <code>staff_a</code> / <code>staff_b</code> 或联系管理员授权。</div>`;
+    document.getElementById("pageRoot").innerHTML = `<div class="card empty-state">当前为「${getRoleLabel()}」，无文档上传权限。请使用具备上传权限的员工账号，或联系管理员授权。</div>`;
     return;
   }
 

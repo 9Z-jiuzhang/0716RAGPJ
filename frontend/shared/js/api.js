@@ -218,8 +218,9 @@ async function tryRefresh() {
 /**
  * SSE 流式问答 POST /qa/ask
  * onEvent(eventName, data)
+ * 与 apiRequest 一致：401 时尝试 refresh 后自动重试一次
  */
-export async function askStream(body, { onEvent, signal } = {}) {
+export async function askStream(body, { onEvent, signal, _retried = false } = {}) {
   const headers = {
     "Content-Type": "application/json",
     Accept: "text/event-stream",
@@ -237,8 +238,24 @@ export async function askStream(body, { onEvent, signal } = {}) {
       body: JSON.stringify(body),
       signal,
     });
-  } catch {
+  } catch (e) {
+    if (e?.name === "AbortError" || signal?.aborted) {
+      throw e;
+    }
     throw new Error("无法连接后端问答接口");
+  }
+
+  if (res.status === 401 && !_retried) {
+    // 有登录态才续票；访客无 token 的 401 不走 refresh
+    if (getRefreshToken() || getAccessToken()) {
+      const ok = await tryRefresh();
+      if (ok) {
+        return askStream(body, { onEvent, signal, _retried: true });
+      }
+      clearAuth();
+      toast("登录已失效，请重新登录", "error");
+      throw new Error("UNAUTHORIZED");
+    }
   }
 
   if (!res.ok) {

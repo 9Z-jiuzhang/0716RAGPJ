@@ -554,6 +554,162 @@ html[data-theme="dark"] .usage-notice {
   font-weight: 400;
 }
 
+/* ---------- 部门列表表：按内容分配列宽；操作列保持全局 12.5rem 不动 ----------
+ * 问题：全局 col-name=8rem、col-code=7rem 挤占空间；介绍被 cell-clamp 截断。
+ * 策略：介绍列最大并可自动换行；名称/编码中等；成员/知识库/状态收紧；操作列不改。
+ */
+.table-depts {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+.table-depts col.depts-col-name {
+  width: 14%;
+}
+.table-depts col.depts-col-code {
+  width: 8%;
+}
+.table-depts col.depts-col-desc {
+  width: 40%;
+}
+.table-depts col.depts-col-num {
+  width: 7%;
+}
+.table-depts col.depts-col-status {
+  width: 8%;
+}
+.table-depts col.depts-col-actions {
+  width: 12.5rem;
+}
+
+.table-depts th,
+.table-depts td {
+  overflow: hidden;
+  vertical-align: middle;
+  max-width: 0;
+  text-align: center;
+}
+
+.table-depts th.col-name,
+.table-depts td.col-name,
+.table-depts th.col-code,
+.table-depts td.col-code,
+.table-depts th.col-desc,
+.table-depts td.col-desc {
+  width: auto;
+  max-width: none;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.table-depts th.col-desc,
+.table-depts td.col-desc {
+  line-height: 1.45;
+}
+
+.table-depts th.col-num,
+.table-depts td.col-num,
+.table-depts th.col-status,
+.table-depts td.col-status {
+  width: auto;
+  max-width: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.table-depts th.col-actions,
+.table-depts td.col-actions {
+  max-width: none;
+  overflow: visible;
+}
+
+.table-users .th-sortable {
+  padding: 0;
+  vertical-align: middle;
+}
+
+.table-users .th-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 8px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.table-users .th-sort-btn:hover {
+  color: var(--color-primary, #3b82f6);
+}
+
+.table-users .th-sort-arrow {
+  font-size: 0.72em;
+  line-height: 1;
+  opacity: 0.42;
+  transform: translateY(0.5px);
+}
+
+.table-users .th-sortable.is-sorted .th-sort-btn {
+  color: var(--color-primary, #3b82f6);
+}
+
+.table-users .th-sortable.is-sorted .th-sort-arrow {
+  opacity: 1;
+}
+
+.table-users .th-dept-filter {
+  padding: 6px 8px;
+  vertical-align: middle;
+  min-width: 7.5rem;
+}
+
+.table-users .th-filter {
+  display: block;
+  margin: 0;
+}
+
+.table-users .th-filter-select {
+  width: 100%;
+  max-width: 11rem;
+  min-height: 32px;
+  padding: 4px 28px 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border, #c5d0db) 80%, transparent);
+  border-radius: var(--radius, 8px);
+  background-color: color-mix(in srgb, var(--color-surface, #fff) 88%, transparent);
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 14px) calc(50% - 2px), calc(100% - 9px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-size-sm, 0.875rem);
+  font-weight: 600;
+  appearance: none;
+  cursor: pointer;
+}
+
+.table-users .th-filter-select:hover,
+.table-users .th-filter-select:focus {
+  border-color: var(--color-primary, #3b82f6);
+  color: var(--color-primary, #3b82f6);
+  outline: none;
+}
+
 .table .col-status .badge {
   min-width: 52px;
 }
@@ -1114,7 +1270,8 @@ html[data-theme="light"] .dash-welcome p {
 }
 
 .page-grid.monitor-page-grid > .monitor-equal-card .health-check-list,
-.page-grid.monitor-page-grid > .monitor-equal-card .monitor-stats-body {
+.page-grid.monitor-page-grid > .monitor-equal-card .monitor-stats-body,
+.page-grid.monitor-page-grid > .monitor-equal-card .dash-chart-body {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -1187,9 +1344,47 @@ html[data-theme="light"] .dash-welcome p {
   background: var(--color-danger, #ea5455);
 }
 
+.dash-fb-trend {
+  display: grid;
+  gap: 20px;
+}
+
+.dash-fb-trend-block {
+  min-width: 0;
+}
+
+.dash-fb-trend-label {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 8px;
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #6e6b7b);
+}
+
+@media (min-width: 900px) {
+  .dash-fb-trend {
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+}
+
 .monitor-chart-body {
   min-height: 160px;
   padding: 8px 4px 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* 柱状图贴底并占满卡片剩余高度，避免等高卡片底部大块留白 */
+.dash-chart-body > .bar-chart,
+.monitor-chart-body > .bar-chart {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 140px;
+  box-sizing: border-box;
 }
 
 .monitor-stats-list .monitor-stat-value {
@@ -1256,6 +1451,7 @@ html[data-theme="light"] .dash-welcome p {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
 }
 
 .dash-chart-card .chart-range {
@@ -1956,7 +2152,7 @@ html[data-theme="dark"] .kb-card-cover > span:not(.badge) {
   z-index: 2;
 }
 
-/* 共享蓝描边胶囊：列表「文档详情」与详情页「编辑知识库」 */
+/* 共享蓝描边胶囊：列表「知识库详情」与详情页「编辑知识库」 */
 .btn.kb-card-btn {
   flex: 0 0 auto;
   width: auto;
@@ -3859,4 +4055,12 @@ html[data-theme="dark"] .audit-export-page-input::placeholder {
 
 html[data-theme="dark"] .audit-export-page-input:focus {
   background: color-mix(in srgb, #c5cad3 22%, transparent);
+}
+
+/* Guard / 深链定位用户行 */
+.table-users tr.is-focus-row,
+.table tr.is-focus-row {
+  outline: 2px solid var(--color-primary, #3b82f6);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--color-primary, #3b82f6) 10%, transparent);
 }

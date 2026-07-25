@@ -150,13 +150,41 @@ function bindSpotlight() {
 }
 
 /**
- * CountUp：将 [data-count-up] 从 0 滚到目标值
+ * 统计数字展示：
+ * - < 1 万：千分位（整数不强制小数；有小数则保留 2 位）
+ * - ≥ 1 万：缩写为「x.xx万」
+ */
+export function formatStatNumber(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return String(n ?? "0");
+  const sign = v < 0 ? "-" : "";
+  const abs = Math.abs(v);
+  if (abs >= 10000) {
+    return `${sign}${(abs / 10000).toFixed(2)}万`;
+  }
+  const isInt = Math.abs(abs - Math.round(abs)) < 1e-9;
+  if (isInt) {
+    return sign + Math.round(abs).toLocaleString("zh-CN");
+  }
+  return (
+    sign +
+    abs.toLocaleString("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
+}
+
+/**
+ * CountUp：将 [data-count-up] 从 0 滚到目标值（滚动过程与终值均按 formatStatNumber 展示）
  * @param {ParentNode} [root=document]
  */
 export function runCountUps(root = document) {
   if (prefersReduced) {
     root.querySelectorAll("[data-count-up]").forEach((el) => {
-      el.textContent = el.getAttribute("data-count-up") || "0";
+      const raw = el.getAttribute("data-count-up") || "0";
+      const num = Number(raw);
+      el.textContent = Number.isFinite(num) ? formatStatNumber(num) : raw;
     });
     return;
   }
@@ -174,7 +202,9 @@ export function runCountUps(root = document) {
     const step = (now) => {
       const t = Math.min(1, (now - start) / duration);
       const eased = 1 - (1 - t) ** 3;
-      el.textContent = String(Math.round(from + (target - from) * eased));
+      const current = from + (target - from) * eased;
+      const show = t < 1 && Number.isInteger(target) ? Math.round(current) : t < 1 ? current : target;
+      el.textContent = formatStatNumber(show);
       if (t < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);

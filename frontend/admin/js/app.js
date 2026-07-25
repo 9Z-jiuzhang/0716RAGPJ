@@ -6,10 +6,10 @@
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=gap-opt-0721s";
-import { api, clearDemoFlags } from "/assets/js/api.js?v=bug-ui-palette-0721ek";
+import { api, clearDemoFlags } from "/assets/js/api.js?v=ask-auth-refresh-0725a";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js?v=gap-opt-0721s";
 import { escapeHtml, formatDateTime, formatDateTimeHtml, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=bug-ui-palette-0721ea";
-import { initMotion, runCountUps } from "/assets/js/motion.js?v=bug-ui-palette-0721ea";
+import { initMotion, runCountUps } from "/assets/js/motion.js?v=stat-num-0725a";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721s";
 
 clearDemoFlags();
@@ -138,6 +138,44 @@ function bindCompactPager(pager, { page, totalPages, onGo }) {
   });
 }
 
+/**
+ * 按页循环拉取列表接口全部 items（前端全量，再本地分页）。
+ * path 如 "/roles"；自动追加 page / page_size。
+ * @param {{ pageSize?: number, maxPages?: number, maxItems?: number }} [opts]
+ */
+async function fetchAllPagedItems(path, { pageSize = 100, maxPages = 50, maxItems = Infinity } = {}) {
+  const base = String(path || "").split("?")[0];
+  const limit = Number.isFinite(maxItems) ? Math.max(0, Math.trunc(maxItems)) : Infinity;
+  let page = 1;
+  let total = Infinity;
+  const collected = [];
+  while (collected.length < total && collected.length < limit) {
+    const data = await api.get(`${base}?page=${page}&page_size=${pageSize}`);
+    const items = Array.isArray(data) ? data : data?.items || [];
+    total = Array.isArray(data) ? items.length : Number(data?.total ?? collected.length + items.length);
+    const room = Number.isFinite(limit) ? limit - collected.length : items.length;
+    collected.push(...items.slice(0, Math.max(0, room)));
+    if (!items.length || items.length < pageSize) break;
+    if (collected.length >= limit) break;
+    page += 1;
+    if (page > maxPages) break;
+  }
+  return collected;
+}
+
+/** 统一横向紧凑翻页条（与用户/文档列表一致） */
+function compactPagerHtml(id, listPage, totalPages, { total = 0, pageSize = 0 } = {}) {
+  if (pageSize > 0 && total <= pageSize) return "";
+  if (totalPages <= 1) return "";
+  const { buttons, jump } = renderCompactPagerParts(listPage, totalPages);
+  return `<div class="pager pager-center" id="${escapeHtml(id)}">
+    <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
+    ${buttons}
+    <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+    ${jump}
+  </div>`;
+}
+
 /** LLM Guard 意图码 → 中文展示 */
 const GUARD_INTENT_LABELS = {
   knowledge_query: "知识查询",
@@ -153,10 +191,28 @@ const GUARD_INTENT_LABELS = {
   unknown: "未知",
 };
 
+const GUARD_REASON_LABELS = {
+  prompt_injection: "疑似提示注入",
+  jailbreak: "越狱尝试",
+  secret_exfiltration: "疑似窃取密钥",
+  authorization_bypass: "疑似越权",
+  destructive_operation: "疑似破坏性操作",
+  command_execution: "疑似命令执行",
+  policy_block: "策略拦截",
+  rate_limit: "触发限流",
+  unknown: "未知原因",
+};
+
 function guardIntentLabel(intent) {
   const key = String(intent || "").trim().toLowerCase();
   if (!key) return "-";
   return GUARD_INTENT_LABELS[key] || key;
+}
+
+function guardReasonLabel(code) {
+  const key = String(code || "").trim().toLowerCase();
+  if (!key) return "-";
+  return GUARD_REASON_LABELS[key] || code;
 }
 
 /** 管理端置顶菜单（无分组标题） */
@@ -455,8 +511,28 @@ async function dispatchRender() {
   const path = currentPath();
   // 知识库工作区（旧 /documents、/snapshots 归一化到 ?tab=）
   let m;
-  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)\/documents$/))) return navigate(kbWorkspacePath(m[1], "docs"));
-  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)\/snapshots$/))) return navigate(kbWorkspacePath(m[1], "snaps"));
+  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)\/documents$/))) {
+    try {
+      if (!sessionStorage.getItem("kb_legacy_docs_tip")) {
+        sessionStorage.setItem("kb_legacy_docs_tip", "1");
+        setTimeout(() => toast("文档管理已并入知识库工作区「文档上传」页签", "info"), 0);
+      }
+    } catch {
+      /* ignore */
+    }
+    return navigate(kbWorkspacePath(m[1], "docs"));
+  }
+  if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)\/snapshots$/))) {
+    try {
+      if (!sessionStorage.getItem("kb_legacy_snaps_tip")) {
+        sessionStorage.setItem("kb_legacy_snaps_tip", "1");
+        setTimeout(() => toast("快照管理已并入知识库工作区「历史快照」页签", "info"), 0);
+      }
+    } catch {
+      /* ignore */
+    }
+    return navigate(kbWorkspacePath(m[1], "snaps"));
+  }
   if ((m = path.match(/^\/admin\/knowledge-bases\/([^/]+)$/))) return pageKbWorkspace(m[1]);
   if (path === "/admin/users") return pageUsers();
   if (path === "/admin/roles") return pageRoles();
@@ -593,7 +669,10 @@ async function pageDashboard() {
   const welcome = renderDashboardWelcome();
   document.getElementById("pageRoot").innerHTML = `${welcome}<div class="loading">加载统计数据…</div>`;
   try {
-    const s = await api.get("/monitor/stats");
+    const [s, feedback] = await Promise.all([
+      api.get("/monitor/stats"),
+      api.get("/monitor/analytics/feedback?days=14").catch(() => null),
+    ]);
     const qaFull = s.qa_trend_30d?.length ? s.qa_trend_30d : s.qa_trend_7d || [0, 0, 0, 0, 0, 0, 0];
     const hitFull = s.hit_rate_trend_30d?.length ? s.hit_rate_trend_30d : s.hit_rate_trend_7d || [0, 0, 0, 0, 0, 0, 0];
     const errHourly =
@@ -609,6 +688,47 @@ async function pageDashboard() {
               return Array.from({ length: 6 }, (_, i) => base + (i < rem ? 1 : 0));
             });
           })();
+
+    const fbDays = Number(feedback?.days || feedback?.trend_days || feedback?.range?.days || 14);
+    const useful = Number(feedback?.useful || 0);
+    const useless = Number(feedback?.useless || 0);
+    const fbTotal = useful + useless;
+    const requestEvents = Number(feedback?.request_events || 0);
+    const feedbackRateDisplay =
+      requestEvents > 0
+        ? `${(Number(feedback?.feedback_rate || 0) * 100).toFixed(2)}%`
+        : "—";
+    const fbTrend = Array.isArray(feedback?.trend) ? feedback.trend : [];
+    const fbTrendLabels = fbTrend.map((x) => {
+      const d = String(x.date || "");
+      return d.length >= 10 ? d.slice(5) : d;
+    });
+    const feedbackKpiHtml = feedback
+      ? `<div class="stat-grid dash-stat-grid dash-feedback-grid">
+          <div class="stat-card"><div class="label">有用（近 ${fbDays} 日）</div><div class="value" data-count-up="${useful}">0</div></div>
+          <div class="stat-card"><div class="label">无用（近 ${fbDays} 日）</div><div class="value" data-count-up="${useless}">0</div></div>
+          <div class="stat-card"><div class="label">反馈率</div><div class="value">${escapeHtml(feedbackRateDisplay)}</div></div>
+          <div class="stat-card"><div class="label">已反馈条数</div><div class="value" data-count-up="${fbTotal}">0</div></div>
+        </div>`
+      : `<p class="text-muted">暂无点赞/点踩统计（需登录用户提交反馈）</p>`;
+    const feedbackTrendHtml = fbTrend.length
+      ? `<div class="dash-fb-trend">
+          <div class="dash-fb-trend-block">
+            <div class="dash-fb-trend-label"><span class="legend-dot legend-useful"></span>有用</div>
+            ${renderBars(
+              fbTrend.map((x) => x.useful || 0),
+              { labels: fbTrendLabels }
+            )}
+          </div>
+          <div class="dash-fb-trend-block">
+            <div class="dash-fb-trend-label"><span class="legend-dot legend-useless"></span>无用</div>
+            ${renderBars(
+              fbTrend.map((x) => x.useless || 0),
+              { labels: fbTrendLabels }
+            )}
+          </div>
+        </div>`
+      : `<p class="text-muted">暂无近 ${fbDays} 日反馈趋势</p>`;
 
     const dayOpts = [
       [3, "近 3 天"],
@@ -637,7 +757,7 @@ async function pageDashboard() {
       const values = sliceDailyTrend(hitFull, hitDays);
       const title = document.getElementById("dashHitTitle");
       const body = document.getElementById("dashHitChart");
-      if (title) title.textContent = `近 ${hitDays} 天命中率`;
+      if (title) title.textContent = `近 ${hitDays} 天评测命中率`;
       if (body) body.innerHTML = renderBars(values, { percent: true, labels: weekLabels(values.length) });
     };
     const paintErr = () => {
@@ -650,14 +770,22 @@ async function pageDashboard() {
 
     document.getElementById("pageRoot").innerHTML = `
       ${welcome}
+      ${renderDashboardShortcuts()}
       <section class="dash-section">
-        <div class="dash-section-head"><h2>核心指标</h2><span class="text-muted">实时汇总</span></div>
+        <div class="dash-section-head"><h2>核心指标</h2><span class="text-muted">刷新时统计</span></div>
         <div class="stat-grid dash-stat-grid">
           <div class="stat-card"><div class="label">知识库</div><div class="value" data-count-up="${s.kb_count ?? 0}">0</div></div>
           <div class="stat-card"><div class="label">文档</div><div class="value" data-count-up="${s.doc_count ?? 0}">0</div></div>
           <div class="stat-card"><div class="label">用户</div><div class="value" data-count-up="${s.user_count ?? 0}">0</div></div>
           <div class="stat-card"><div class="label">活跃会话</div><div class="value" data-count-up="${s.active_sessions ?? 0}">0</div></div>
         </div>
+      </section>
+      <section class="dash-section">
+        <div class="dash-section-head">
+          <h2>问答反馈</h2>
+          <span class="text-muted">近 ${fbDays} 日点赞 / 点踩 · <a href="#/admin/qa-analytics" data-go="/admin/qa-analytics">查看详情</a></span>
+        </div>
+        ${feedbackKpiHtml}
       </section>
       <section class="dash-section page-grid dash-bento">
         <div class="card dash-chart-card span-8">
@@ -682,7 +810,9 @@ async function pageDashboard() {
         </div>
         <div class="card dash-chart-card span-4">
           <div class="card-header">
-            <div class="card-header-text"><h3 class="card-title" id="dashHitTitle">近 7 天命中率</h3></div>
+            <div class="card-header-text"><h3 class="card-title" id="dashHitTitle">近 7 天评测命中率</h3>
+              <p class="card-sub">来自「命中率测试」已完成任务，非线上问答质量</p>
+            </div>
             <div class="card-header-actions">${chartRangeSelect("dashHitRange", dayOpts, hitDays)}</div>
           </div>
           <div id="dashHitChart" class="dash-chart-body"></div>
@@ -694,8 +824,16 @@ async function pageDashboard() {
           </div>
           <div id="dashErrChart" class="dash-chart-body"></div>
         </div>
-      </section>
-      ${renderDashboardShortcuts()}`;
+        <div class="card dash-chart-card span-12">
+          <div class="card-header">
+            <div class="card-header-text">
+              <h3 class="card-title">近 ${fbDays} 日点赞 / 点踩趋势</h3>
+              <p class="card-sub">按日聚合 · 与上方 KPI 同一窗口</p>
+            </div>
+          </div>
+          <div class="dash-chart-body">${feedbackTrendHtml}</div>
+        </div>
+      </section>`;
 
     paintQa();
     paintHit();
@@ -715,7 +853,10 @@ async function pageDashboard() {
     });
 
     document.querySelectorAll("#pageRoot [data-go]").forEach((el) => {
-      el.addEventListener("click", () => navigate(el.getAttribute("data-go")));
+      el.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        navigate(el.getAttribute("data-go"));
+      });
     });
     runCountUps(document.getElementById("pageRoot"));
   } catch (e) {
@@ -804,11 +945,11 @@ async function openCreateUserForm() {
   let roles = [];
   let departments = [];
   try {
-    const [roleData, deptData] = await Promise.all([
-      api.get("/roles?page=1&page_size=100"),
+    const [roleItems, deptData] = await Promise.all([
+      fetchAllPagedItems("/roles"),
       loadDepartmentOptions(),
     ]);
-    roles = (roleData.items || []).filter((r) => {
+    roles = roleItems.filter((r) => {
       if (r.name === "user" || r.name === "kb_admin" || r.name === "super_admin") return false;
       if (isSuperAdmin()) return true;
       return r.name !== "admin";
@@ -903,50 +1044,132 @@ async function pageUsers() {
   if (!requirePerm("user:read", "用户管理")) return;
   const canWrite = hasPermission("user:write");
   const focusUserId = new URLSearchParams(location.hash.split("?")[1] || "").get("user");
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载用户…</div>`;
-  try {
-    const data = await api.get("/users?page=1&page_size=50");
-    const items = data.items || [];
-    document.getElementById("pageRoot").innerHTML = `
-      ${pageHead({
-        title: "用户管理",
-        desc: canWrite ? "可新增用户、启用/禁用、变更角色、删除权限更低的用户。" : "当前为只读，可查看用户列表。",
-        actions: canWrite ? `<button class="btn btn-sm" id="btnNewUser">新增用户</button>` : "",
-      })}
-      <div class="card panel-fill users-panel">
-        <div class="card-header">
-          <div class="card-header-text">
-            <h3 class="card-title">用户列表</h3>
-            <p class="card-sub">共 ${items.length} 人</p>
-          </div>
-        </div>
-        <div class="table-wrap"><table class="table table-users">
-          <thead><tr>
-            <th class="col-time">创建时间</th>
-            <th class="col-name">账号</th>
-            <th>用户名</th>
-            <th class="col-status">状态</th>
-            <th>角色</th>
-            <th>所属部门</th>
-            <th class="col-time">最近登录</th>
-            <th class="col-actions">操作</th>
-          </tr></thead>
-          <tbody>
-            ${items
-              .map((u) => {
-                const isFixedSuper = String(u.username || "") === "super";
-                const st = u.status === "active" ? `<span class="badge badge-success">活跃</span>` : u.status === "disabled" ? `<span class="badge badge-danger">禁用</span>` : `<span class="badge badge-warning">待验证</span>`;
-                const myRank = isSuperAdmin() ? 100 : isAdminUser() ? 50 : 0;
-                const targetRank = isFixedSuper ? 100 : maxRoleRankOfUser(u);
-                const canManage = canWrite && !isFixedSuper && targetRank < myRank;
-                const roleCell = isFixedSuper
-                  ? `<span class="badge badge-gold">超级管理员</span>`
-                  : escapeHtml(roleLabelOf(u));
-                const ops = canWrite
-                  ? isFixedSuper
-                    ? `<span class="cell-muted cell-muted-stack">固定超管<br />（不可操作）</span>`
-                    : canManage
-                      ? `<div class="table-actions table-actions-stack">
+  let focusTipShown = false;
+  const root = document.getElementById("pageRoot");
+  root.innerHTML = `<div class="loading">加载用户…</div>`;
+
+  const PAGE_SIZE = 20;
+  let listPage = 1;
+  let sortKey = "created_at";
+  let sortDir = "desc";
+  let deptFilter = "";
+  /** @type {any[]} */
+  let departments = [];
+  /** @type {any[]} */
+  let allUsers = [];
+
+  /** 深链 ?user=：清筛选、翻到所在页 */
+  const syncFocusUserPage = () => {
+    if (!focusUserId) return;
+    const target = allUsers.find((u) => String(u.id) === String(focusUserId));
+    if (!target) {
+      if (!focusTipShown) {
+        focusTipShown = true;
+        toast("未在用户列表中找到该账号（可能已删除或超出加载上限）", "error");
+      }
+      return;
+    }
+    if (deptFilter) {
+      const code = String(deptFilter).toUpperCase();
+      if (String(target.department || "").toUpperCase() !== code) {
+        deptFilter = "";
+      }
+    }
+    const sorted = filteredSorted();
+    const idx = sorted.findIndex((u) => String(u.id) === String(focusUserId));
+    if (idx >= 0) listPage = Math.floor(idx / PAGE_SIZE) + 1;
+  };
+
+  const pinRankOf = (u) => {
+    const name = String(u?.username || "");
+    if (name === "super") return 0;
+    if (name === "admin") return 1;
+    return 2;
+  };
+
+  const sortValueOf = (u, key) => {
+    if (key === "created_at") return String(u.created_at || "");
+    if (key === "username") return String(u.username || "").toLowerCase();
+    if (key === "nickname") return String(u.nickname || "").toLowerCase();
+    if (key === "status") return String(u.status || "");
+    if (key === "role") {
+      if (String(u.username || "") === "super") return "超级管理员";
+      return String(roleLabelOf(u) || "").toLowerCase();
+    }
+    if (key === "department") return String(departmentLabelOf(u.department, departments) || "").toLowerCase();
+    if (key === "last_login_at") return String(u.last_login_at || "");
+    return "";
+  };
+
+  const filteredSorted = () => {
+    let list = allUsers;
+    if (deptFilter) {
+      const code = String(deptFilter).toUpperCase();
+      list = list.filter((u) => String(u.department || "").toUpperCase() === code);
+    }
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...list].sort((a, b) => {
+      const pa = pinRankOf(a);
+      const pb = pinRankOf(b);
+      if (pa !== pb) return pa - pb;
+      const va = sortValueOf(a, sortKey);
+      const vb = sortValueOf(b, sortKey);
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  };
+
+  const sortTh = (key, label, cls = "") => {
+    const active = sortKey === key;
+    const arrow = active && sortDir === "asc" ? "▲" : "▼";
+    const tip = active ? (sortDir === "asc" ? "升序，点击切换" : "降序，点击切换") : "点击全局排序";
+    return `<th class="${cls} th-sortable${active ? " is-sorted" : ""}">
+        <button type="button" class="th-sort-btn" data-sort="${key}" title="${tip}" aria-label="${escapeHtml(label)}，${tip}">
+          <span>${escapeHtml(label)}</span>
+          <span class="th-sort-arrow" aria-hidden="true">${arrow}</span>
+        </button>
+      </th>`;
+  };
+
+  const deptFilterTh = () => {
+    const opts = (departments || [])
+      .filter((d) => d.is_enabled !== false)
+      .map(
+        (d) =>
+          `<option value="${escapeHtml(d.code)}" ${String(d.code).toUpperCase() === String(deptFilter).toUpperCase() ? "selected" : ""}>${escapeHtml(departmentDisplayName(d))}</option>`
+      )
+      .join("");
+    return `<th class="th-dept-filter">
+        <label class="th-filter">
+          <select class="th-filter-select" id="userDeptFilter" aria-label="按所属部门筛选" title="按所属部门筛选">
+            <option value="" ${!deptFilter ? "selected" : ""}>全部部门</option>
+            ${opts}
+          </select>
+        </label>
+      </th>`;
+  };
+
+  const renderUserRow = (u) => {
+    const isFixedSuper = String(u.username || "") === "super";
+    const st =
+      u.status === "active"
+        ? `<span class="badge badge-success">活跃</span>`
+        : u.status === "disabled"
+          ? `<span class="badge badge-danger">禁用</span>`
+          : `<span class="badge badge-warning">待验证</span>`;
+    const myRank = isSuperAdmin() ? 100 : isAdminUser() ? 50 : 0;
+    const targetRank = isFixedSuper ? 100 : maxRoleRankOfUser(u);
+    const canManage = canWrite && !isFixedSuper && targetRank < myRank;
+    const roleCell = isFixedSuper
+      ? `<span class="badge badge-gold">超级管理员</span>`
+      : escapeHtml(roleLabelOf(u));
+    const deptName = departmentLabelOf(u.department, departments);
+    const ops = canWrite
+      ? isFixedSuper
+        ? `<span class="cell-muted cell-muted-stack">固定超管<br />（不可操作）</span>`
+        : canManage
+          ? `<div class="table-actions table-actions-stack">
                     <div class="table-actions-row">
                       <button type="button" class="btn btn-secondary btn-sm" data-role="${escapeHtml(u.id)}">角色</button>
                     </div>
@@ -955,32 +1178,22 @@ async function pageUsers() {
                       <button type="button" class="btn btn-danger btn-sm" data-del-user="${escapeHtml(u.id)}">删除</button>
                     </div>
                   </div>`
-                      : `<span class="cell-muted">权限不足</span>`
-                  : `<span class="cell-muted">—</span>`;
-                const focused = focusUserId && String(u.id) === String(focusUserId);
-                return `<tr data-id="${escapeHtml(u.id)}" class="${focused ? "row-focus" : ""}" ${focused ? 'style="outline:2px solid var(--color-primary, #5b8def);outline-offset:-2px"' : ""}>
+          : `<span class="cell-muted">权限不足</span>`
+      : `<span class="cell-muted">—</span>`;
+    const focused = focusUserId && String(u.id) === String(focusUserId);
+    return `<tr data-id="${escapeHtml(u.id)}" class="${focused ? "row-focus" : ""}" ${focused ? 'style="outline:2px solid var(--color-primary, #5b8def);outline-offset:-2px"' : ""}>
                   <td class="col-time">${formatDateTimeHtml(u.created_at)}</td>
                   <td class="col-name"><strong class="cell-primary">${escapeHtml(u.username)}</strong></td>
                   <td>${escapeHtml(u.nickname || "-")}</td>
                   <td class="col-status">${st}</td>
                   <td class="cell-role">${roleCell}</td>
-                  <td>${escapeHtml(u.department || "-")}</td>
+                  <td class="cell-dept" title="${escapeHtml(u.department || "")}">${escapeHtml(deptName)}</td>
                   <td class="col-time">${formatDateTimeHtml(u.last_login_at)}</td>
                   <td class="col-actions">${ops}</td>
                 </tr>`;
-              })
-              .join("")}
-          </tbody>
-        </table></div>
-      </div>`;
+  };
 
-    if (focusUserId) {
-      const row = [...document.querySelectorAll("tr[data-id]")].find(
-        (el) => el.getAttribute("data-id") === String(focusUserId)
-      );
-      if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-
+  const wireRowActions = (pageItems) => {
     if (!canWrite) return;
 
     document.querySelectorAll("[data-toggle]").forEach((btn) => {
@@ -998,7 +1211,7 @@ async function pageUsers() {
         try {
           await api.patch(`/users/${id}/status`, { status: next });
           toast("状态已更新", "success");
-          pageUsers();
+          await reloadAndPaint();
         } catch (e) {
           toast(e.message || "操作失败", "error");
         }
@@ -1008,7 +1221,7 @@ async function pageUsers() {
     document.querySelectorAll("[data-role]").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.getAttribute("data-role");
-        const user = items.find((x) => x.id === id);
+        const user = pageItems.find((x) => String(x.id) === String(id)) || allUsers.find((x) => String(x.id) === String(id));
         if (!user) return;
         if (String(user.username || "") === "super") {
           toast("唯一超管账号 super 不可变更角色", "error");
@@ -1024,19 +1237,20 @@ async function pageUsers() {
           return;
         }
         try {
-          const [roleData, departments] = await Promise.all([
-            api.get("/roles?page=1&page_size=100"),
+          const [roleItems, depts] = await Promise.all([
+            fetchAllPagedItems("/roles"),
             loadDepartmentOptions(),
           ]);
+          departments = depts;
           openUserRolePicker({
             user,
-            roles: roleData.items || [],
+            roles: roleItems,
             departments,
             onSave: async ({ role_ids, department }) => {
               await api.put(`/users/${id}/roles`, { role_ids });
               await api.put(`/users/${id}`, { department });
               toast("用户角色与部门已更新", "success");
-              pageUsers();
+              await reloadAndPaint();
             },
           });
         } catch (e) {
@@ -1048,7 +1262,7 @@ async function pageUsers() {
     document.querySelectorAll("[data-del-user]").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.getAttribute("data-del-user");
-        const user = items.find((x) => x.id === id);
+        const user = pageItems.find((x) => String(x.id) === String(id)) || allUsers.find((x) => String(x.id) === String(id));
         if (!user) return;
         if (String(user.username || "") === "super") {
           toast("唯一超管账号 super 不可删除", "error");
@@ -1064,18 +1278,157 @@ async function pageUsers() {
         try {
           await api.delete(`/users/${id}`);
           toast("用户已删除", "success");
-          pageUsers();
+          await reloadAndPaint();
         } catch (e) {
           toast(e.message || "删除失败", "error");
         }
       };
     });
+  };
+
+  const paint = () => {
+    syncFocusUserPage();
+    const sorted = filteredSorted();
+    const total = sorted.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE) || 1);
+    if (listPage > totalPages) listPage = totalPages;
+    const start = (listPage - 1) * PAGE_SIZE;
+    const pageItems = sorted.slice(start, start + PAGE_SIZE);
+    const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
+    const filterHint = deptFilter ? ` · ${departmentLabelOf(deptFilter, departments)}` : "";
+
+    root.innerHTML = `
+      ${pageHead({
+        title: "用户管理",
+        desc: canWrite ? "可新增用户、启用/禁用、变更角色、删除权限更低的用户。" : "当前为只读，可查看用户列表。",
+        actions: canWrite ? `<button class="btn btn-sm" id="btnNewUser">新增用户</button>` : "",
+      })}
+      <div class="card panel-fill users-panel">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">用户列表</h3>
+            <p class="card-sub">共 ${escapeHtml(total)} 人${escapeHtml(filterHint)} · 第 ${listPage}/${totalPages} 页 · 超管/管理员置顶${allUsers.length >= 5000 ? " · 已加载达上限" : ""}</p>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="table table-users">
+          <thead id="usersTableHead">
+            <tr>
+              ${sortTh("created_at", "创建时间", "col-time")}
+              ${sortTh("username", "账号", "col-name")}
+              ${sortTh("nickname", "用户名")}
+              ${sortTh("status", "状态", "col-status")}
+              ${sortTh("role", "角色")}
+              ${deptFilterTh()}
+              ${sortTh("last_login_at", "最近登录", "col-time")}
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="usersTableBody">
+            ${
+              pageItems.map(renderUserRow).join("") ||
+              `<tr><td colspan="8" class="text-muted">暂无用户</td></tr>`
+            }
+          </tbody>
+        </table></div>
+        ${
+          total > PAGE_SIZE
+            ? `<div class="table-card-footer">
+                <div class="table-card-footer-start"></div>
+                <div class="pager pager-center" id="usersPager">
+                  <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
+                  ${pageButtons}
+                  <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+                  ${pageJump}
+                </div>
+              </div>`
+            : ""
+        }
+      </div>`;
+
+    document.querySelectorAll("[data-sort]").forEach((btn) => {
+      btn.onclick = () => {
+        const key = btn.getAttribute("data-sort");
+        if (sortKey === key) {
+          sortDir = sortDir === "asc" ? "desc" : "asc";
+        } else {
+          sortKey = key;
+          sortDir = key === "created_at" || key === "last_login_at" ? "desc" : "asc";
+        }
+        listPage = 1;
+        paint();
+      };
+    });
+
+    const deptSelect = document.getElementById("userDeptFilter");
+    if (deptSelect) {
+      deptSelect.onchange = () => {
+        deptFilter = String(deptSelect.value || "").trim();
+        listPage = 1;
+        paint();
+      };
+    }
+
+    const pager = document.getElementById("usersPager");
+    if (pager) {
+      bindCompactPager(pager, {
+        page: listPage,
+        totalPages,
+        onGo: (p) => {
+          listPage = p;
+          paint();
+        },
+      });
+    }
+
+    wireRowActions(pageItems);
+
+    if (focusUserId) {
+      const row = [...document.querySelectorAll("tr[data-id]")].find(
+        (el) => el.getAttribute("data-id") === String(focusUserId)
+      );
+      if (row) {
+        row.classList.add("is-focus-row");
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else if (allUsers.some((u) => String(u.id) === String(focusUserId)) && !focusTipShown) {
+        focusTipShown = true;
+        toast("目标用户不在当前页，请检查筛选条件", "info");
+      }
+    }
 
     const btnNewUser = document.getElementById("btnNewUser");
     if (btnNewUser) btnNewUser.onclick = () => openCreateUserForm();
-  } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
-  }
+  };
+
+  const fetchAllUsers = async () => {
+    const pageSize = 100;
+    let page = 1;
+    let total = Infinity;
+    const collected = [];
+    while (collected.length < total) {
+      const data = await api.get(`/users?page=${page}&page_size=${pageSize}`);
+      const items = data.items || [];
+      total = Number(data.total ?? collected.length + items.length);
+      collected.push(...items);
+      if (!items.length || items.length < pageSize) break;
+      page += 1;
+      if (page > 50) break;
+    }
+    return collected;
+  };
+
+  const reloadAndPaint = async () => {
+    root.innerHTML = `<div class="loading">加载用户…</div>`;
+    try {
+      const [users, depts] = await Promise.all([fetchAllUsers(), loadDepartmentOptions()]);
+      allUsers = users;
+      departments = depts;
+      paint();
+    } catch (e) {
+      root.innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+    }
+  };
+
+  await reloadAndPaint();
 }
 
 /* ========== 角色管理 ========== */
@@ -1148,69 +1501,15 @@ function openRolePermissionForm({ title, role = null, permissionData, onSave }) 
 async function pageRoles() {
   if (!requirePerm("role:read", "角色管理")) return;
   const canWrite = hasPermission("role:write");
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载角色…</div>`;
-  try {
-    const data = await api.get("/roles?page=1&page_size=50");
-    const items = data.items || [];
-    document.getElementById("pageRoot").innerHTML = `
-      ${pageHead({
-        title: "角色管理",
-        desc: "内置：超级管理员 / 管理员 / 员工 / 访客。仅超级管理员可配置角色权限。",
-        actions: canWrite ? `<button class="btn btn-sm" id="btnNewRole">新建角色</button>` : "",
-      })}
-      <div class="card panel-fill">
-        <div class="card-header">
-          <div class="card-header-text">
-            <h3 class="card-title">角色列表</h3>
-            <p class="card-sub">共 ${items.filter((r) => r.name !== "user" && r.name !== "kb_admin").length} 个角色</p>
-          </div>
-        </div>
-        <div class="table-wrap"><table class="table table-roles">
-          <colgroup>
-            <col class="roles-col-name" />
-            <col class="roles-col-code" />
-            <col class="roles-col-desc" />
-            <col class="roles-col-builtin" />
-            <col class="roles-col-num" />
-            <col class="roles-col-actions" />
-          </colgroup>
-          <thead><tr>
-            <th class="col-name">身份角色</th>
-            <th class="col-code">标识</th>
-            <th class="col-desc">说明</th>
-            <th class="col-builtin">内置</th>
-            <th class="col-num">权限数</th>
-            <th class="col-actions">操作</th>
-          </tr></thead>
-          <tbody>
-            ${items
-              .filter((r) => r.name !== "user" && r.name !== "kb_admin")
-              .map((r) => {
-                const isSuperRole = r.name === "super_admin";
-                const canEditThis = canWrite && (isSuperAdmin() || !isSuperRole);
-                const canConfigPerms = isSuperAdmin() && canEditThis;
-                const desc = r.description || "";
-                return `<tr>
-                  <td class="col-name"><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
-                  <td class="col-code"><code>${escapeHtml(r.name)}</code></td>
-                  <td class="col-desc">${escapeHtml(desc || "—")}</td>
-                  <td class="col-builtin">${r.is_builtin ? `<span class="badge badge-info">内置</span>` : "-"}</td>
-                  <td class="col-num">${(r.permissions || []).length}</td>
-                  <td class="col-actions">
-                    <div class="table-actions">
-                      <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
-                      ${canEditThis ? `<button class="btn btn-secondary btn-sm" data-edit-meta="${escapeHtml(r.id)}">编辑说明</button>` : ""}
-                      ${canConfigPerms ? `<button class="btn btn-secondary btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
-                      ${!r.is_builtin && canEditThis ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
-                    </div>
-                  </td>
-                </tr>`;
-              })
-              .join("")}
-          </tbody>
-        </table></div>
-      </div>`;
+  const root = document.getElementById("pageRoot");
+  const PAGE_SIZE = 20;
+  let listPage = 1;
+  /** @type {any[]} */
+  let allRoles = [];
 
+  const visibleRoles = () => allRoles.filter((r) => r.name !== "user" && r.name !== "kb_admin");
+
+  const wireRowActions = (pageItems) => {
     const btnNew = document.getElementById("btnNewRole");
     if (btnNew) {
       btnNew.onclick = async () => {
@@ -1230,9 +1529,9 @@ async function pageRoles() {
       };
     }
 
-    document.querySelectorAll("[data-view]").forEach((btn) => {
+    root.querySelectorAll("[data-view]").forEach((btn) => {
       btn.onclick = async () => {
-        const r = items.find((x) => x.id === btn.getAttribute("data-view"));
+        const r = allRoles.find((x) => String(x.id) === btn.getAttribute("data-view"));
         if (!r) return;
         try {
           const catalog = await fetchPermissionCatalog();
@@ -1249,9 +1548,9 @@ async function pageRoles() {
       };
     });
 
-    document.querySelectorAll("[data-edit-meta]").forEach((btn) => {
+    root.querySelectorAll("[data-edit-meta]").forEach((btn) => {
       btn.onclick = async () => {
-        const role = items.find((item) => item.id === btn.getAttribute("data-edit-meta"));
+        const role = allRoles.find((item) => String(item.id) === btn.getAttribute("data-edit-meta"));
         if (!role) return;
         const result = await openWideModal({
           title: `编辑角色 · ${role.display_name || role.name}`,
@@ -1280,13 +1579,13 @@ async function pageRoles() {
       };
     });
 
-    document.querySelectorAll("[data-edit-perms]").forEach((btn) => {
+    root.querySelectorAll("[data-edit-perms]").forEach((btn) => {
       btn.onclick = async () => {
         if (!isSuperAdmin()) {
           toast("仅超级管理员可配置角色权限", "error");
           return;
         }
-        const role = items.find((item) => item.id === btn.getAttribute("data-edit-perms"));
+        const role = allRoles.find((item) => String(item.id) === btn.getAttribute("data-edit-perms"));
         if (!role) return;
         try {
           const permissionData = await fetchPermissionCatalog();
@@ -1305,7 +1604,7 @@ async function pageRoles() {
       };
     });
 
-    document.querySelectorAll("[data-del]").forEach((btn) => {
+    root.querySelectorAll("[data-del]").forEach((btn) => {
       btn.onclick = async () => {
         const ok = await confirmDialog({ title: "删除角色", message: "确定删除该角色？", confirmText: "删除" });
         if (!ok) return;
@@ -1318,28 +1617,126 @@ async function pageRoles() {
         }
       };
     });
+  };
+
+  const paint = () => {
+    const items = visibleRoles();
+    const total = items.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE) || 1);
+    if (listPage > totalPages) listPage = totalPages;
+    const start = (listPage - 1) * PAGE_SIZE;
+    const pageItems = items.slice(start, start + PAGE_SIZE);
+    const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
+
+    root.innerHTML = `
+      ${pageHead({
+        title: "角色管理",
+        desc: "内置：超级管理员 / 管理员 / 员工 / 访客。仅超级管理员可配置角色权限。",
+        actions: canWrite ? `<button class="btn btn-sm" id="btnNewRole">新建角色</button>` : "",
+      })}
+      <div class="card panel-fill">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">角色列表</h3>
+            <p class="card-sub">共 ${escapeHtml(total)} 个角色 · 第 ${listPage}/${totalPages} 页</p>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="table table-roles">
+          <colgroup>
+            <col class="roles-col-name" />
+            <col class="roles-col-code" />
+            <col class="roles-col-desc" />
+            <col class="roles-col-builtin" />
+            <col class="roles-col-num" />
+            <col class="roles-col-actions" />
+          </colgroup>
+          <thead><tr>
+            <th class="col-name">身份角色</th>
+            <th class="col-code">标识</th>
+            <th class="col-desc">说明</th>
+            <th class="col-builtin">内置</th>
+            <th class="col-num">权限数</th>
+            <th class="col-actions">操作</th>
+          </tr></thead>
+          <tbody>
+            ${
+              pageItems.length
+                ? pageItems
+                    .map((r) => {
+                      const isSuperRole = r.name === "super_admin";
+                      const canEditThis = canWrite && (isSuperAdmin() || !isSuperRole);
+                      const canConfigPerms = isSuperAdmin() && canEditThis;
+                      const desc = r.description || "";
+                      return `<tr>
+                  <td class="col-name"><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
+                  <td class="col-code"><code>${escapeHtml(r.name)}</code></td>
+                  <td class="col-desc">${escapeHtml(desc || "—")}</td>
+                  <td class="col-builtin">${r.is_builtin ? `<span class="badge badge-info">内置</span>` : "-"}</td>
+                  <td class="col-num">${(r.permissions || []).length}</td>
+                  <td class="col-actions">
+                    <div class="table-actions">
+                      <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
+                      ${canEditThis ? `<button class="btn btn-secondary btn-sm" data-edit-meta="${escapeHtml(r.id)}">编辑说明</button>` : ""}
+                      ${canConfigPerms ? `<button class="btn btn-secondary btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
+                      ${!r.is_builtin && canEditThis ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
+                    </div>
+                  </td>
+                </tr>`;
+                    })
+                    .join("")
+                : `<tr><td colspan="6" class="text-muted">暂无角色</td></tr>`
+            }
+          </tbody>
+        </table></div>
+        ${
+          total > PAGE_SIZE
+            ? `<div class="pager pager-center" id="rolesPager">
+                <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
+                ${pageButtons}
+                <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+                ${pageJump}
+              </div>`
+            : ""
+        }
+      </div>`;
+
+    const pager = document.getElementById("rolesPager");
+    bindCompactPager(pager, {
+      page: listPage,
+      totalPages,
+      onGo: (p) => {
+        listPage = p;
+        paint();
+      },
+    });
+    wireRowActions(pageItems);
+  };
+
+  root.innerHTML = `<div class="loading">加载角色…</div>`;
+  try {
+    allRoles = await fetchAllPagedItems("/roles");
+    paint();
   } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+    root.innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
 }
 
 /* ========== 部门管理 ========== */
 async function loadDepartmentOptions() {
   try {
-    const data = await api.get("/departments?page=1&page_size=100");
-    return data.items || [];
+    return await fetchAllPagedItems("/departments");
   } catch {
     return [];
   }
 }
 
-/** 访问范围（多部门）标签：含 GUEST=访客专用；多部门并列；空=私有 */
+/** 访问范围（多部门）标签：GUEST=访客；多部门并列；空=私有 */
 function accessScopeBadge(k) {
   const codes = kbDepartmentCodes(k);
   if (!codes.length) return `<span class="badge">私有</span>`;
   return codes
     .map((dept) => {
-      if (dept === "GUEST") return `<span class="badge badge-success">访客专用</span>`;
+      if (dept === "GUEST") return `<span class="badge badge-success">访客</span>`;
       return `<span class="badge">${escapeHtml(dept)} 部门</span>`;
     })
     .join(" ");
@@ -1378,15 +1775,15 @@ function departmentSelectHtml(departments, selectedCode, { emptyLabel = "不限 
   const cur = String(selectedCode || "").toUpperCase();
   const opts = (departments || [])
     .filter((d) => d.is_enabled !== false)
-    .map(
-      (d) =>
-        `<option value="${escapeHtml(d.code)}" ${String(d.code).toUpperCase() === cur ? "selected" : ""}>${escapeHtml(d.name)}（${escapeHtml(d.code)}）</option>`
-    )
+    .map((d) => {
+      const label = departmentDisplayName(d);
+      return `<option value="${escapeHtml(d.code)}" ${String(d.code).toUpperCase() === cur ? "selected" : ""}>${escapeHtml(label)}（${escapeHtml(d.code)}）</option>`;
+    })
     .join("");
   return `<option value="">${escapeHtml(emptyLabel)}</option>${opts}`;
 }
 
-/** 访问范围多选：含「除访客外全选」 */
+/** 访问范围多选：含「除访客外全选」；GUEST 展示为「访客」 */
 function departmentMultiSelectHtml(departments, selectedCodes = [], { idPrefix = "deptScope" } = {}) {
   const selected = new Set((selectedCodes || []).map((c) => String(c || "").toUpperCase()).filter(Boolean));
   const enabled = (departments || []).filter((d) => d.is_enabled !== false);
@@ -1394,7 +1791,8 @@ function departmentMultiSelectHtml(departments, selectedCodes = [], { idPrefix =
     .map((d) => {
       const code = String(d.code || "").toUpperCase();
       const checked = selected.has(code) ? "checked" : "";
-      return `<label class="dept-scope-item"><input type="checkbox" name="departments" value="${escapeHtml(code)}" ${checked} /> ${escapeHtml(d.name)}（${escapeHtml(code)}）</label>`;
+      const label = departmentDisplayName(d);
+      return `<label class="dept-scope-item"><input type="checkbox" name="departments" value="${escapeHtml(code)}" ${checked} /> ${escapeHtml(label)}（${escapeHtml(code)}）</label>`;
     })
     .join("");
   return `
@@ -1428,6 +1826,24 @@ function readSelectedDepartments(root) {
     .filter(Boolean);
 }
 
+/** 部门展示名：GUEST 统一显示为「访客」 */
+function departmentDisplayName(deptOrName, code) {
+  const c = String(code || deptOrName?.code || "").toUpperCase();
+  if (c === "GUEST") return "访客";
+  if (deptOrName && typeof deptOrName === "object") return deptOrName.name || c || "";
+  return String(deptOrName || "");
+}
+
+/** 部门编码 → 中文名 */
+function departmentLabelOf(code, departments = []) {
+  const raw = String(code || "").trim();
+  if (!raw) return "未分配";
+  const cur = raw.toUpperCase();
+  if (cur === "GUEST") return "访客";
+  const hit = (departments || []).find((d) => String(d.code || "").toUpperCase() === cur);
+  return hit?.name || raw;
+}
+
 function openDepartmentForm({ title, dept = null, onSave }) {
   closeAllModals();
   const mask = document.createElement("div");
@@ -1439,7 +1855,7 @@ function openDepartmentForm({ title, dept = null, onSave }) {
         <label class="form-label">部门编码</label>
         <input class="form-control" name="code" required maxlength="50" value="${escapeHtml(dept?.code || "")}" placeholder="如 A / B / HR" ${dept ? "" : ""} />
         <label class="form-label" style="margin-top:10px">部门名称</label>
-        <input class="form-control" name="name" required maxlength="100" value="${escapeHtml(dept?.name || "")}" placeholder="如 研发部" />
+        <input class="form-control" name="name" required maxlength="100" value="${escapeHtml(dept ? departmentDisplayName(dept) : "")}" placeholder="如 研发部" />
         <label class="form-label" style="margin-top:10px">部门介绍</label>
         <textarea class="form-control" name="description" rows="4" placeholder="可选，介绍部门职责与范围">${escapeHtml(dept?.description || "")}</textarea>
         <label class="form-label" style="margin-top:10px;display:flex;align-items:center;gap:8px">
@@ -1483,11 +1899,22 @@ function openDepartmentForm({ title, dept = null, onSave }) {
 async function pageDepartments() {
   if (!requirePerm("department:read", "部门管理")) return;
   const canWrite = hasPermission("department:write");
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载部门…</div>`;
-  try {
-    const data = await api.get("/departments?page=1&page_size=100");
-    const items = data.items || [];
-    document.getElementById("pageRoot").innerHTML = `
+  const root = document.getElementById("pageRoot");
+  const PAGE_SIZE = 20;
+  let listPage = 1;
+  /** @type {any[]} */
+  let allDepts = [];
+
+  const paint = () => {
+    const items = allDepts;
+    const total = items.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE) || 1);
+    if (listPage > totalPages) listPage = totalPages;
+    const start = (listPage - 1) * PAGE_SIZE;
+    const pageItems = items.slice(start, start + PAGE_SIZE);
+    const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
+
+    root.innerHTML = `
       ${pageHead({
         title: "部门管理",
         desc: "维护部门介绍、成员与关联知识库；部门编码用于上传与访问隔离。",
@@ -1497,23 +1924,40 @@ async function pageDepartments() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">部门列表</h3>
-            <p class="card-sub">共 ${items.length} 个部门</p>
+            <p class="card-sub">共 ${escapeHtml(total)} 个部门 · 第 ${listPage}/${totalPages} 页</p>
           </div>
         </div>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th class="col-name">名称</th><th class="col-code">编码</th><th class="col-desc">介绍</th><th>成员</th><th>知识库</th><th>状态</th><th class="col-actions">操作</th></tr></thead>
+        <div class="table-wrap"><table class="table table-depts">
+          <colgroup>
+            <col class="depts-col-name" />
+            <col class="depts-col-code" />
+            <col class="depts-col-desc" />
+            <col class="depts-col-num" />
+            <col class="depts-col-num" />
+            <col class="depts-col-status" />
+            <col class="depts-col-actions" />
+          </colgroup>
+          <thead><tr>
+            <th class="col-name">名称</th>
+            <th class="col-code">编码</th>
+            <th class="col-desc">介绍</th>
+            <th class="col-num">成员</th>
+            <th class="col-num">知识库</th>
+            <th class="col-status">状态</th>
+            <th class="col-actions">操作</th>
+          </tr></thead>
           <tbody>
             ${
-              items.length
-                ? items
+              pageItems.length
+                ? pageItems
                     .map(
                       (d) => `<tr>
-                        <td class="col-name"><strong>${escapeHtml(d.name)}</strong></td>
+                        <td class="col-name"><strong>${escapeHtml(departmentDisplayName(d))}</strong></td>
                         <td class="col-code"><code>${escapeHtml(d.code)}</code></td>
-                        <td class="col-desc" title="${escapeHtml(d.description || "")}"><span class="cell-clamp">${escapeHtml(d.description || "-")}</span></td>
-                        <td>${escapeHtml(d.member_count ?? 0)}</td>
-                        <td>${escapeHtml(d.kb_count ?? 0)}</td>
-                        <td>${d.is_enabled ? `<span class="badge badge-success">启用</span>` : `<span class="badge badge-danger">停用</span>`}</td>
+                        <td class="col-desc" title="${escapeHtml(d.description || "")}">${escapeHtml(d.description || "-")}</td>
+                        <td class="col-num">${escapeHtml(d.member_count ?? 0)}</td>
+                        <td class="col-num">${escapeHtml(d.kb_count ?? 0)}</td>
+                        <td class="col-status">${d.is_enabled ? `<span class="badge badge-success">启用</span>` : `<span class="badge badge-danger">停用</span>`}</td>
                         <td class="col-actions">
                           <div class="table-actions table-actions-stack">
                             <div class="table-actions-row">
@@ -1536,9 +1980,19 @@ async function pageDepartments() {
             }
           </tbody>
         </table></div>
+        ${
+          total > PAGE_SIZE
+            ? `<div class="pager pager-center" id="deptsPager">
+                <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
+                ${pageButtons}
+                <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+                ${pageJump}
+              </div>`
+            : ""
+        }
       </div>`;
 
-    document.querySelectorAll("[data-go]").forEach((btn) => {
+    root.querySelectorAll("[data-go]").forEach((btn) => {
       btn.onclick = () => navigate(btn.getAttribute("data-go"));
     });
 
@@ -1554,12 +2008,12 @@ async function pageDepartments() {
         });
     }
 
-    document.querySelectorAll("[data-edit]").forEach((btn) => {
+    root.querySelectorAll("[data-edit]").forEach((btn) => {
       btn.onclick = () => {
-        const d = items.find((x) => String(x.id) === btn.getAttribute("data-edit"));
+        const d = allDepts.find((x) => String(x.id) === btn.getAttribute("data-edit"));
         if (!d) return;
         openDepartmentForm({
-          title: `编辑「${d.name}」`,
+          title: `编辑「${departmentDisplayName(d)}」`,
           dept: d,
           onSave: async (payload) => {
             await api.put(`/departments/${d.id}`, payload);
@@ -1569,7 +2023,7 @@ async function pageDepartments() {
       };
     });
 
-    document.querySelectorAll("[data-del]").forEach((btn) => {
+    root.querySelectorAll("[data-del]").forEach((btn) => {
       btn.onclick = async () => {
         const ok = await confirmDialog({
           title: "删除部门",
@@ -1587,8 +2041,23 @@ async function pageDepartments() {
         }
       };
     });
+
+    bindCompactPager(document.getElementById("deptsPager"), {
+      page: listPage,
+      totalPages,
+      onGo: (p) => {
+        listPage = p;
+        paint();
+      },
+    });
+  };
+
+  root.innerHTML = `<div class="loading">加载部门…</div>`;
+  try {
+    allDepts = await fetchAllPagedItems("/departments");
+    paint();
   } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
+    root.innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -1602,7 +2071,7 @@ async function pageDepartmentDetail(deptId) {
     const kbs = d.knowledge_bases || [];
     document.getElementById("pageRoot").innerHTML = `
       ${pageHead({
-        title: d.name || "部门详情",
+        title: departmentDisplayName(d) || "部门详情",
         desc: `${d.is_enabled ? "启用" : "停用"} · 编码 ${d.code} · 成员 ${members.length} · 知识库 ${kbs.length}`,
         actions: `
           <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments">返回列表</button>
@@ -1687,7 +2156,7 @@ async function pageDepartmentDetail(deptId) {
     if (btnEdit) {
       btnEdit.onclick = () =>
         openDepartmentForm({
-          title: `编辑「${d.name}」`,
+          title: `编辑「${departmentDisplayName(d)}」`,
           dept: d,
           onSave: async (payload) => {
             await api.put(`/departments/${d.id}`, payload);
@@ -1700,8 +2169,7 @@ async function pageDepartmentDetail(deptId) {
     if (btnAddMember) {
       btnAddMember.onclick = async () => {
         try {
-          const usersData = await api.get("/users?page=1&page_size=100");
-          const users = (usersData.items || []).filter(
+          const users = (await fetchAllPagedItems("/users")).filter(
             (u) => String(u.department || "").toUpperCase() !== String(d.code).toUpperCase()
           );
           if (!users.length) {
@@ -1718,7 +2186,7 @@ async function pageDepartmentDetail(deptId) {
           mask.className = "modal-mask";
           mask.innerHTML = `
             <form class="modal" style="width:min(480px,calc(100vw - 24px));max-height:90vh;overflow:auto">
-              <div class="modal-header"><h3>添加成员到「${escapeHtml(d.name)}」</h3></div>
+              <div class="modal-header"><h3>添加成员到「${escapeHtml(departmentDisplayName(d))}」</h3></div>
               <div class="modal-body">${options}</div>
               <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-close>取消</button>
@@ -1775,8 +2243,9 @@ async function pageDepartmentDetail(deptId) {
     if (btnAddKb) {
       btnAddKb.onclick = async () => {
         try {
-          const kbData = await api.get("/knowledge-bases?page=1&page_size=100");
-          const list = (kbData.items || []).filter((k) => !kbHasDepartment(k, d.code));
+          const list = (await fetchAllPagedItems("/knowledge-bases")).filter(
+            (k) => !kbHasDepartment(k, d.code)
+          );
           if (!list.length) {
             toast("没有可关联的知识库", "error");
             return;
@@ -1792,7 +2261,7 @@ async function pageDepartmentDetail(deptId) {
           mask.className = "modal-mask";
           mask.innerHTML = `
             <form class="modal" style="width:min(480px,calc(100vw - 24px));max-height:90vh;overflow:auto">
-              <div class="modal-header"><h3>关联知识库到「${escapeHtml(d.name)}」</h3></div>
+              <div class="modal-header"><h3>关联知识库到「${escapeHtml(departmentDisplayName(d))}」</h3></div>
               <div class="modal-body">${options}</div>
               <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-close>取消</button>
@@ -1850,6 +2319,18 @@ async function pageDepartmentDetail(deptId) {
 }
 
 /* ========== 大模型管理 ========== */
+/** 模型类型展示文案（接口仍用小写枚举） */
+const MODEL_TYPE_LABELS = {
+  llm: "LLM",
+  embedding: "Embedding",
+  rerank: "Rerank",
+};
+
+function modelTypeLabel(type) {
+  const key = String(type || "").toLowerCase();
+  return MODEL_TYPE_LABELS[key] || String(type || "-");
+}
+
 /**
  * 管理端模型预设仅用于辅助填写，不限制管理员接入兼容模型。
  * Rerank 默认项与后端 `.env.example` 保持一致，避免类型下拉有 rerank 却没有可选模型。
@@ -1885,7 +2366,7 @@ function openModelForm({ title, model = null, onSave }) {
           <label class="form-label" style="margin-top:10px">类型</label>
           <select class="form-control" name="model_type" ${model ? "disabled" : ""}>
             ${["llm", "embedding", "rerank"]
-              .map((t) => `<option value="${t}" ${m.model_type === t ? "selected" : ""}>${t}</option>`)
+              .map((t) => `<option value="${t}" ${m.model_type === t ? "selected" : ""}>${modelTypeLabel(t)}</option>`)
               .join("")}
           </select>
           <label class="form-label" style="margin-top:10px">提供方</label>
@@ -1995,7 +2476,7 @@ async function pageModels() {
               canWrite
                 ? "可编辑连接信息与生成参数（仅超级管理员）"
                 : "当前账号只读；模型设置仅超级管理员可修改"
-            }</p>
+            } · 本页最多展示 50 条（已加载 ${items.length}${data.total != null && Number(data.total) > items.length ? ` / 共 ${data.total}` : ""}）</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-models">
@@ -2026,7 +2507,7 @@ async function pageModels() {
               .map(
                 (m) => `<tr>
                   <td class="col-name">${escapeHtml(m.name)}</td>
-                  <td class="col-type"><span class="badge">${escapeHtml(m.model_type)}</span></td>
+                  <td class="col-type"><span class="badge">${escapeHtml(modelTypeLabel(m.model_type))}</span></td>
                   <td class="col-model">${escapeHtml(m.model_name || "-")}</td>
                   <td class="col-url text-muted" title="${escapeHtml(m.base_url || "")}">${escapeHtml(m.base_url || "-")}</td>
                   <td class="col-key">
@@ -2254,7 +2735,7 @@ function openModelParamsForm({ model, onSave }) {
       <form class="modal" style="max-width:520px;width:92%">
         <div class="modal-header"><h3>配置参数 · ${escapeHtml(model.name || "")}</h3></div>
         <div class="modal-body">
-          <p class="text-muted" style="margin-top:0">类型 <code>${escapeHtml(model.model_type)}</code> · 提供方 <code>${escapeHtml(model.provider || "-")}</code>。留空表示不覆盖该项。</p>
+          <p class="text-muted" style="margin-top:0">类型 <code>${escapeHtml(modelTypeLabel(model.model_type))}</code> · 提供方 <code>${escapeHtml(model.provider || "-")}</code>。留空表示不覆盖该项。</p>
           ${fieldHtml}
           <label class="form-label" style="margin-top:10px">请求超时（秒）</label>
           <input class="form-control" name="timeout_seconds" type="number" min="5" max="600" step="1"
@@ -2300,11 +2781,14 @@ async function openModelVersionsModal(model) {
   closeAllModals();
   const root = document.createElement("div");
   root.className = "modal-mask";
-  root.innerHTML = `<div class="modal-card" style="max-width:720px">
-    <div class="modal-header"><h3>「${escapeHtml(model.name)}」版本</h3>
-      <button type="button" class="btn btn-text btn-sm" data-close>关闭</button></div>
-    <div class="modal-body"><div class="loading">加载版本…</div></div>
-  </div>`;
+  root.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" style="width:min(720px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+      <div class="modal-header"><h3>「${escapeHtml(model.name)}」版本</h3></div>
+      <div class="modal-body"><div class="loading">加载版本…</div></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>关闭</button>
+      </div>
+    </div>`;
   document.body.appendChild(root);
   root.querySelector("[data-close]").onclick = () => root.remove();
   root.addEventListener("click", (e) => {
@@ -2315,7 +2799,7 @@ async function openModelVersionsModal(model) {
     const versions = (await api.get(`/models/${model.id}/versions`)) || [];
     const list = Array.isArray(versions) ? versions : versions.items || [];
     if (!list.length) {
-      body.innerHTML = `<p class="text-muted">暂无已发布版本。可先「配置参数」后点击「发布版本」。（需启用 MODEL_CONFIG_REGISTRY_V2_ENABLED）</p>`;
+      body.innerHTML = `<p class="text-muted" style="margin:0">暂无已发布版本。可先「配置参数」后点击「发布版本」。（需启用 MODEL_CONFIG_REGISTRY_V2_ENABLED）</p>`;
       return;
     }
     body.innerHTML = `<div class="table-wrap"><table class="data-table">
@@ -2324,18 +2808,18 @@ async function openModelVersionsModal(model) {
         .map(
           (v) => `<tr>
             <td><code>${escapeHtml(v.version || "")}</code></td>
-            <td class="text-muted">${escapeHtml(v.published_at || "—")}</td>
+            <td class="text-muted">${escapeHtml(v.published_at ? formatDateTime(v.published_at) : "—")}</td>
             <td class="text-muted">${escapeHtml(v.note || "—")}</td>
-            <td><button type="button" class="btn btn-text btn-sm" data-rollback="${escapeHtml(v.id)}">回滚</button></td>
+            <td><button type="button" class="btn btn-secondary btn-sm" data-rollback="${escapeHtml(v.id)}" title="将当前模型配置恢复为该历史版本（非知识库快照回退）">回滚至此版本</button></td>
           </tr>`
         )
         .join("")}</tbody></table></div>`;
     body.querySelectorAll("[data-rollback]").forEach((btn) => {
       btn.onclick = async () => {
         const ok = await confirmDialog({
-          title: "回滚版本",
-          message: "将以该历史参数重新发布为新版本，确定？",
-          confirmText: "回滚",
+          title: "回滚模型配置版本",
+          message: "将把该模型配置恢复为所选历史版本并发布（仅模型连接/参数，不是知识库快照回退）。确定继续？",
+          confirmText: "回滚配置",
         });
         if (!ok) return;
         try {
@@ -2349,7 +2833,7 @@ async function openModelVersionsModal(model) {
       };
     });
   } catch (e) {
-    body.innerHTML = `<p class="text-danger">${escapeHtml(e.message || "加载失败")}</p>`;
+    body.innerHTML = `<p class="text-danger" style="margin:0">${escapeHtml(e.message || "加载失败")}</p>`;
   }
 }
 
@@ -2444,13 +2928,23 @@ async function renderModelUsage(model, days) {
 
 /* ========== 知识库工作区（同页 Tab + ?tab=） ========== */
 const KB_WS_TABS = ["overview", "docs", "snaps"];
-const KB_WS_TAB_LABELS = { overview: "文档详情", docs: "文档上传", snaps: "历史快照" };
+const KB_WS_TAB_LABELS = { overview: "知识库详情", docs: "文档上传", snaps: "历史快照" };
 
 function normalizeKbTab(tab) {
   const t = String(tab || "overview").toLowerCase();
   if (t === "documents") return "docs";
   if (t === "snapshots") return "snaps";
-  if (t === "acl") return "overview"; // ACL 入口已下线，旧链接回退到详情
+  if (t === "acl") {
+    try {
+      if (!sessionStorage.getItem("kb_acl_tab_tip")) {
+        sessionStorage.setItem("kb_acl_tab_tip", "1");
+        setTimeout(() => toast("知识库权限 Tab 已下线，现按部门管理访问范围", "info"), 0);
+      }
+    } catch {
+      /* ignore */
+    }
+    return "overview"; // ACL 入口已下线，旧链接回退到详情
+  }
   return KB_WS_TABS.includes(t) ? t : "overview";
 }
 
@@ -2528,8 +3022,7 @@ async function pageKbWorkspace(id) {
   let kbList = [];
   let kbName = id;
   try {
-    const data = await api.get("/knowledge-bases?page=1&page_size=100");
-    kbList = data.items || [];
+    kbList = await fetchAllPagedItems("/knowledge-bases", { pageSize: 100, maxItems: 100 });
     const cur = kbList.find((k) => String(k.id) === String(id));
     if (cur) kbName = cur.name || id;
   } catch (e) {
@@ -2550,11 +3043,12 @@ async function pageKbList() {
   if (!requirePerm("kb:read", "知识库管理")) return;
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载知识库…</div>`;
   try {
-    const [data, departments] = await Promise.all([
-      api.get("/knowledge-bases?page=1&page_size=100"),
+    const [allItems, departments] = await Promise.all([
+      fetchAllPagedItems("/knowledge-bases", { pageSize: 100, maxItems: 100 }),
       loadDepartmentOptions(),
     ]);
-    const allItems = data.items || [];
+    const KB_PAGE_SIZE = 15;
+    let listPage = 1;
     const statusLabel = (status) =>
       ({ active: "已同步", ready: "已就绪", processing: "处理中", vectorizing: "向量化中" }[String(status || "").toLowerCase()] ||
         status ||
@@ -2587,7 +3081,7 @@ async function pageKbList() {
             <div class="kb-card-meta"><span>${escapeHtml(k.document_count ?? k.doc_count ?? 0)} 份文档</span><span>${formatDateTime(k.updated_at)}</span></div>
             <div class="kb-card-access kb-card-tags">${accessScopeBadge(k)}</div>
             <div class="kb-card-actions">
-              <button type="button" class="btn btn-sm kb-card-btn kb-card-btn-detail" data-kb-detail="${escapeHtml(k.id)}">文档详情</button>
+              <button type="button" class="btn btn-sm kb-card-btn kb-card-btn-detail" data-kb-detail="${escapeHtml(k.id)}">知识库详情</button>
               ${
                 canWriteKb
                   ? `<button type="button" class="btn btn-sm kb-card-btn kb-card-btn-del" data-kb-del="${escapeHtml(k.id)}" data-kb-name="${escapeHtml(k.name || "")}">删除</button>`
@@ -2647,15 +3141,21 @@ async function pageKbList() {
 
     const paintList = () => {
       const items = allItems.filter(matchKb);
+      const total = items.length;
+      const totalPages = Math.max(1, Math.ceil(total / KB_PAGE_SIZE) || 1);
+      if (listPage > totalPages) listPage = totalPages;
+      const start = (listPage - 1) * KB_PAGE_SIZE;
+      const pageItems = items.slice(start, start + KB_PAGE_SIZE);
       const grid = document.getElementById("kbCardGrid");
       const summary = document.getElementById("kbListSummary");
+      const pagerMount = document.getElementById("kbListPager");
       if (summary) {
         const docTotal = items.reduce(
           (sum, k) => sum + Number(k.document_count ?? k.doc_count ?? 0),
           0
         );
-        summary.innerHTML = `<span>共 <b>${items.length}</b> 个知识库 · 文档合计 <b>${docTotal}</b> 份${
-          items.length !== allItems.length ? `（筛选自 ${allItems.length} 个知识库）` : ""
+        summary.innerHTML = `<span>共 <b>${total}</b> 个知识库 · 文档合计 <b>${docTotal}</b> 份 · 第 ${listPage}/${totalPages} 页${
+          items.length !== allItems.length ? `（筛选自 ${allItems.length} 个）` : allItems.length >= 100 ? "（最多展示 100 个）" : ""
         }</span><span>仅展示当前账号有权访问的内容</span>`;
       }
       if (!grid) return;
@@ -2664,10 +3164,24 @@ async function pageKbList() {
         : "";
       grid.innerHTML =
         createCard +
-        (items.map(renderCard).join("") ||
+        (pageItems.map(renderCard).join("") ||
           `<div class="card empty-state span-12">${
             allItems.length ? "无匹配的知识库，请调整搜索或筛选条件" : "暂未创建可访问的知识库"
           }</div>`);
+      if (pagerMount) {
+        pagerMount.innerHTML = compactPagerHtml("kbPager", listPage, totalPages, {
+          total,
+          pageSize: KB_PAGE_SIZE,
+        });
+        bindCompactPager(document.getElementById("kbPager"), {
+          page: listPage,
+          totalPages,
+          onGo: (p) => {
+            listPage = p;
+            paintList();
+          },
+        });
+      }
       bindCards();
     };
 
@@ -2676,7 +3190,7 @@ async function pageKbList() {
       `<option value="__private__">私有</option>`,
       ...(departments || [])
         .filter((d) => d.is_enabled !== false)
-        .map((d) => `<option value="${escapeHtml(d.code)}">${escapeHtml(d.name)}（${escapeHtml(d.code)}）</option>`),
+        .map((d) => `<option value="${escapeHtml(d.code)}">${escapeHtml(departmentDisplayName(d))}（${escapeHtml(d.code)}）</option>`),
     ].join("");
 
     document.getElementById("pageRoot").innerHTML = `
@@ -2707,7 +3221,8 @@ async function pageKbList() {
         <div class="kb-list-toolbar-spacer" aria-hidden="true"></div>
       </div>
       <div class="kb-summary-row" id="kbListSummary"></div>
-      <section class="kb-card-grid" id="kbCardGrid"></section>`;
+      <section class="kb-card-grid" id="kbCardGrid"></section>
+      <div id="kbListPager"></div>`;
 
     paintList();
 
@@ -2719,6 +3234,7 @@ async function pageKbList() {
       filters.q = searchInput?.value || "";
       filters.department = deptSel?.value || "";
       filters.type = typeSel?.value || "";
+      listPage = 1;
       paintList();
     };
     if (searchInput) {
@@ -2750,7 +3266,7 @@ async function pageKbList() {
               </select>
               <label class="form-label" style="margin-top:10px">访问范围（可多选部门）</label>
               ${departmentMultiSelectHtml(departments, [], { idPrefix: "createKbDept" })}
-              <p class="text-muted" style="margin:6px 0 0;font-size:12px">可同时授权多个部门访问同一知识库。勾选访客专用=所有人可见；不选=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
+              <p class="text-muted" style="margin:6px 0 0;font-size:12px">可同时授权多个部门访问同一知识库。勾选访客=所有人可见；不选=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
               <label class="form-label" style="margin-top:10px">标签（逗号分隔）</label>
               <input class="form-control" name="tags" maxlength="500" placeholder="可选" />
               <label class="form-label" style="margin-top:10px">描述</label>
@@ -2890,7 +3406,7 @@ async function pageKbDetail(id, opts = {}) {
               <div id="editDepartmentScope" style="margin:6px 0 12px">
                 ${departmentMultiSelectHtml(departments, kbDepartmentCodes(k), { idPrefix: "editKbDept" })}
               </div>
-              <p class="text-muted" style="margin:0 0 12px;font-size:12px">可同时授权多个部门。勾选访客专用=所有人可见；不选=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
+              <p class="text-muted" style="margin:0 0 12px;font-size:12px">可同时授权多个部门。勾选访客=所有人可见；不选=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
               <label class="text-muted">标签（逗号分隔）</label>
               <input class="form-control" id="editTags" maxlength="500" value="${escapeHtml((k.tags || []).join(", "))}" style="margin:6px 0 12px" />
               <label class="text-muted">描述</label>
@@ -3629,17 +4145,23 @@ async function pageDocuments(kbId, opts = {}) {
 
   const openDocWorkbench = async (docId, filenameHint) => {
     try {
-      const [detail, content, chunksPage] = await Promise.all([
+      const [detail, content, chunks] = await Promise.all([
         api.get(`/knowledge-bases/${kbId}/documents/${docId}`).catch(() => null),
         api.get(`/knowledge-bases/${kbId}/documents/${docId}/content`),
-        api
-          .get(`/knowledge-bases/${kbId}/documents/${docId}/chunks?page=1&page_size=100`)
-          .catch(() => ({ items: [], total: 0 })),
+        fetchAllPagedItems(`/knowledge-bases/${kbId}/documents/${docId}/chunks`, {
+          pageSize: 100,
+          maxPages: 200,
+        }).catch(() => []),
       ]);
       let rules = { ...(content.segment_rules || detail?.segment_rules || {}) };
-      let chunks = chunksPage.items || [];
+      // chunks already full list
       const status = detail?.status || content.status || "-";
 
+      const reportedChunks = Number(content.chunk_count ?? detail?.chunk_count ?? chunks.length);
+      const chunkCapHint =
+        chunks.length >= 20000 || (reportedChunks > chunks.length)
+          ? ` · <span class="text-danger">仅加载前 ${chunks.length} 段（可能未全量）</span>`
+          : "";
       const mask = document.createElement("div");
       mask.className = "modal-mask";
       mask.innerHTML = `
@@ -3648,9 +4170,10 @@ async function pageDocuments(kbId, opts = {}) {
           <div class="modal-body doc-wb-body">
             <p class="text-muted doc-wb-meta">
               状态 <span class="badge">${escapeHtml(status)}</span>
-              · 分段 <span id="docWbChunkCount">${escapeHtml(content.chunk_count ?? detail?.chunk_count ?? chunks.length)}</span>
+              · 分段 <span id="docWbChunkCount">${escapeHtml(reportedChunks)}</span>（已加载 ${escapeHtml(chunks.length)}）
               · 清洗 ${escapeHtml(content.normalized_char_count ?? 0)} 字
               · 原文 ${escapeHtml(content.raw_char_count ?? 0)} 字
+              ${chunkCapHint}
               ${content.error_message || detail?.error_message ? ` · <span class="text-danger">${escapeHtml(content.error_message || detail.error_message)}</span>` : ""}
             </p>
             <div class="doc-wb-tabs" role="tablist" aria-label="文档工作台">
@@ -3668,19 +4191,19 @@ async function pageDocuments(kbId, opts = {}) {
                 <div id="docPreviewDryRunList"><p class="text-muted">加载预览中…</p></div>
               </div>
               <div id="docPreviewRules" class="doc-wb-pane" style="display:none">
-                <label class="text-muted">chunk_size（100–5000）</label>
+                <label class="text-muted">分段长度（100–5000 字符）</label>
                 <input class="form-control" id="ruleSize" type="number" min="100" max="5000" style="margin:6px 0 10px" />
-                <label class="text-muted">chunk_overlap（0–1000）</label>
+                <label class="text-muted">分段重叠（0–1000 字符）</label>
                 <input class="form-control" id="ruleOverlap" type="number" min="0" max="1000" style="margin:6px 0 10px" />
-                <label class="text-muted">split_mode</label>
+                <label class="text-muted">切分方式</label>
                 <select class="form-control" id="ruleMode" style="margin:6px 0 10px">
-                  <option value="fixed">fixed</option>
-                  <option value="sliding">sliding</option>
-                  <option value="paragraph">paragraph</option>
-                  <option value="heading">heading</option>
-                  <option value="markdown">markdown</option>
+                  <option value="fixed">固定长度</option>
+                  <option value="sliding">滑动窗口</option>
+                  <option value="paragraph">按段落</option>
+                  <option value="heading">按标题</option>
+                  <option value="markdown">按 Markdown 结构</option>
                 </select>
-                <label class="text-muted">separators（可选，逗号分隔）</label>
+                <label class="text-muted">分隔符（可选，逗号分隔）</label>
                 <input class="form-control" id="ruleSeps" style="margin:6px 0 10px" placeholder="例如 \\n\\n,\\n" />
                 <p class="text-muted" style="margin:0;font-size:12px">上传时按文件类型自动选择分段方式；修改后需「重新分段并向量化」才会生效（仅作用于当前文档）。</p>
               </div>
@@ -3781,11 +4304,10 @@ async function pageDocuments(kbId, opts = {}) {
           const body = readRulesForm();
           const preview = await api.post(`/knowledge-bases/${kbId}/documents/${docId}/segment-preview`, body);
           effectListEl.innerHTML = `<p class="text-muted">共 ${escapeHtml(preview.total_chunks ?? 0)} 段（未写库）</p>${(preview.chunks || [])
-            .slice(0, 50)
             .map(
               (c) => `<div style="border:1px solid var(--color-border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px">
                 <div class="text-muted">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字</div>
-                <div style="white-space:pre-wrap">${escapeHtml((c.content || "").slice(0, 400))}</div>
+                <div style="white-space:pre-wrap">${escapeHtml(c.content || "")}</div>
               </div>`
             )
             .join("")}`;
@@ -4223,10 +4745,25 @@ const CONFIG_FIELD_LABELS = {
   name: "知识库名称",
   chunk_size: "分段长度",
   chunk_overlap: "分段重叠",
+  split_mode: "切分方式",
+  separators: "分隔符",
   embedding_model: "嵌入模型",
   visibility: "可见性",
   permissions: "权限配置",
 };
+
+const SPLIT_MODE_LABELS = {
+  fixed: "固定长度",
+  sliding: "滑动窗口",
+  paragraph: "按段落",
+  heading: "按标题",
+  markdown: "按 Markdown 结构",
+};
+
+function splitModeLabel(mode) {
+  if (!mode) return "-";
+  return SPLIT_MODE_LABELS[mode] || String(mode);
+}
 
 /** 宽弹窗（快照详情 / 差异预览）；确认时不自动卸载，便于读取表单。 */
 function openWideModal({ title, bodyHtml, actionsHtml, width = "min(760px,calc(100vw - 24px))", panelClass = "", onReady = null }) {
@@ -4292,9 +4829,27 @@ async function pageSnapshots(kbId, opts = {}) {
     return `<strong class="cell-primary" title="${escapeHtml(raw)}">${escapeHtml(raw)}</strong>`;
   };
 
+  const SNAP_PAGE_SIZE = 20;
+  let snapListPage = 1;
+  /** @type {any[]} */
+  let allSnaps = [];
+
   const renderList = async () => {
-    const data = await api.get(`/knowledge-bases/${kbId}/snapshots?page=1&page_size=50`);
-    const items = data.items || [];
+    allSnaps = await fetchAllPagedItems(`/knowledge-bases/${kbId}/snapshots`, {
+      pageSize: 50,
+      maxItems: 50,
+    });
+    paintSnaps();
+  };
+
+  const paintSnaps = () => {
+    const items = allSnaps;
+    const total = items.length;
+    const totalPages = Math.max(1, Math.ceil(total / SNAP_PAGE_SIZE) || 1);
+    if (snapListPage > totalPages) snapListPage = totalPages;
+    const start = (snapListPage - 1) * SNAP_PAGE_SIZE;
+    const pageItems = items.slice(start, start + SNAP_PAGE_SIZE);
+
     mountEl().innerHTML = `
       ${pageHead({
         title: "快照管理",
@@ -4312,11 +4867,11 @@ async function pageSnapshots(kbId, opts = {}) {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">历史快照与回退</h3>
-            <p class="card-sub">共 ${items.length} 份</p>
+            <p class="card-sub">共 ${escapeHtml(total)} 份（上限 50）· 第 ${snapListPage}/${totalPages} 页</p>
           </div>
         </div>
         ${
-          items.length
+          total
             ? `<div class="table-wrap"><table class="table table-snapshots">
           <colgroup>
             <col class="snap-col-time" />
@@ -4337,13 +4892,13 @@ async function pageSnapshots(kbId, opts = {}) {
             <th class="col-actions">操作</th>
           </tr></thead>
           <tbody>
-            ${items
+            ${pageItems
               .map((s) => {
                 const isProtection = s.trigger === "rollback_protection";
                 const ops = [
                   `<button type="button" class="btn btn-text btn-sm" data-detail="${escapeHtml(s.id)}">详情</button>`,
                   canRestore
-                    ? `<button type="button" class="btn btn-secondary btn-sm" data-preview="${escapeHtml(s.id)}">预览/回退</button>`
+                    ? `<button type="button" class="btn btn-secondary btn-sm" data-preview="${escapeHtml(s.id)}" title="先预览差异，确认后再回退知识库（非模型配置回滚）">预览/回退</button>`
                     : "",
                   canWrite && !isProtection
                     ? `<button type="button" class="btn btn-danger btn-sm" data-del="${escapeHtml(s.id)}">删除</button>`
@@ -4363,7 +4918,8 @@ async function pageSnapshots(kbId, opts = {}) {
               })
               .join("")}
           </tbody>
-        </table></div>`
+        </table></div>
+        ${compactPagerHtml("snapPager", snapListPage, totalPages, { total, pageSize: SNAP_PAGE_SIZE })}`
             : `<div class="empty-state">暂无快照。上传/删除文档或点击「手动创建快照」后会出现记录。</div>`
         }
       </div>`;
@@ -4371,6 +4927,15 @@ async function pageSnapshots(kbId, opts = {}) {
     document.querySelectorAll("[data-go]").forEach((b) =>
       b.addEventListener("click", () => navigate(b.getAttribute("data-go")))
     );
+
+    bindCompactPager(document.getElementById("snapPager"), {
+      page: snapListPage,
+      totalPages,
+      onGo: (p) => {
+        snapListPage = p;
+        paintSnaps();
+      },
+    });
 
     const btnCreate = document.getElementById("btnCreateSnap");
     if (btnCreate) {
@@ -4443,7 +5008,8 @@ async function pageSnapshots(kbId, opts = {}) {
               <p class="text-muted">${escapeHtml(d.description || "无说明")}</p>
               <h4 style="margin:14px 0 8px;font-size:14px">分段规则</h4>
               <p>分段长度 <code>${escapeHtml(rules.chunk_size ?? "-")}</code> · 重叠
-                <code>${escapeHtml(rules.chunk_overlap ?? "-")}</code></p>
+                <code>${escapeHtml(rules.chunk_overlap ?? "-")}</code> · 切分方式
+                <code>${escapeHtml(splitModeLabel(rules.split_mode))}</code></p>
               <h4 style="margin:14px 0 8px;font-size:14px">权限配置（${perms.length} 条）</h4>
               ${
                 perms.length
@@ -4460,21 +5026,20 @@ async function pageSnapshots(kbId, opts = {}) {
               }
               <h4 style="margin:14px 0 8px;font-size:14px">文档清单（${docs.length}）</h4>
               <div class="table-wrap"><table class="table">
-                <thead><tr><th>文件名</th><th>类型</th><th>分段数</th><th>状态</th></tr></thead>
-                <tbody>${
-                  docs.length
-                    ? docs
-                        .map(
-                          (doc) => `<tr>
-                          <td>${escapeHtml(doc.filename)}</td>
-                          <td>${escapeHtml(doc.file_type || "-")}</td>
-                          <td>${escapeHtml(doc.chunk_count ?? 0)}</td>
-                          <td>${escapeHtml((doc.metadata && doc.metadata.status) || "-")}</td>
-                        </tr>`
-                        )
-                        .join("")
-                    : `<tr><td colspan="4" class="text-muted">无文档</td></tr>`
-                }</tbody>
+                <thead><tr><th>文件名</th><th>状态</th><th>分段</th></tr></thead>
+                <tbody>
+                  ${
+                    docs.length
+                      ? docs
+                          .slice(0, 50)
+                          .map(
+                            (doc) =>
+                              `<tr><td>${escapeHtml(doc.filename || "-")}</td><td>${escapeHtml(doc.status || "-")}</td><td>${escapeHtml(doc.chunk_count ?? 0)}</td></tr>`
+                          )
+                          .join("")
+                      : `<tr><td colspan="3" class="text-muted">无文档</td></tr>`
+                  }
+                </tbody>
               </table></div>`,
             actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
           });
@@ -4501,12 +5066,13 @@ async function pageSnapshots(kbId, opts = {}) {
                 configChanges.length
                   ? `<h4 style="margin:12px 0 8px;font-size:14px">配置差异</h4>
                     <ul class="list-plain">${configChanges
-                      .map(
-                        (c) =>
-                          `<li>${escapeHtml(CONFIG_FIELD_LABELS[c.field] || c.field)}：
-                            <code>${escapeHtml(JSON.stringify(c.current))}</code>
-                            → <code>${escapeHtml(JSON.stringify(c.snapshot))}</code></li>`
-                      )
+                      .map((c) => {
+                        const fmt = (v) =>
+                          c.field === "split_mode" ? splitModeLabel(v) : JSON.stringify(v);
+                        return `<li>${escapeHtml(CONFIG_FIELD_LABELS[c.field] || c.field)}：
+                            <code>${escapeHtml(fmt(c.current))}</code>
+                            → <code>${escapeHtml(fmt(c.snapshot))}</code></li>`;
+                      })
                       .join("")}</ul>`
                   : `<p class="text-muted">配置项与当前一致</p>`
               }
@@ -4599,7 +5165,7 @@ async function pageSnapshots(kbId, opts = {}) {
         const sid = btn.getAttribute("data-del");
         const ok = await confirmDialog({
           title: "删除快照",
-          message: "删除后列表中不再展示该快照（软删除）。回退保护快照不可删。确定删除？",
+          message: "删除后列表中不再展示该快照（列表侧软删除，不可恢复展示）。回退保护快照不可删。确定删除？",
           confirmText: "删除",
           danger: true,
         });
@@ -4841,35 +5407,22 @@ async function pageHitTest() {
   };
 
   try {
-    const [casesData, runsData, kbData] = await Promise.all([
-      api.get("/hit-tests/cases?page=1&page_size=50"),
-      api.get("/hit-tests/runs?page=1&page_size=100"),
-      api.get("/knowledge-bases?page=1&page_size=50"),
+    const [cases, runs, kbs] = await Promise.all([
+      fetchAllPagedItems("/hit-tests/cases", { pageSize: 100, maxItems: 500 }),
+      fetchAllPagedItems("/hit-tests/runs", { pageSize: 100, maxItems: 500 }),
+      fetchAllPagedItems("/knowledge-bases", { pageSize: 100, maxItems: 100 }),
     ]);
-    // 兼容 data 解包异常或直接返回数组
-    const cases = Array.isArray(casesData)
-      ? casesData
-      : Array.isArray(casesData?.items)
-        ? casesData.items
-        : [];
-    const runs = Array.isArray(runsData)
-      ? runsData
-      : Array.isArray(runsData?.items)
-        ? runsData.items
-        : [];
-    const kbs = Array.isArray(kbData)
-      ? kbData
-      : Array.isArray(kbData?.items)
-        ? kbData.items
-        : [];
 
     // 预加载各库文档（创建用例时匹配期望文档）
     const docsByKb = {};
     await Promise.all(
       kbs.map(async (kb) => {
         try {
-          const d = await api.get(`/knowledge-bases/${kb.id}/documents?page=1&page_size=100`);
-          docsByKb[String(kb.id)] = { name: kb.name, docs: d.items || [] };
+          const docs = await fetchAllPagedItems(`/knowledge-bases/${kb.id}/documents`, {
+            pageSize: 100,
+            maxItems: 500,
+          });
+          docsByKb[String(kb.id)] = { name: kb.name, docs };
         } catch {
           docsByKb[String(kb.id)] = { name: kb.name, docs: [] };
         }
@@ -4956,7 +5509,7 @@ async function pageHitTest() {
           ${
             canWrite
               ? `<button type="button" class="btn" id="btnRunTest">执行测试</button>
-                 <button type="button" class="btn btn-secondary" id="btnClearCase">清除已选</button>`
+                 <button type="button" class="btn btn-secondary" id="btnClearCase">取消已选</button>`
               : `<span class="text-muted">需要 test:write 才能执行</span>`
           }
         </div>
@@ -5002,7 +5555,7 @@ async function pageHitTest() {
                                 <button type="button" class="btn btn-secondary btn-sm" data-edit-case="${escapeHtml(cid)}">编辑</button>
                               </div>
                               <div class="table-actions-row">
-                                <button type="button" class="btn btn-danger btn-sm" data-del-case="${escapeHtml(cid)}">清除</button>
+                                <button type="button" class="btn btn-danger btn-sm" data-del-case="${escapeHtml(cid)}">删除</button>
                               </div>
                             </div>`
                                 : `<span class="cell-muted">—</span>`
@@ -5030,7 +5583,7 @@ async function pageHitTest() {
             <div class="card-header-actions">
             ${
               canWrite && runs.length
-                ? `<button type="button" class="btn btn-danger btn-sm" id="btnClearAllRuns">清除全部</button>`
+                ? `<button type="button" class="btn btn-danger btn-sm" id="btnClearAllRuns">删除全部</button>`
                 : ""
             }
             </div>
@@ -5054,7 +5607,7 @@ async function pageHitTest() {
             </tr></thead>
             <tbody id="htRunTableBody"></tbody>
           </table></div>
-          <div class="pager pager-stack" id="htRunPager" hidden></div>
+          <div class="pager pager-center" id="htRunPager" hidden></div>
         </div>
 
         <div class="card span-12" id="htRunDetailCard">
@@ -5149,18 +5702,18 @@ async function pageHitTest() {
         if (delBtn) {
           (async () => {
             const ok = await confirmDialog({
-              title: "清除用例",
-              message: "确定清除该测试用例？",
-              confirmText: "清除",
+              title: "删除用例",
+              message: "确定删除该测试用例？此操作不可恢复。",
+              confirmText: "删除",
               danger: true,
             });
             if (!ok) return;
             try {
               await api.delete(`/hit-tests/cases/${delBtn.getAttribute("data-del-case")}`);
-              toast("已清除", "success");
+              toast("已删除", "success");
               pageHitTest();
             } catch (err) {
-              toast(err.message || "清除失败", "error");
+              toast(err.message || "删除失败", "error");
             }
           })();
         }
@@ -5188,7 +5741,7 @@ async function pageHitTest() {
     const btnNew = document.getElementById("btnNewCase");
     if (btnNew) btnNew.onclick = () => openCreateCase(docsByKb);
 
-    const HT_RUN_PAGE_SIZE = 5;
+    const HT_RUN_PAGE_SIZE = 20;
     let runListPage = 1;
 
     const renderRunsPage = () => {
@@ -5227,7 +5780,7 @@ async function pageHitTest() {
             <td class="col-actions">
               <div class="table-actions table-actions-col ht-run-actions">
                 <button type="button" class="btn btn-secondary btn-sm" data-run="${escapeHtml(String(r.id))}">详情</button>
-                ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">清除</button>` : ""}
+                ${canWrite ? `<button type="button" class="btn btn-danger btn-sm" data-del-run="${escapeHtml(String(r.id))}">删除</button>` : ""}
               </div>
             </td>
           </tr>`
@@ -5240,16 +5793,13 @@ async function pageHitTest() {
         pager.innerHTML = "";
         return;
       }
-      const { buttons, jump } = renderCompactPagerParts(runListPage, totalPages);
       pager.hidden = false;
-      pager.innerHTML = `
-        <div class="pager-row">
-          <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${runListPage <= 1 ? "disabled" : ""}>上一页</button>
-          ${buttons}
-          <button type="button" class="btn btn-secondary btn-sm" data-page-next ${runListPage >= totalPages ? "disabled" : ""}>下一页</button>
-        </div>
-        <div class="pager-row pager-row-jump">${jump}</div>`;
-      bindCompactPager(pager, {
+      pager.outerHTML = compactPagerHtml("htRunPager", runListPage, totalPages, {
+        total,
+        pageSize: HT_RUN_PAGE_SIZE,
+      });
+      const nextPager = document.getElementById("htRunPager");
+      bindCompactPager(nextPager, {
         page: runListPage,
         totalPages,
         onGo: (p) => {
@@ -5273,18 +5823,18 @@ async function pageHitTest() {
         if (delBtn) {
           (async () => {
             const ok = await confirmDialog({
-              title: "清除运行记录",
-              message: "确定清除这条运行记录？",
-              confirmText: "清除",
+              title: "删除运行记录",
+              message: "确定删除这条运行记录？此操作不可恢复。",
+              confirmText: "删除",
               danger: true,
             });
             if (!ok) return;
             try {
               await api.delete(`/hit-tests/runs/${delBtn.getAttribute("data-del-run")}`);
-              toast("已清除", "success");
+              toast("已删除", "success");
               pageHitTest();
             } catch (err) {
-              toast(err.message || "清除失败", "error");
+              toast(err.message || "删除失败", "error");
             }
           })();
         }
@@ -5295,19 +5845,19 @@ async function pageHitTest() {
     if (btnClearAllRuns) {
       btnClearAllRuns.onclick = async () => {
         const ok = await confirmDialog({
-          title: "清除全部运行记录",
+          title: "删除全部运行记录",
           message: "将删除全部历史运行记录，不可恢复。确定继续？",
-          confirmText: "全部清除",
+          confirmText: "全部删除",
           danger: true,
         });
         if (!ok) return;
         try {
           const res = await api.delete("/hit-tests/runs");
           const n = res?.deleted;
-          toast(n != null ? `已清除 ${n} 条运行记录` : "已清除全部记录", "success");
+          toast(n != null ? `已删除 ${n} 条运行记录` : "已删除全部记录", "success");
           pageHitTest();
         } catch (err) {
-          toast(err.message || "清除失败", "error");
+          toast(err.message || "删除失败", "error");
         }
       };
     }
@@ -5548,17 +6098,70 @@ async function pageRagas() {
   const root = document.getElementById("pageRoot");
   root.innerHTML = `<div class="loading">加载 RAGAS 评估记录…</div>`;
   try {
-    const [kbData, runData] = await Promise.all([
-      api.get("/knowledge-bases?page=1&page_size=100"),
-      api.get("/ragas/runs?page=1&page_size=50"),
+    const [knowledgeBases, runs] = await Promise.all([
+      fetchAllPagedItems("/knowledge-bases", { pageSize: 100, maxItems: 100 }),
+      fetchAllPagedItems("/ragas/runs", { pageSize: 100, maxItems: 500 }),
     ]);
-    const knowledgeBases = kbData.items || [];
-    const runs = runData.items || [];
+    const RAGAS_PAGE_SIZE = 20;
+    let ragasListPage = 1;
     const kbOptions = knowledgeBases
       .map((kb) => `<option value="${escapeHtml(kb.id)}">${escapeHtml(kb.name)}</option>`)
       .join("");
     /** @type {ReturnType<typeof createRagasDraft>[]} */
     let drafts = [];
+
+    const paintRagasRuns = () => {
+      const tbody = document.getElementById("ragasRunsBody");
+      const sub = document.getElementById("ragasRunsSub");
+      const pagerMount = document.getElementById("ragasRunsPager");
+      if (!tbody) return;
+      const total = runs.length;
+      const totalPages = Math.max(1, Math.ceil(total / RAGAS_PAGE_SIZE) || 1);
+      if (ragasListPage > totalPages) ragasListPage = totalPages;
+      const start = (ragasListPage - 1) * RAGAS_PAGE_SIZE;
+      const pageItems = runs.slice(start, start + RAGAS_PAGE_SIZE);
+      if (sub) sub.textContent = `共 ${total} 次 · 第 ${ragasListPage}/${totalPages} 页`;
+      tbody.innerHTML = pageItems.length
+        ? pageItems
+            .map(
+              (run) => `<tr>
+                        <td>${escapeHtml(run.kb_name || run.kb_id)}</td>
+                        <td class="col-status"><span class="badge ${
+                          run.status === "completed"
+                            ? "badge-success"
+                            : run.status === "failed"
+                              ? "badge-danger"
+                              : "badge-info"
+                        }">${run.status === "completed" ? "已完成" : run.status === "failed" ? "失败" : "运行中"}</span>${run.error_message ? `<div class="text-danger" style="max-width:220px">${escapeHtml(run.error_message)}</div>` : ""}</td>
+                        <td>${escapeHtml(run.sample_count ?? 0)}</td>
+                        <td>${ragasScore(run.metric_scores?.faithfulness)}</td>
+                        <td>${ragasScore(run.metric_scores?.answer_relevancy)}</td>
+                        <td>${ragasScore(run.metric_scores?.context_precision)}</td>
+                        <td>${ragasScore(run.metric_scores?.context_recall)}</td>
+                        <td class="col-time">${formatDateTimeHtml(run.completed_at || run.created_at)}</td>
+                        <td><button type="button" class="btn btn-text btn-sm" data-ragas-detail="${escapeHtml(run.id)}">详细结果</button></td>
+                      </tr>`
+            )
+            .join("")
+        : `<tr><td colspan="9" class="text-muted">暂无评估记录，请准备样本后开始评估</td></tr>`;
+      if (pagerMount) {
+        pagerMount.innerHTML = compactPagerHtml("ragasPager", ragasListPage, totalPages, {
+          total,
+          pageSize: RAGAS_PAGE_SIZE,
+        });
+        bindCompactPager(document.getElementById("ragasPager"), {
+          page: ragasListPage,
+          totalPages,
+          onGo: (p) => {
+            ragasListPage = p;
+            paintRagasRuns();
+          },
+        });
+      }
+      tbody.querySelectorAll("[data-ragas-detail]").forEach((button) => {
+        button.onclick = () => openRagasRunDetail(button.getAttribute("data-ragas-detail"));
+      });
+    };
 
     const renderDrafts = () => {
       const list = document.getElementById("ragasDraftList");
@@ -5671,43 +6274,21 @@ async function pageRagas() {
       </div>
       <div class="card panel-fill span-12">
         <div class="card-header">
-          <div class="card-header-text"><h3 class="card-title">评估记录</h3></div>
-          <span class="badge">共 ${escapeHtml(runData.total ?? runs.length)} 次</span>
+          <div class="card-header-text">
+            <h3 class="card-title">评估记录</h3>
+            <p class="card-sub" id="ragasRunsSub">共 ${escapeHtml(runs.length)} 次</p>
+          </div>
         </div>
         <div class="table-wrap"><table class="table">
           <thead><tr><th>知识库</th><th>状态</th><th>样本</th><th>忠实度</th><th>答案相关性</th><th>上下文精确率</th><th>上下文召回率</th><th class="col-time">完成时间</th><th></th></tr></thead>
-          <tbody>
-            ${
-              runs.length
-                ? runs
-                    .map(
-                      (run) => `<tr>
-                        <td>${escapeHtml(run.kb_name || run.kb_id)}</td>
-                        <td class="col-status"><span class="badge ${
-                          run.status === "completed"
-                            ? "badge-success"
-                            : run.status === "failed"
-                              ? "badge-danger"
-                              : "badge-info"
-                        }">${run.status === "completed" ? "已完成" : run.status === "failed" ? "失败" : "运行中"}</span>${run.error_message ? `<div class="text-danger" style="max-width:220px">${escapeHtml(run.error_message)}</div>` : ""}</td>
-                        <td>${escapeHtml(run.sample_count ?? 0)}</td>
-                        <td>${ragasScore(run.metric_scores?.faithfulness)}</td>
-                        <td>${ragasScore(run.metric_scores?.answer_relevancy)}</td>
-                        <td>${ragasScore(run.metric_scores?.context_precision)}</td>
-                        <td>${ragasScore(run.metric_scores?.context_recall)}</td>
-                        <td class="col-time">${formatDateTimeHtml(run.completed_at || run.created_at)}</td>
-                        <td><button type="button" class="btn btn-text btn-sm" data-ragas-detail="${escapeHtml(run.id)}">详细结果</button></td>
-                      </tr>`
-                    )
-                    .join("")
-                : `<tr><td colspan="9" class="text-muted">暂无评估记录，请准备样本后开始评估</td></tr>`
-            }
-          </tbody>
+          <tbody id="ragasRunsBody"></tbody>
         </table></div>
+        <div id="ragasRunsPager"></div>
       </div>
       </div>`;
 
     renderDrafts();
+    paintRagasRuns();
 
     document.getElementById("ragasKb").onchange = () => {
       drafts = [];
@@ -5923,27 +6504,42 @@ async function pageQaSessions() {
   const root = document.getElementById("pageRoot");
   root.innerHTML = `<div class="loading">加载会话与 Query 预处理记录…</div>`;
 
-  try {
-    // 配置与会话记录彼此独立，并行加载可以缩短管理页首屏等待时间。
-    const [data, queryConfig] = await Promise.all([
-      api.get("/qa/admin/sessions?page=1&page_size=50"),
-      api.get("/query-processing"),
-    ]);
-    const sessions = data.items || [];
-    const canWrite = hasPermission("kb:write");
-    root.innerHTML = `
+  const PAGE_SIZE = 20;
+  let listPage = 1;
+  /** @type {object|null} */
+  let cachedQueryConfig = null;
+
+  const paint = async () => {
+    try {
+      const sessionReq = api.get(`/qa/admin/sessions?page=${listPage}&page_size=${PAGE_SIZE}`);
+      const configReq = cachedQueryConfig
+        ? Promise.resolve(cachedQueryConfig)
+        : api.get("/query-processing");
+      const [data, queryConfig] = await Promise.all([sessionReq, configReq]);
+      cachedQueryConfig = queryConfig;
+      const sessions = data.items || [];
+      const total = Number(data.total ?? sessions.length);
+      const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE) || 1);
+      if (listPage > totalPages) {
+        listPage = totalPages;
+        return paint();
+      }
+      const canWrite = hasPermission("kb:write");
+      const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
+      root.innerHTML = `
       ${pageHead({
         title: "会话分析",
-        desc: "Query 预处理策略与会话审计。HyDE 只用于向量召回，不作为回答依据。",
+        desc: "全局 Query 预处理策略（改写 / 扩展 / HyDE）与会话审计。可在本页上方直接调整策略；HyDE 只用于向量召回，不作为回答依据。",
+        actions: canWrite ? "" : `<span class="role-chip" title="保存策略需要 kb:write 权限">策略只读 · 需 kb:write</span>`,
       })}
       <div class="page-grid">
       <div class="card span-12">
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">Query 预处理策略</h3>
-            <p class="card-sub">默认关闭改写、扩展与 HyDE；开启后会增加模型开销。上下文追问可由业务路由临时启用改写。</p>
+            <p class="card-sub">默认关闭改写、扩展与 HyDE；开启后会增加模型开销。保存需 kb:write。上下文追问可由业务路由临时启用改写。</p>
           </div>
-          ${canWrite ? `<div class="card-header-actions"><button type="button" class="btn btn-primary btn-sm" data-query-config-save>保存策略</button></div>` : ""}
+          ${canWrite ? `<div class="card-header-actions"><button type="button" class="btn btn-primary btn-sm" data-query-config-save>保存策略</button></div>` : `<div class="card-header-actions"><span class="text-muted" title="需要 kb:write">无保存权限</span></div>`}
         </div>
         <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:8px">
@@ -5963,14 +6559,18 @@ async function pageQaSessions() {
             启用 HyDE 假设文档
           </label>
         </div>
+        <div class="query-config-hints" style="margin-top:14px;display:grid;gap:4px">
+          <p class="card-sub" style="margin:0">启用 Query 改写：将口语化、省略或指代不清的问题改写成更适合检索的完整问句，提升命中率；会额外调用模型，增加耗时与费用。</p>
+          <p class="card-sub" style="margin:0">启用 Query 扩展：在原问题之外再生成若干近义/补充检索词（数量由「扩展数量」控制），扩大召回面；同样增加模型开销。</p>
+          <p class="card-sub" style="margin:0">启用 HyDE 假设文档：先让模型写一段「假设会出现在知识库里的答案」，再用该文本做向量检索；只参与召回，不会当作最终回答依据。</p>
+        </div>
       </div>
       <div class="card panel-fill span-12">
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">Query 预处理审计</h3>
-            <p class="card-sub">原始 Query、改写、扩展与 HyDE</p>
+            <p class="card-sub">原始 Query、改写、扩展与 HyDE · 共 ${escapeHtml(total)} 个会话 · 第 ${listPage}/${totalPages} 页</p>
           </div>
-          <span class="badge">共 ${escapeHtml(data.total ?? sessions.length)} 个会话</span>
         </div>
         <div class="table-wrap"><table class="table">
           <thead><tr><th>会话</th><th>用户</th><th>类型</th><th>消息数</th><th class="col-time">最后活跃</th><th></th></tr></thead>
@@ -5993,43 +6593,68 @@ async function pageQaSessions() {
             }
           </tbody>
         </table></div>
+        ${
+          total > PAGE_SIZE
+            ? `<div class="pager pager-center" id="qaSessionPager">
+                <button type="button" class="btn btn-secondary btn-sm" data-page-prev ${listPage <= 1 ? "disabled" : ""}>上一页</button>
+                ${pageButtons}
+                <button type="button" class="btn btn-secondary btn-sm" data-page-next ${listPage >= totalPages ? "disabled" : ""}>下一页</button>
+                ${pageJump}
+              </div>`
+            : ""
+        }
       </div>
       </div>`;
 
-    if (canWrite) {
-      const expansionToggle = root.querySelector("[data-query-expansion]");
-      const expansionCount = root.querySelector("[data-query-expansion-count]");
-      // 扩展关闭时禁用数量输入，防止管理员误以为数量仍会生效。
-      expansionToggle.onchange = () => {
-        expansionCount.disabled = !expansionToggle.checked;
-      };
-      root.querySelector("[data-query-config-save]").onclick = async () => {
-        const count = Number(expansionCount.value);
-        if (!Number.isInteger(count) || count < 0 || count > 5) {
-          toast("Query 扩展数量必须是 0-5 的整数", "error");
-          return;
-        }
-        try {
-          await api.put("/query-processing", {
-            rewrite_enabled: root.querySelector("[data-query-rewrite]").checked,
-            expansion_enabled: expansionToggle.checked,
-            expansion_count: count,
-            hyde_enabled: root.querySelector("[data-query-hyde]").checked,
-          });
-          toast("Query 预处理策略已保存");
-          await pageQaSessions();
-        } catch (error) {
-          toast(`保存 Query 预处理策略失败：${error.message}`, "error");
-        }
-      };
-    }
+      if (canWrite) {
+        const expansionToggle = root.querySelector("[data-query-expansion]");
+        const expansionCount = root.querySelector("[data-query-expansion-count]");
+        expansionToggle.onchange = () => {
+          expansionCount.disabled = !expansionToggle.checked;
+        };
+        root.querySelector("[data-query-config-save]").onclick = async () => {
+          const count = Number(expansionCount.value);
+          if (!Number.isInteger(count) || count < 0 || count > 5) {
+            toast("Query 扩展数量必须是 0-5 的整数", "error");
+            return;
+          }
+          try {
+            await api.put("/query-processing", {
+              rewrite_enabled: root.querySelector("[data-query-rewrite]").checked,
+              expansion_enabled: expansionToggle.checked,
+              expansion_count: count,
+              hyde_enabled: root.querySelector("[data-query-hyde]").checked,
+            });
+            cachedQueryConfig = null;
+            toast("Query 预处理策略已保存");
+            await paint();
+          } catch (error) {
+            toast(`保存 Query 预处理策略失败：${error.message}`, "error");
+          }
+        };
+      }
 
-    root.querySelectorAll("[data-session-detail]").forEach((button) => {
-      button.onclick = () => openQaSessionDetail(button.getAttribute("data-session-detail"));
-    });
-  } catch (error) {
-    root.innerHTML = `<div class="card empty-state">加载会话分析失败：${escapeHtml(error.message)}</div>`;
-  }
+      root.querySelectorAll("[data-session-detail]").forEach((button) => {
+        button.onclick = () => openQaSessionDetail(button.getAttribute("data-session-detail"));
+      });
+
+      const pager = document.getElementById("qaSessionPager");
+      if (pager) {
+        bindCompactPager(pager, {
+          page: listPage,
+          totalPages,
+          onGo: (p) => {
+            listPage = p;
+            paint();
+          },
+        });
+      }
+    } catch (error) {
+      root.innerHTML = `<div class="card empty-state">加载会话分析失败：${escapeHtml(error.message)}</div>`;
+    }
+  };
+
+  await paint();
 }
 
 /* ========== 角色缓存 /admin/role-caches ========== */
@@ -6259,6 +6884,10 @@ async function openQaSessionDetail(sessionId) {
             const hyde = processing.hyde_document || "";
             const rerank = meta.rerank || {};
             const intent = meta.intent || {};
+            const fb = meta.feedback || {};
+            const fbLabel =
+              fb.rating === "useful" ? "有用" : fb.rating === "useless" ? "无用" : "未反馈";
+            const fbComment = fb.comment ? String(fb.comment) : "";
             return `
               <div class="card" style="margin-bottom:12px;background:var(--color-bg-tint,#f8f9fa)">
                 <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
@@ -6273,6 +6902,7 @@ async function openQaSessionDetail(sessionId) {
                   <span class="text-muted">HyDE 假设文档</span><div style="white-space:pre-wrap">${hyde ? escapeHtml(hyde) : "-"}</div>
                   <span class="text-muted">检索结果</span><div>命中 ${escapeHtml(meta.hit_count ?? 0)} 段；扩展 Query ${escapeHtml(meta.expanded_query_count ?? expansions.length)} 条；HyDE ${meta.hyde_used ? "已参与向量检索" : "未参与"}</div>
                   <span class="text-muted">Rerank</span><div>${rerank.applied ? `${escapeHtml(rerank.provider || "-")} / ${escapeHtml(rerank.model || "-")}` : `未应用${rerank.error ? `（${escapeHtml(rerank.error)}）` : ""}`}</div>
+                  <span class="text-muted">用户反馈</span><div>${escapeHtml(fbLabel)}${fbComment ? ` · ${escapeHtml(fbComment)}` : ""}</div>
                   <span class="text-muted">最终回答</span><div style="white-space:pre-wrap">${escapeHtml(turn.answer?.content || "-")}</div>
                 </div>
               </div>`;
@@ -6817,15 +7447,18 @@ async function pageQaAnalytics() {
   const useless = Number(feedback?.useless || 0);
   const fbTotal = useful + useless;
   const usefulPct = fbTotal ? Math.round((useful / fbTotal) * 100) : 0;
+  const requestEvents = Number(feedback?.request_events || 0);
+  const feedbackRateDisplay =
+    requestEvents > 0 ? `${(Number(feedback?.feedback_rate || 0) * 100).toFixed(2)}%` : "—";
   const feedbackPieHtml = feedback
     ? `<div class="monitor-feedback-chart">
         <div class="monitor-pie" style="--useful:${usefulPct}" title="有用 ${useful} / 无用 ${useless}" aria-label="反馈占比"></div>
         <ul class="list-plain monitor-stats-list">
-          <li><span class="monitor-stat-label">问答事件</span><span class="monitor-stat-value">${feedback.request_events ?? 0}</span></li>
+          <li><span class="monitor-stat-label">问答事件</span><span class="monitor-stat-value">${requestEvents}</span></li>
           <li><span class="monitor-stat-label">独立会话</span><span class="monitor-stat-value">${feedback.unique_conversations ?? 0}</span></li>
-          <li><span class="monitor-stat-label">反馈率</span><span class="monitor-stat-value">${Math.round(Number(feedback.feedback_rate || 0) * 1000) / 10}%</span></li>
-          <li><span class="monitor-stat-label"><span class="legend-dot legend-useful"></span>有用</span><span class="monitor-stat-value">${useful}</span></li>
-          <li><span class="monitor-stat-label"><span class="legend-dot legend-useless"></span>无用</span><span class="monitor-stat-value">${useless}</span></li>
+          <li><span class="monitor-stat-label">反馈率</span><span class="monitor-stat-value">${escapeHtml(feedbackRateDisplay)}</span></li>
+          <li><span class="monitor-stat-label"><span class="legend-dot legend-useful"></span>有用（累计）</span><span class="monitor-stat-value">${useful}</span></li>
+          <li><span class="monitor-stat-label"><span class="legend-dot legend-useless"></span>无用（累计）</span><span class="monitor-stat-value">${useless}</span></li>
           ${
             feedback.avg_latency_ms != null
               ? `<li><span class="monitor-stat-label">平均耗时</span><span class="monitor-stat-value">${feedback.avg_latency_ms} ms</span></li>`
@@ -6836,31 +7469,75 @@ async function pageQaAnalytics() {
     : `<p class="text-muted">暂无反馈统计（需已产生问答事件与点赞/点踩）</p>`;
 
   const trend = Array.isArray(feedback?.trend) ? feedback.trend : [];
+  const trendLabels = trend.map((x) => {
+    const d = String(x.date || "");
+    return d.length >= 10 ? d.slice(5) : d;
+  });
   const trendHtml = trend.length
     ? renderBars(
         trend.map((x) => x.requests || 0),
-        {
-          labels: trend.map((x) => {
-            const d = String(x.date || "");
-            return d.length >= 10 ? d.slice(5) : d;
-          }),
-        }
+        { labels: trendLabels }
       )
     : `<p class="text-muted">暂无近 ${days} 日问答趋势</p>`;
+  const feedbackTrendHtml = trend.length
+    ? `<div class="dash-fb-trend">
+        <div class="dash-fb-trend-block">
+          <div class="dash-fb-trend-label"><span class="legend-dot legend-useful"></span>有用</div>
+          ${renderBars(
+            trend.map((x) => x.useful || 0),
+            { labels: trendLabels }
+          )}
+        </div>
+        <div class="dash-fb-trend-block">
+          <div class="dash-fb-trend-label"><span class="legend-dot legend-useless"></span>无用</div>
+          ${renderBars(
+            trend.map((x) => x.useless || 0),
+            { labels: trendLabels }
+          )}
+        </div>
+      </div>`
+    : `<p class="text-muted">暂无近 ${days} 日点赞/点踩趋势</p>`;
 
   const routeDist = Array.isArray(feedback?.route_distribution) ? feedback.route_distribution : [];
   const cacheDist = Array.isArray(feedback?.cache_distribution) ? feedback.cache_distribution : [];
-  const routeHtml = routeDist.length
-    ? renderBars(
-        routeDist.map((x) => x.count),
-        { labels: routeDist.map((x) => x.label) }
+  const routeLabelOf = (label) => {
+    const key = String(label || "").trim().toUpperCase();
+    const map = {
+      NEW_KB_QUERY: "新知识查询",
+      FOLLOW_UP: "追问续聊",
+      GREETING: "问候",
+      CHITCHAT: "闲聊",
+      UNKNOWN: "未知",
+    };
+    return map[key] || label || "—";
+  };
+  const cacheLabelOf = (label) => {
+    const key = String(label || "").trim().toLowerCase();
+    const map = {
+      none: "未命中缓存",
+      l1: "L1 缓存",
+      l2: "L2 缓存",
+      role: "角色缓存",
+      semantic: "语义缓存",
+    };
+    return map[key] || label || "—";
+  };
+  const renderCountList = (rows, labelFn) => {
+    if (!rows.length) return "";
+    return `<ul class="list-plain monitor-stats-list">${rows
+      .map(
+        (x) =>
+          `<li><span class="monitor-stat-label" title="${escapeHtml(x.label || "")}">${escapeHtml(
+            labelFn(x.label)
+          )}</span><span class="monitor-stat-value">${escapeHtml(x.count ?? 0)}</span></li>`
       )
+      .join("")}</ul>`;
+  };
+  const routeHtml = routeDist.length
+    ? renderCountList(routeDist, routeLabelOf)
     : `<p class="text-muted">暂无路由分布</p>`;
   const cacheHtml = cacheDist.length
-    ? renderBars(
-        cacheDist.map((x) => x.count),
-        { labels: cacheDist.map((x) => x.label) }
-      )
+    ? renderCountList(cacheDist, cacheLabelOf)
     : `<p class="text-muted">暂无缓存分布</p>`;
 
   const topicItems = Array.isArray(topics?.items) ? topics.items : [];
@@ -6909,19 +7586,26 @@ async function pageQaAnalytics() {
       </div>
       <div class="dash-chart-body monitor-chart-body">${trendHtml}</div>
     </div>
+    <div class="card span-12">
+      <div class="card-header">
+        <div class="card-header-text"><h3 class="card-title">近 ${days} 日点赞 / 点踩</h3>
+        <p class="card-sub">按日反馈事件（与上方 KPI 同一窗口）</p></div>
+      </div>
+      <div class="dash-chart-body monitor-chart-body">${feedbackTrendHtml}</div>
+    </div>
     <div class="card span-6">
       <div class="card-header">
         <div class="card-header-text"><h3 class="card-title">近 ${days} 日路由分布</h3>
         <p class="card-sub">意图路由计数</p></div>
       </div>
-      <div class="dash-chart-body monitor-chart-body">${routeHtml}</div>
+      <div class="monitor-stats-body">${routeHtml}</div>
     </div>
     <div class="card span-6">
       <div class="card-header">
         <div class="card-header-text"><h3 class="card-title">近 ${days} 日缓存层分布</h3>
         <p class="card-sub">命中层级计数</p></div>
       </div>
-      <div class="dash-chart-body monitor-chart-body">${cacheHtml}</div>
+      <div class="monitor-stats-body">${cacheHtml}</div>
     </div>
     <div class="card span-12">
       <div class="card-header">
@@ -7093,21 +7777,23 @@ async function pageMonitor() {
       <div class="card-header">
         <div class="card-header-text">
           <h3 class="card-title">Grafana 面板</h3>
-          <p class="card-sub">经 Nginx 反代嵌入本地 Grafana（匿名只读）</p>
+          <p class="card-sub">经 Nginx 反代嵌入本地 Grafana（匿名只读）。若下方空白，请点「打开 Overview」或检查 /grafana 是否可用</p>
         </div>
         <div class="card-header-actions">
           <a class="btn btn-secondary btn-sm" href="/grafana/d/rag-overview/overview?orgId=1&kiosk&theme=dark" target="_blank" rel="noopener">打开 Overview</a>
           <a class="btn btn-text btn-sm" href="/grafana/" target="_blank" rel="noopener">Grafana</a>
         </div>
       </div>
-      <div class="embed-frame" style="padding:0;min-height:520px">
+      <div class="embed-frame" style="padding:0;min-height:520px;position:relative">
+        <p class="text-muted" id="grafanaEmbedHint" style="position:absolute;inset:16px;z-index:0;margin:0;pointer-events:none">若面板长时间未显示，多为 Grafana 未启动或路径配置不符。</p>
         <iframe
           title="Grafana"
           src="/grafana/d/rag-overview/overview?orgId=1&kiosk&theme=dark"
-          style="width:100%;height:520px;border:0;border-radius:16px;background:#0b0f19"
+          style="width:100%;height:520px;border:0;border-radius:16px;background:#0b0f19;position:relative;z-index:1"
           loading="lazy"
           referrerpolicy="same-origin"
           allow="fullscreen"
+          onload="const h=document.getElementById('grafanaEmbedHint'); if(h) h.style.display='none';"
         ></iframe>
       </div>
     </div>
@@ -7121,16 +7807,51 @@ async function pageMonitor() {
 async function pageGuardEvents() {
   if (!requirePerm("system:read", "LLM Guard 拦截")) return;
   const canOpenUsers = hasPermission("user:read");
-  document.getElementById("pageRoot").innerHTML = `<div class="loading">加载拦截记录…</div>`;
-  let data = { items: [], total: 0, blocked_24h: 0, blocked_7d: 0 };
+  const root = document.getElementById("pageRoot");
+  root.innerHTML = `<div class="loading">加载拦截记录…</div>`;
+  const GUARD_PAGE_SIZE = 20;
+  const GUARD_MAX = 200;
+  let listPage = 1;
+  let meta = { blocked_24h: 0, blocked_7d: 0, total: 0 };
+  /** @type {any[]} */
+  let allItems = [];
+
   try {
-    data = (await api.get("/monitor/guard-events?page=1&page_size=50")) || data;
+    const pageSize = 100;
+    let page = 1;
+    let total = Infinity;
+    const collected = [];
+    while (collected.length < GUARD_MAX && collected.length < total) {
+      const data = (await api.get(`/monitor/guard-events?page=${page}&page_size=${pageSize}`)) || {};
+      if (page === 1) {
+        meta = {
+          blocked_24h: data.blocked_24h ?? 0,
+          blocked_7d: data.blocked_7d ?? 0,
+          total: data.total ?? 0,
+        };
+      }
+      const items = data.items || [];
+      total = Number(data.total ?? collected.length + items.length);
+      const room = GUARD_MAX - collected.length;
+      collected.push(...items.slice(0, Math.max(0, room)));
+      if (!items.length || items.length < pageSize) break;
+      page += 1;
+      if (page > 5) break;
+    }
+    allItems = collected;
   } catch (e) {
-    document.getElementById("pageRoot").innerHTML = `<div class="card text-danger">${escapeHtml(e.message || "加载失败")}</div>`;
+    root.innerHTML = `<div class="card text-danger">${escapeHtml(e.message || "加载失败")}</div>`;
     return;
   }
-  const items = data.items || [];
-  document.getElementById("pageRoot").innerHTML = `
+
+  const paint = () => {
+    const total = allItems.length;
+    const totalPages = Math.max(1, Math.ceil(total / GUARD_PAGE_SIZE) || 1);
+    if (listPage > totalPages) listPage = totalPages;
+    const start = (listPage - 1) * GUARD_PAGE_SIZE;
+    const pageItems = allItems.slice(start, start + GUARD_PAGE_SIZE);
+
+    root.innerHTML = `
     ${pageHead({
       title: "LLM Guard 拦截",
       desc: "恶意访问阻拦审计：账号、来源 IP、意图与原因码。不含用户完整问题原文。",
@@ -7139,17 +7860,17 @@ async function pageGuardEvents() {
     <div class="page-grid">
       <div class="card span-6">
         <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 24 小时</h3></div></div>
-        <div class="value" style="font-size:28px;font-weight:700">${escapeHtml(data.blocked_24h ?? 0)}</div>
+        <div class="value" style="font-size:28px;font-weight:700">${escapeHtml(meta.blocked_24h ?? 0)}</div>
       </div>
       <div class="card span-6">
         <div class="card-header"><div class="card-header-text"><h3 class="card-title">近 7 天</h3></div></div>
-        <div class="value" style="font-size:28px;font-weight:700">${escapeHtml(data.blocked_7d ?? 0)}</div>
+        <div class="value" style="font-size:28px;font-weight:700">${escapeHtml(meta.blocked_7d ?? 0)}</div>
       </div>
       <div class="card span-12">
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">阻拦记录</h3>
-            <p class="card-sub">共 ${escapeHtml(data.total ?? items.length)} 条，展示最近 ${items.length} 条</p>
+            <p class="card-sub">接口共 ${escapeHtml(meta.total ?? total)} 条 · 本页加载 ${escapeHtml(total)} 条（最多 ${GUARD_MAX}）· 第 ${listPage}/${totalPages} 页</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table">
@@ -7158,8 +7879,8 @@ async function pageGuardEvents() {
           </tr></thead>
           <tbody>
             ${
-              items.length
-                ? items
+              pageItems.length
+                ? pageItems
                     .map((event) => {
                       const registered = event.is_registered && event.user_id;
                       const userBtn =
@@ -7173,7 +7894,7 @@ async function pageGuardEvents() {
                         <td><strong>${escapeHtml(event.actor_label || "访客")}</strong></td>
                         <td><code>${escapeHtml(event.client_ip || "-")}</code></td>
                         <td>${escapeHtml(guardIntentLabel(event.intent))}</td>
-                        <td><code>${escapeHtml(event.reason_code)}</code></td>
+                        <td title="${escapeHtml(event.reason_code || "")}">${escapeHtml(guardReasonLabel(event.reason_code))}${event.reason_code && guardReasonLabel(event.reason_code) !== event.reason_code ? ` <code style="font-size:11px;opacity:.7">${escapeHtml(event.reason_code)}</code>` : ""}</td>
                         <td>${event.detector === "llm" ? "LLM 分类器" : "本地规则"}</td>
                         <td>${formatPercentCell(event.confidence)}</td>
                         <td class="text-muted" style="max-width:220px;font-size:12px">${escapeHtml(event.question_preview || "-")}</td>
@@ -7185,16 +7906,28 @@ async function pageGuardEvents() {
             }
           </tbody>
         </table></div>
+        ${compactPagerHtml("guardPager", listPage, totalPages, { total, pageSize: GUARD_PAGE_SIZE })}
       </div>
     </div>`;
 
-  document.getElementById("btnGuardRefresh")?.addEventListener("click", () => pageGuardEvents());
-  document.querySelectorAll("[data-goto-user]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const uid = btn.getAttribute("data-goto-user");
-      if (uid) navigate(`/admin/users?user=${encodeURIComponent(uid)}`);
+    document.getElementById("btnGuardRefresh")?.addEventListener("click", () => pageGuardEvents());
+    document.querySelectorAll("[data-goto-user]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const uid = btn.getAttribute("data-goto-user");
+        if (uid) navigate(`/admin/users?user=${encodeURIComponent(uid)}`);
+      });
     });
-  });
+    bindCompactPager(document.getElementById("guardPager"), {
+      page: listPage,
+      totalPages,
+      onGo: (p) => {
+        listPage = p;
+        paint();
+      },
+    });
+  };
+
+  paint();
 }
 
 /** 简易 Markdown → HTML（接入指南展示用；覆盖标题/列表/表格/代码块） */
