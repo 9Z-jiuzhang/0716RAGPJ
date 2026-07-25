@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import (
     GUEST_DEPARTMENT_CODE,
-    derive_visibility,
     normalize_department,
 )
 from app.core.exceptions import (
@@ -39,6 +38,13 @@ from app.schemas.knowledge_base import (
 from app.services.chunking import merge_rules
 from app.services.document_pipeline import run_resegment_pipeline
 from app.services.index_switch import IndexSwitchService
+from app.services.kb_departments import (
+    kb_ids_with_department_subquery,
+    list_kb_department_codes,
+    list_kb_department_codes_map,
+    replace_kb_departments,
+    resolve_departments_payload,
+)
 from app.services.observability import write_audit
 from app.services.snapshot_hooks import take_auto_snapshot
 
@@ -66,15 +72,23 @@ class KnowledgeBaseService:
         if existing is not None:
             raise KnowledgeBaseAlreadyExistsException(data.name)
 
-        # 部门驱动：可见性由部门派生（访客专用 -> public，其余 -> restricted）
-        department = normalize_department(data.department)
+        # 部门驱动：可见性由多部门关联派生（含 GUEST -> public）
+        fields_set = getattr(data, "model_fields_set", set()) or set()
+        dept_codes = resolve_departments_payload(
+            departments=data.departments,
+            department=data.department,
+            departments_set="departments" in fields_set,
+            department_set="department" in fields_set,
+        )
+        if dept_codes is None:
+            dept_codes = []
         kb = KnowledgeBase(
             name=data.name,
             type=_enum_str(data.type),
             tags=list(data.tags or []),
             description=data.description,
-            visibility=derive_visibility(department),
-            department=department,
+            visibility="restricted",
+            department=None,
             embedding_model=data.embedding_model,
             chunk_size=data.chunk_size,
             chunk_overlap=data.chunk_overlap,
@@ -83,13 +97,14 @@ class KnowledgeBaseService:
         )
         self.db.add(kb)
         await self.db.flush()
+        await replace_kb_departments(self.db, kb, dept_codes)
         await write_audit(
             self.db,
             user_id=creator_id,
             action="kb.create",
             resource_type="kb",
             resource_id=str(kb.id),
-            detail={"name": kb.name, "department": kb.department, "type": kb.type},
+            detail={"name": kb.name, "departments": dept_codes, "type": kb.type},
         )
         await self.db.commit()
         await self.db.refresh(kb)
@@ -126,12 +141,12 @@ class KnowledgeBaseService:
             dept = normalize_department(getattr(current_user, "department", None))
             # 部门驱动：访客专用库 ∪ 本部门库 ∪ 本人创建 ∪ 显式授权
             scope_filters = [
-                KnowledgeBase.department == GUEST_DEPARTMENT_CODE,
+                KnowledgeBase.id.in_(kb_ids_with_department_subquery(GUEST_DEPARTMENT_CODE)),
                 KnowledgeBase.creator_id == current_user.id,
                 KnowledgeBase.id.in_(granted),
             ]
             if dept:
-                scope_filters.append(KnowledgeBase.department == dept)
+                scope_filters.append(KnowledgeBase.id.in_(kb_ids_with_department_subquery(dept)))
             conditions.append(or_(*scope_filters))
 
         total = await self.db.scalar(select(func.count()).select_from(KnowledgeBase).where(*conditions)) or 0
@@ -146,7 +161,10 @@ class KnowledgeBaseService:
                 )
             ).all()
         )
-        items = [await self._to_response(kb) for kb in rows]
+        items = []
+        codes_map = await list_kb_department_codes_map(self.db, [kb.id for kb in rows])
+        for kb in rows:
+            items.append(await self._to_response(kb, department_codes=codes_map.get(kb.id)))
         return PageResponse(items=items, total=total, page=page, page_size=page_size)
 
     async def get_kb(self, kb_id: str, current_user: User) -> KnowledgeBaseResponse:
@@ -169,11 +187,8 @@ class KnowledgeBaseService:
             if clash is not None:
                 raise KnowledgeBaseAlreadyExistsException(payload["name"])
         for field, value in payload.items():
-            if field == "department":
-                kb.department = normalize_department(value)
-                continue
-            if field == "visibility":
-                # 可见性由部门派生，忽略前端直接传入的值（保持单一事实来源）
+            if field in ("department", "departments", "visibility"):
+                # 部门/可见性在下方统一处理
                 continue
             if value is None:
                 continue
@@ -181,8 +196,15 @@ class KnowledgeBaseService:
                 setattr(kb, field, _enum_str(value))
             else:
                 setattr(kb, field, value)
-        # 统一由部门派生可见性
-        kb.visibility = derive_visibility(kb.department)
+        fields_set = getattr(data, "model_fields_set", set()) or set()
+        dept_codes = resolve_departments_payload(
+            departments=data.departments,
+            department=data.department,
+            departments_set="departments" in fields_set,
+            department_set="department" in fields_set,
+        )
+        if dept_codes is not None:
+            await replace_kb_departments(self.db, kb, dept_codes)
         await write_audit(
             self.db,
             user_id=user_id,
@@ -421,7 +443,13 @@ class KnowledgeBaseService:
             raise KnowledgeBaseNotFoundException(kb_id)
         return kb
 
-    async def _to_response(self, kb: KnowledgeBase, *, include_permissions: bool = False) -> KnowledgeBaseResponse:
+    async def _to_response(
+        self,
+        kb: KnowledgeBase,
+        *,
+        include_permissions: bool = False,
+        department_codes: list[str] | None = None,
+    ) -> KnowledgeBaseResponse:
         doc_count = (
             await self.db.scalar(
                 select(func.count()).select_from(Document).where(Document.kb_id == kb.id, Document.status != "archived")
@@ -467,6 +495,11 @@ class KnowledgeBaseService:
                 )
                 for row in rows
             ]
+        departments = (
+            list(department_codes)
+            if department_codes is not None
+            else await list_kb_department_codes(self.db, kb.id)
+        )
         return KnowledgeBaseResponse(
             id=kb.id,
             name=kb.name,
@@ -474,7 +507,8 @@ class KnowledgeBaseService:
             tags=list(kb.tags or []),
             description=kb.description,
             visibility=visibility,
-            department=getattr(kb, "department", None),
+            departments=departments,
+            department=getattr(kb, "department", None) or (departments[0] if departments else None),
             embedding_model=kb.embedding_model,
             chunk_size=kb.chunk_size,
             chunk_overlap=kb.chunk_overlap,

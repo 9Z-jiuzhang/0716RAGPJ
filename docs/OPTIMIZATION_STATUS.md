@@ -3,7 +3,7 @@
 > 本文描述**当前仓库已落地能力**；高风险能力默认开关关闭，开启后即可生效。  
 > 外部「六维核查修订版」计划文档包不在本仓库内；以本文与 `.env.example` / `config.py` 为准。
 
-最后核对日期：2026-07-25。
+最后核对日期：2026-07-25（含知识库多部门访问）。
 
 ## 总览
 
@@ -82,3 +82,18 @@
 - 路由：`SYSTEM_MECHANISM` / 扩面 `SYSTEM_HELP` / `OUT_OF_SCOPE`（`conversation_router.py` rules-v2）。
 - 兜底：`_stream_no_evidence_answer` 按意图分策；仅白名单意图且显式开启 `QA_FALLBACK_LLM_ENABLED` 才写 LLM 参考答。
 - `retrieval_meta.fallback_mode`：`notice_only` | `template_refuse` | `llm_reference` | …
+
+## 知识库多部门访问（2026-07-25）
+
+与六维开关无关的产品能力，已与主线一并落地：
+
+| 项 | 说明 |
+|----|------|
+| 数据模型 | 权威表 `kb_departments`（`kb_id` × `department_code`）；`knowledge_bases.department` 为兼容首选列（含 GUEST 优先） |
+| API | 创建/更新支持 `departments[]`；仍接受单值 `department`；响应同时返回 `departments` 与 `department` |
+| 可见性 | 关联列表含 `GUEST` → `public`，否则 `restricted` |
+| 部门侧 | `POST .../knowledge-bases` **追加**关联；`DELETE` 仅解除本部门；删除部门时其它部门对同一库的关联保留 |
+| 管理端 | 知识库「访问范围」多选；快捷操作「除访客外全选」/「清空」 |
+| 检索/鉴权 | `retrieval/scope.py`、`assert_kb_access`、列表过滤均按多部门判断 |
+| 回填 | 启动 `seed_departments` 将历史单部门字段幂等写入 `kb_departments` |
+| 测试 | `backend/tests/test_kb_multi_departments.py` |

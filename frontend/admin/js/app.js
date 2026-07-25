@@ -1333,12 +1333,32 @@ async function loadDepartmentOptions() {
   }
 }
 
-/** 访问范围（部门驱动）标签：GUEST=访客专用；其余=部门；空=私有 */
+/** 访问范围（多部门）标签：含 GUEST=访客专用；多部门并列；空=私有 */
 function accessScopeBadge(k) {
-  const dept = String(k.department || "").toUpperCase();
-  if (dept === "GUEST") return `<span class="badge badge-success">访客专用</span>`;
-  if (dept) return `<span class="badge">${escapeHtml(k.department)} 部门</span>`;
-  return `<span class="badge">私有</span>`;
+  const codes = kbDepartmentCodes(k);
+  if (!codes.length) return `<span class="badge">私有</span>`;
+  return codes
+    .map((dept) => {
+      if (dept === "GUEST") return `<span class="badge badge-success">访客专用</span>`;
+      return `<span class="badge">${escapeHtml(dept)} 部门</span>`;
+    })
+    .join(" ");
+}
+
+/** 统一读取知识库关联部门编码列表 */
+function kbDepartmentCodes(k) {
+  if (Array.isArray(k?.departments) && k.departments.length) {
+    return [...new Set(k.departments.map((d) => String(d || "").toUpperCase()).filter(Boolean))];
+  }
+  const single = String(k?.department || "").toUpperCase();
+  return single ? [single] : [];
+}
+
+/** 知识库是否关联某部门 */
+function kbHasDepartment(k, code) {
+  const target = String(code || "").toUpperCase();
+  if (!target) return false;
+  return kbDepartmentCodes(k).includes(target);
 }
 
 /** 知识库类型中文 */
@@ -1364,6 +1384,48 @@ function departmentSelectHtml(departments, selectedCode, { emptyLabel = "不限 
     )
     .join("");
   return `<option value="">${escapeHtml(emptyLabel)}</option>${opts}`;
+}
+
+/** 访问范围多选：含「除访客外全选」 */
+function departmentMultiSelectHtml(departments, selectedCodes = [], { idPrefix = "deptScope" } = {}) {
+  const selected = new Set((selectedCodes || []).map((c) => String(c || "").toUpperCase()).filter(Boolean));
+  const enabled = (departments || []).filter((d) => d.is_enabled !== false);
+  const boxes = enabled
+    .map((d) => {
+      const code = String(d.code || "").toUpperCase();
+      const checked = selected.has(code) ? "checked" : "";
+      return `<label class="dept-scope-item"><input type="checkbox" name="departments" value="${escapeHtml(code)}" ${checked} /> ${escapeHtml(d.name)}（${escapeHtml(code)}）</label>`;
+    })
+    .join("");
+  return `
+    <div class="dept-scope-toolbar">
+      <button type="button" class="btn btn-text btn-sm" data-dept-select-all-except-guest>除访客外全选</button>
+      <button type="button" class="btn btn-text btn-sm" data-dept-clear>清空</button>
+    </div>
+    <div class="dept-scope-list" id="${escapeHtml(idPrefix)}List">${boxes || `<span class="text-muted">暂无可用部门</span>`}</div>`;
+}
+
+function bindDepartmentMultiSelect(root) {
+  if (!root) return;
+  const boxes = () => [...root.querySelectorAll('input[name="departments"]')];
+  root.querySelector("[data-dept-select-all-except-guest]")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    boxes().forEach((el) => {
+      el.checked = String(el.value || "").toUpperCase() !== "GUEST";
+    });
+  });
+  root.querySelector("[data-dept-clear]")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    boxes().forEach((el) => {
+      el.checked = false;
+    });
+  });
+}
+
+function readSelectedDepartments(root) {
+  return [...(root?.querySelectorAll('input[name="departments"]:checked') || [])]
+    .map((el) => String(el.value || "").trim().toUpperCase())
+    .filter(Boolean);
 }
 
 function openDepartmentForm({ title, dept = null, onSave }) {
@@ -1714,18 +1776,17 @@ async function pageDepartmentDetail(deptId) {
       btnAddKb.onclick = async () => {
         try {
           const kbData = await api.get("/knowledge-bases?page=1&page_size=100");
-          const list = (kbData.items || []).filter(
-            (k) => String(k.department || "").toUpperCase() !== String(d.code).toUpperCase()
-          );
+          const list = (kbData.items || []).filter((k) => !kbHasDepartment(k, d.code));
           if (!list.length) {
             toast("没有可关联的知识库", "error");
             return;
           }
           const options = list
-            .map(
-              (k) =>
-                `<label style="display:block;margin:4px 0"><input type="checkbox" name="kid" value="${escapeHtml(k.id)}" /> ${escapeHtml(k.name)} <small class="text-muted">${k.department ? `当前 ${escapeHtml(k.department)}` : "不限部门"}</small></label>`
-            )
+            .map((k) => {
+              const depts = kbDepartmentCodes(k);
+              const hint = depts.length ? `已关联 ${escapeHtml(depts.join(", "))}` : "尚未关联部门";
+              return `<label style="display:block;margin:4px 0"><input type="checkbox" name="kid" value="${escapeHtml(k.id)}" /> ${escapeHtml(k.name)} <small class="text-muted">${hint}</small></label>`;
+            })
             .join("");
           const mask = document.createElement("div");
           mask.className = "modal-mask";
@@ -2508,9 +2569,9 @@ async function pageKbList() {
       }
       if (filters.type && String(k.type || "").toLowerCase() !== filters.type) return false;
       if (filters.department === "__private__") {
-        if (String(k.department || "").trim()) return false;
+        if (kbDepartmentCodes(k).length) return false;
       } else if (filters.department) {
-        if (String(k.department || "").toUpperCase() !== filters.department.toUpperCase()) return false;
+        if (!kbHasDepartment(k, filters.department)) return false;
       }
       return true;
     };
@@ -2672,7 +2733,6 @@ async function pageKbList() {
     const btnCreate = document.getElementById("btnCreateKb");
     if (btnCreate) {
       btnCreate.onclick = async () => {
-        const deptOptions = departmentSelectHtml(departments, "", { emptyLabel: "私有（仅创建者与管理员可见）" });
         const mask = document.createElement("div");
         mask.className = "modal-mask";
         mask.innerHTML = `
@@ -2688,9 +2748,9 @@ async function pageKbList() {
                 <option value="product">产品手册</option>
                 <option value="faq">FAQ</option>
               </select>
-              <label class="form-label" style="margin-top:10px">访问范围（所属部门）</label>
-              <select class="form-control" name="department">${deptOptions}</select>
-              <p class="text-muted" style="margin:6px 0 0;font-size:12px">访客专用=所有人可见；某部门=仅该部门员工与管理员；私有=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
+              <label class="form-label" style="margin-top:10px">访问范围（可多选部门）</label>
+              ${departmentMultiSelectHtml(departments, [], { idPrefix: "createKbDept" })}
+              <p class="text-muted" style="margin:6px 0 0;font-size:12px">可同时授权多个部门访问同一知识库。勾选访客专用=所有人可见；不选=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
               <label class="form-label" style="margin-top:10px">标签（逗号分隔）</label>
               <input class="form-control" name="tags" maxlength="500" placeholder="可选" />
               <label class="form-label" style="margin-top:10px">描述</label>
@@ -2702,6 +2762,7 @@ async function pageKbList() {
             </div>
           </form>`;
         document.body.appendChild(mask);
+        bindDepartmentMultiSelect(mask);
         mask.querySelector("[data-close]").onclick = () => mask.remove();
         mask.addEventListener("click", (e) => {
           if (e.target === mask) mask.remove();
@@ -2710,7 +2771,7 @@ async function pageKbList() {
           ev.preventDefault();
           const fd = new FormData(ev.currentTarget);
           const kbName = String(fd.get("name") || "").trim();
-          const dept = String(fd.get("department") || "").trim().toUpperCase() || null;
+          const selectedDepts = readSelectedDepartments(ev.currentTarget);
           const tags = String(fd.get("tags") || "")
             .split(",")
             .map((t) => t.trim())
@@ -2730,7 +2791,7 @@ async function pageKbList() {
               type: String(fd.get("type") || "general"),
               description: String(fd.get("description") || "").trim(),
               tags,
-              department: dept,
+              departments: selectedDepts,
               embedding_model: "text-embedding-v3",
               chunk_size: 500,
               chunk_overlap: 50,
@@ -2800,7 +2861,7 @@ async function pageKbDetail(id, opts = {}) {
                 <div class="meta-row"><span class="meta-label">创建</span><span class="meta-value">${formatDateTime(k.created_at)}</span></div>
                 <div class="meta-row"><span class="meta-label">更新</span><span class="meta-value">${formatDateTime(k.updated_at)}</span></div>
               </div>
-              <p class="page-desc kb-detail-overview-note">知识库可绑定部门；员工仅能上传本部门库。功能权限请在「组织与权限」中由超级管理员配置。管理员与超管不受部门隔离。</p>
+              <p class="page-desc kb-detail-overview-note">知识库可绑定多个部门；员工仅能上传其所属部门关联的库。功能权限请在「组织与权限」中由超级管理员配置。管理员与超管不受部门隔离。</p>
             </div>
           </div>
         </div>`;
@@ -2825,11 +2886,11 @@ async function pageKbDetail(id, opts = {}) {
                 <option value="faq" ${k.type === "faq" ? "selected" : ""}>FAQ</option>
                 <option value="general" ${k.type === "general" ? "selected" : ""}>通用知识</option>
               </select>
-              <label class="text-muted">访问范围（所属部门）</label>
-              <select class="form-control" id="editDepartment" style="margin:6px 0 12px">
-                ${departmentSelectHtml(departments, k.department, { emptyLabel: "私有（仅创建者与管理员可见）" })}
-              </select>
-              <p class="text-muted" style="margin:0 0 12px;font-size:12px">访客专用=所有人可见；某部门=仅该部门员工与管理员；私有=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
+              <label class="text-muted">访问范围（可多选部门）</label>
+              <div id="editDepartmentScope" style="margin:6px 0 12px">
+                ${departmentMultiSelectHtml(departments, kbDepartmentCodes(k), { idPrefix: "editKbDept" })}
+              </div>
+              <p class="text-muted" style="margin:0 0 12px;font-size:12px">可同时授权多个部门。勾选访客专用=所有人可见；不选=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
               <label class="text-muted">标签（逗号分隔）</label>
               <input class="form-control" id="editTags" maxlength="500" value="${escapeHtml((k.tags || []).join(", "))}" style="margin:6px 0 12px" />
               <label class="text-muted">描述</label>
@@ -2837,11 +2898,12 @@ async function pageKbDetail(id, opts = {}) {
             actionsHtml: `
               <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
               <button type="button" class="btn" data-act="ok">保存</button>`,
+            onReady: (mask) => bindDepartmentMultiSelect(mask.querySelector("#editDepartmentScope")),
           });
           if (!result) return;
           const name = result.root.querySelector("#editName")?.value?.trim();
           const type = result.root.querySelector("#editType")?.value;
-          const department = result.root.querySelector("#editDepartment")?.value || "";
+          const selectedDepts = readSelectedDepartments(result.root.querySelector("#editDepartmentScope"));
           const tags = result.root.querySelector("#editTags")?.value?.split(",").map((t) => t.trim()).filter(Boolean) || [];
           const description = result.root.querySelector("#editDesc")?.value?.trim() || undefined;
           result.root.remove();
@@ -2855,7 +2917,7 @@ async function pageKbDetail(id, opts = {}) {
               type,
               tags,
               description,
-              department: department || null,
+              departments: selectedDepts,
             });
             toast("已更新", "success");
             await render();

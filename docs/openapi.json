@@ -5198,7 +5198,7 @@
       },
       "delete": {
         "summary": "删除部门",
-        "description": "删除部门并解除关联（KB department 置空、可见性回落 restricted）。GUEST 部门不可删除。需要 department:write。",
+        "description": "删除部门并解除本部门与知识库的关联（其它部门关联保留）；用户本部门清空。GUEST 部门不可删除。需要 department:write。",
         "tags": [
           "部门管理"
         ],
@@ -5897,7 +5897,7 @@
     "/departments/{id}/knowledge-bases": {
       "post": {
         "summary": "关联知识库到部门",
-        "description": "批量将知识库归属该部门，并同步派生可见性。需要 department:write。",
+        "description": "批量将知识库关联到该部门（追加，不解除其它部门关联），并同步派生可见性。需要 department:write。",
         "tags": [
           "部门管理"
         ],
@@ -6145,7 +6145,7 @@
     "/departments/{id}/knowledge-bases/{kb_id}": {
       "delete": {
         "summary": "解除知识库与部门关联",
-        "description": "解除后知识库 department 置空。需要 department:write。",
+        "description": "仅解除与本部门的关联，其它部门关联保留。需要 department:write。",
         "tags": [
           "部门管理"
         ],
@@ -7972,7 +7972,7 @@
       },
       "post": {
         "summary": "创建知识库",
-        "description": "创建知识库；可见性由 department 派生。需要 kb:write。",
+        "description": "创建知识库；可见性由 departments 派生。需要 kb:write。",
         "tags": [
           "知识库管理"
         ],
@@ -8409,7 +8409,7 @@
       },
       "put": {
         "summary": "修改知识库",
-        "description": "更新元信息；改 department 会重新派生可见性。需要 kb:write。",
+        "description": "更新元信息；改 departments 会重新派生可见性。需要 kb:write。",
         "tags": [
           "知识库管理"
         ],
@@ -20036,14 +20036,22 @@
             "type": "string",
             "nullable": true
           },
+          "departments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "description": "访问范围（多部门）；含 GUEST=访客/全员可见；空=私有"
+          },
           "department": {
             "type": "string",
-            "description": "访问控制核心：GUEST=访客/全员可见；具体部门=部门隔离；留空=仅创建者/授权者",
+            "description": "兼容单部门；未传 departments 时按单值写入",
             "nullable": true
           },
           "visibility": {
             "type": "string",
-            "description": "由 department 派生（GUEST→public，其余→restricted），一般无需手动传",
+            "description": "由 departments 派生（含 GUEST→public，其余→restricted），一般无需手动传",
             "enum": [
               "public",
               "restricted"
@@ -20096,14 +20104,22 @@
             "type": "string",
             "nullable": true
           },
+          "departments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "description": "全量替换访问部门；空数组=私有"
+          },
           "department": {
             "type": "string",
-            "description": "变更部门会重新派生可见性",
+            "description": "兼容单部门；未传 departments 时按单值全量替换",
             "nullable": true
           },
           "visibility": {
             "type": "string",
-            "description": "传入将被忽略并按 department 重算",
+            "description": "传入将被忽略并按 departments 重算",
             "nullable": true
           },
           "embedding_model": {
@@ -20154,8 +20170,16 @@
               "restricted"
             ]
           },
+          "departments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "关联部门编码列表"
+          },
           "department": {
             "type": "string",
+            "description": "首选部门（兼容；GUEST 优先）",
             "nullable": true
           },
           "embedding_model": {

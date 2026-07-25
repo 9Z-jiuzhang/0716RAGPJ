@@ -285,8 +285,9 @@ export function canAccessKb(kb) {
   if (ids === null) return true;
   if (ids.length && ids.includes(kb.id)) return true;
   const dept = getDepartment();
-  if (dept && Array.isArray(kb.departments) && kb.departments.includes(dept)) return true;
-  if (dept && kb.department === dept) return true;
+  if (dept && Array.isArray(kb.departments) && kb.departments.map((d) => String(d).toUpperCase()).includes(String(dept).toUpperCase()))
+    return true;
+  if (dept && String(kb.department || "").toUpperCase() === String(dept).toUpperCase()) return true;
   // 注册用户默认只能碰公开库（问答范围）；上传另受 canUpload 约束
   if (getPrimaryRole() === "user") return kb.visibility === "public";
   return false;

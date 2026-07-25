@@ -146,11 +146,13 @@ async def assert_kb_access(db: AsyncSession, user: User, kb_id: uuid.UUID, permi
     if grant is None and permission in codes:
         # 拥有全局权限：再按部门隔离（员工）；管理员已在上方放行
         dept = normalize_department(getattr(user, "department", None))
-        kb_dept = normalize_department(getattr(kb, "department", None))
+        from app.services.kb_departments import list_kb_department_codes
+
+        kb_depts = await list_kb_department_codes(db, kb.id)
         # 访客专用库对所有人开放（员工权限覆盖访客，不应被拒绝）
-        if kb_dept == GUEST_DEPARTMENT_CODE:
+        if GUEST_DEPARTMENT_CODE in kb_depts:
             return kb
-        if dept and kb_dept and dept != kb_dept:
+        if dept and kb_depts and dept not in kb_depts:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"无权访问该知识库（部门隔离）: {permission}",

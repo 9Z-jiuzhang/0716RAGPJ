@@ -123,6 +123,17 @@ async def ensure_schema_patches() -> None:
         )
         """,
         "CREATE INDEX IF NOT EXISTS ix_departments_code ON departments (code)",
+        """
+        CREATE TABLE IF NOT EXISTS kb_departments (
+          id UUID PRIMARY KEY,
+          kb_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+          department_code VARCHAR(50) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT uq_kb_departments_kb_code UNIQUE (kb_id, department_code)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_kb_departments_kb_id ON kb_departments (kb_id)",
+        "CREATE INDEX IF NOT EXISTS ix_kb_departments_department_code ON kb_departments (department_code)",
         # 问答 strategy 需容纳 route/transform 等短路径标识
         "ALTER TABLE qa_messages ALTER COLUMN strategy TYPE VARCHAR(64)",
         # 六维优化：问答事件 / 反馈 / 主题簇 / 模型发布版本

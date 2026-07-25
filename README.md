@@ -196,9 +196,9 @@ app/
 | 认证与用户中心 | `/api/v1/auth` | — | 注册、登录、刷新 Token、当前用户、改资料、**修改密码**（超管除外） |
 | 用户管理 | `/api/v1/users` | — | 用户 CRUD、启停、角色绑定；仅可管理等级更低的用户 |
 | 角色与权限 | `/api/v1/roles` | — | 角色 CRUD、权限清单；**配置权限仅超管** |
-| 部门管理 | `/api/v1/departments` | `department.py` | 部门 CRUD、成员与知识库关联；GUEST 部门受保护 |
+| 部门管理 | `/api/v1/departments` | `department.py`、`kb_departments.py` | 部门 CRUD、成员；知识库关联为**追加**，解除仅影响本部门 |
 | 大模型管理 | `/api/v1/models` | `model_config.py`、`model_usage.py` | LLM/Embedding/Rerank 配置、Langfuse 用量 |
-| 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py` | KB CRUD、重向量化、进度；`KBPermission` API（管理端不下发 ACL 编辑卡） |
+| 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py`、`kb_departments.py` | KB CRUD、`departments[]` 多部门访问范围、重向量化；`KBPermission` API（管理端不下发 ACL 编辑卡） |
 | 文档管理 | `/api/v1/knowledge-bases/{kb_id}/documents` | `document_service.py`、`document_pipeline.py` | 上传、解析、分段、规范化、chunk 编辑、重试 |
 | 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`conversation_router.py`、`qa_cache.py`、`llm_guard.py` | SSE 流式问答（Guard + 业务路由 + 多级缓存）、会话、反馈；默认检索 TopK=5；访客端引用区展开相关度最高 3 段、其余折叠 |
 | 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例、执行、多策略对比；默认 TopK=3；得分=命中片段相关度均值 |
@@ -211,14 +211,14 @@ app/
 
 ### 2.3 访问控制模型（部门驱动）
 
-平台以**部门（department）作为知识库可见性的主控制轴**，`visibility` 字段仅由部门派生（`GUEST → public`，其余 `→ restricted`），用于展示与向后兼容。**角色权限**（超管在「组织与权限」配置）控制「能做什么操作」；部门控制「能看到哪些知识库」。`KBPermission` 仍可作为 API 级补充闸门，但管理端知识库页不再提供 ACL 编辑入口，避免无法回看的隐式授权。相关实现见 `core/constants.py`、`retrieval/scope.py`、`core/dependencies.py`、`services/knowledge_base.py`、`services/department.py`。
+平台以**部门（department）作为知识库可见性的主控制轴**。一个知识库可关联**多个部门**（表 `kb_departments`）；`visibility` 由部门列表派生（含 `GUEST → public`，否则 `→ restricted`）。**角色权限**控制「能做什么操作」；部门控制「能看到哪些知识库」。部门管理中为部门关联知识库时为**追加**，不会解除其它部门对该库的关联。相关实现见 `core/constants.py`、`retrieval/scope.py`、`services/kb_departments.py`、`services/knowledge_base.py`、`services/department.py`。
 
 **知识库可见范围**（`status=active` 且未软删除为前提）：
 
 | 身份 | 可见知识库范围 |
 |------|----------------|
-| **访客**（未登录） | 仅 `department=GUEST`（访客专用）的知识库 |
-| **员工**（已登录，非管理员） | GUEST 部门 ∪ 本部门 ∪ 本人创建 ∪ 被 `KBPermission` 显式授权 的知识库（员工权限**超集**于访客，访问 GUEST 内容不被拒绝） |
+| **访客**（未登录） | 仅关联 `GUEST`（访客专用）的知识库 |
+| **员工**（已登录，非管理员） | GUEST 关联库 ∪ 本部门关联库 ∪ 本人创建 ∪ 被 `KBPermission` 显式授权（员工权限**超集**于访客） |
 | **平台管理员**（`super_admin`/`admin` 或 `*`/`admin:*`） | 全部激活知识库 |
 
 **单库操作闸门** `assert_kb_access(db, user, kb_id, permission)`：
@@ -226,7 +226,7 @@ app/
 1. KB 不存在或已删除 → 404；
 2. 直通放行：平台管理员、`*`/`admin:*`、或 KB 创建者本人；
 3. 命中 `KBPermission`（该 kb + 权限码，或 `kb:admin`；匹配 user_id 或启用角色 role_id）→ 放行；
-4. 仅持有**全局**权限码时应用**部门隔离**：GUEST 部门 KB 恒放行；若用户部门与 KB 部门均有值且不同 → 403；否则放行；
+4. 仅持有**全局**权限码时应用**部门隔离**：关联 GUEST 的 KB 恒放行；若用户部门有值且不在 KB 关联部门列表中 → 403；否则放行；
 5. 其余 → 403。
 
 **内置角色 → 能力**（种子数据 `core/seed_data.py`）：
@@ -236,7 +236,7 @@ app/
 | `super_admin` | 全部（含 `model:write`、角色权限配置与超管控制），权限码 `*` |
 | `admin` | 用户/部门/知识库/文档/快照/审计/系统管理；含 `role:read`，**不含** `role:write`、`model:write`；不可操作超管、不可配置角色权限 |
 | `staff` | `qa:ask` + 授权范围内 KB 上传/向量化/文档/分段/测试/快照 |
-| `guest` | 仅 `qa:ask` + `kb:read`（GUEST 部门知识库）；注册与管理员创建用户的默认角色 |
+| `guest` | 仅 `qa:ask` + `kb:read`（关联 GUEST 的知识库）；注册与管理员创建用户的默认角色 |
 
 角色等级：`super_admin > admin > staff > guest`；仅可启停/删除/改角色等级严格低于自己的用户。旧内置角色 `user` 已废弃并迁移为 `guest`；旧内置角色 `kb_admin` 已废弃并迁移为 `staff`。
 
@@ -277,7 +277,7 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
 - **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度 Top-3 展开/其余折叠、置信提示）、登录/注册、对话历史、个人中心（含改密）、**多文件批量上传**（员工/管理员）。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势与错误分桶）与安全窗口、用户/角色/部门、大模型与用量（参数配置/版本发布）、知识库/文档工作台/快照、命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势与错误分桶）与安全窗口、用户/角色/部门、大模型与用量（参数配置/版本发布）、知识库/文档工作台/快照（知识库「访问范围」**多选部门**，含「除访客外全选」）、命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
 - **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、主题/动效、公共 CSS、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
 
 ### 2.7 可观测性
@@ -367,8 +367,9 @@ pytest backend/tests -q
 | 身份 | `users` | username、email、hashed_password、status、`department`（部门编码）、roles(M2M) |
 | | `roles` / `permissions` | name / code、scope（global\|kb_scoped）、is_builtin |
 | | `audit_logs` | action、resource_type、resource_id、detail(JSON)、result、request_id |
-| 部门 | `departments` | `code`（唯一，如 GUEST/A/B）、name、is_enabled（成员/KB 以字符串 code 关联） |
-| 知识库 | `knowledge_bases` | type、tags、`visibility`（派生）、`department`、embedding_model、chunk_size/overlap、status、`current_index_version`、creator_id、deleted_at |
+| 部门 | `departments` | `code`（唯一，如 GUEST/A/B）、name、is_enabled |
+| 知识库↔部门 | `kb_departments` | `kb_id` × `department_code`（多对多；权威关联） |
+| 知识库 | `knowledge_bases` | type、tags、`visibility`（派生）、`department`（兼容首选）、embedding_model、chunk_size/overlap、status、`current_index_version`、creator_id、deleted_at |
 | | `kb_permissions` | kb_id、user_id?/role_id?、permission_code（KB 级授权） |
 | 文档 | `documents` | filename、file_type、file_size、file_path（MinIO）、chunk_count、status、content_hash、raw_text/normalized_text、segment_rules(JSON)、index_version |
 | | `document_chunks` | chunk_index、content、char_count、is_enabled、`content_tsv`（生成列 tsvector，GIN + trgm 索引） |
@@ -415,6 +416,7 @@ docker compose ps
 | [`docs/openapi.json`](docs/openapi.json) | OpenAPI 3.0.3 机器可读契约 |
 | [`docs/API.md`](docs/API.md) | 中文接口详解（字段、权限、约束） |
 | [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md) | 第三方 / Android 等接入指南 |
+| [`docs/OPTIMIZATION_STATUS.md`](docs/OPTIMIZATION_STATUS.md) | 六维优化与近期产品变更落地状态 |
 | [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | 契约使用与变更流程 |
 | 运行时 Swagger（官方） | http://localhost:18080/docs |

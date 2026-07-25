@@ -210,7 +210,7 @@ Authorization: Bearer <access_token>
 1. 服务端先经 **LLM Guard** 做安全意图检查（提示注入、窃密、越权、破坏性指令等）；不通过则推送 `guard_blocked` 并结束。  
 2. 通过后在授权范围内做检索（向量 / 全文 / 混合），再调用大模型生成回答。  
 3. 回答以 **SSE（Server-Sent Events）** 分片推送，适合边收边显示。  
-4. 未登录也可调用（访客），但检索范围通常限于访客部门知识库；登录用户可访问其部门知识库（以及创建者本人库）。功能权限由角色决定，请由超管在「组织与权限」配置。
+4. 未登录也可调用（访客），但检索范围仅限关联 **GUEST（访客专用）** 的知识库；登录员工可检索：GUEST 库 ∪ **本部门关联库**（同一库可被多个部门共享）∪ 本人创建 ∪ 显式授权。功能权限由角色决定，请由超管在「组织与权限」配置。
 
 ### 6.2 请求
 
@@ -315,7 +315,8 @@ data: {"content":"……"}
 
 - 权限：通常需要 `kb:read`；访客仅见授权/访客库  
 - **功能解说：** 让用户在提问前勾选「从哪些库检索」。把选中的 ID 数组放进 `/qa/ask` 的 `kb_ids`。  
-- 创建/改删、上传、向量化等属于管理能力，详见 `API.md` 第 8–9 章，一般不必做进消费者 App。
+- 列表项关键字段：`id`、`name`、`visibility`、**`departments[]`**（关联部门编码；可多选）、`department`（兼容首选编码，含 GUEST 时优先）。  
+- 创建/改删、上传、向量化、多部门访问范围设置属于管理能力，详见 `API.md` 第 6、8 章，一般不必做进消费者 App。
 
 ---
 
@@ -339,8 +340,9 @@ data: {"content":"……"}
 |----------|------------------|
 | `/users` | 用户增删改、启停、分配角色（需 `user:*`） |
 | `/roles` | 角色与权限码配置（写权限敏感，部分仅超管） |
-| `/departments` | 部门、成员、关联知识库 |
+| `/departments` | 部门、成员、关联知识库（**追加**关联，不解除其它部门对同一库的访问） |
 | `/models` | LLM / Embedding / Rerank 配置与用量 |
+| `/knowledge-bases` | 知识库 CRUD；访问范围字段 `departments[]`（多部门） |
 | `/knowledge-bases/.../documents` | 文档上传、分段、清洗、chunk 启停 |
 | `/knowledge-bases/.../snapshots` | 索引快照创建与回退 |
 | `/hit-tests` | 检索命中率用例与运行记录 |
@@ -444,6 +446,7 @@ client.newCall(req).execute().use { resp ->
 |------|------|
 | 本文 `API_INTEGRATION_GUIDE.md` | 第三方 / 移动端接入指南（功能解说向） |
 | 仓库 `docs/API.md` | 全量接口字段与约束 |
+| 仓库 `docs/OPTIMIZATION_STATUS.md` | 六维优化与近期产品变更落地状态 |
 | 运行时 [`/openapi.json`](/openapi.json) | 机器可读契约，可导入 Postman / 代码生成 |
 | 仓库 `docs/CONTRACT.md` | 契约变更流程 |
 | 仓库 `docs/CLOUD_DEPLOY.md` | 云端生产部署与安全加固 |

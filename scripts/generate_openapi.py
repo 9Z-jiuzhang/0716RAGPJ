@@ -517,14 +517,20 @@ schemas["KnowledgeBaseCreate"] = {
         "type": prop("string", "知识库类型", enum=_KB_TYPES),
         "tags": {"type": "array", "items": prop("string"), "default": []},
         "description": prop("string", nullable=True),
+        "departments": {
+            "type": "array",
+            "items": prop("string"),
+            "nullable": True,
+            "description": "访问范围（多部门）；含 GUEST=访客/全员可见；空=私有",
+        },
         "department": prop(
             "string",
-            "访问控制核心：GUEST=访客/全员可见；具体部门=部门隔离；留空=仅创建者/授权者",
+            "兼容单部门；未传 departments 时按单值写入",
             nullable=True,
         ),
         "visibility": prop(
             "string",
-            "由 department 派生（GUEST→public，其余→restricted），一般无需手动传",
+            "由 departments 派生（含 GUEST→public，其余→restricted），一般无需手动传",
             enum=["public", "restricted"],
             nullable=True,
         ),
@@ -540,8 +546,14 @@ schemas["KnowledgeBaseUpdate"] = {
         "type": prop("string", enum=_KB_TYPES, nullable=True),
         "tags": {"type": "array", "items": prop("string"), "nullable": True},
         "description": prop("string", nullable=True),
-        "department": prop("string", "变更部门会重新派生可见性", nullable=True),
-        "visibility": prop("string", "传入将被忽略并按 department 重算", nullable=True),
+        "departments": {
+            "type": "array",
+            "items": prop("string"),
+            "nullable": True,
+            "description": "全量替换访问部门；空数组=私有",
+        },
+        "department": prop("string", "兼容单部门；未传 departments 时按单值全量替换", nullable=True),
+        "visibility": prop("string", "传入将被忽略并按 departments 重算", nullable=True),
         "embedding_model": prop("string", nullable=True),
         "chunk_size": prop("integer", minimum=100, maximum=5000, nullable=True),
         "chunk_overlap": prop("integer", minimum=0, maximum=1000, nullable=True),
@@ -556,7 +568,8 @@ schemas["KnowledgeBaseResponse"] = {
         "tags": {"type": "array", "items": prop("string")},
         "description": prop("string", nullable=True),
         "visibility": prop("string", enum=["public", "restricted"]),
-        "department": prop("string", nullable=True),
+        "departments": {"type": "array", "items": prop("string"), "description": "关联部门编码列表"},
+        "department": prop("string", "首选部门（兼容；GUEST 优先）", nullable=True),
         "embedding_model": prop("string"),
         "chunk_size": prop("integer"),
         "chunk_overlap": prop("integer"),
@@ -1449,7 +1462,7 @@ paths["/departments/{id}"] = {
     ),
     "delete": op(
         "删除部门",
-        "删除部门并解除关联（KB department 置空、可见性回落 restricted）。"
+        "删除部门并解除本部门与知识库的关联（其它部门关联保留）；用户本部门清空。"
         "GUEST 部门不可删除。需要 department:write。",
         ["部门管理"],
         parameters=[path_param("id", "部门 UUID")],
@@ -1478,7 +1491,7 @@ paths["/departments/{id}/members/{user_id}"] = {
 paths["/departments/{id}/knowledge-bases"] = {
     "post": op(
         "关联知识库到部门",
-        "批量将知识库归属该部门，并同步派生可见性。需要 department:write。",
+        "批量将知识库关联到该部门（追加，不解除其它部门关联），并同步派生可见性。需要 department:write。",
         ["部门管理"],
         parameters=[path_param("id", "部门 UUID")],
         request_body=json_body("DepartmentKbsRequest"),
@@ -1488,7 +1501,7 @@ paths["/departments/{id}/knowledge-bases"] = {
 paths["/departments/{id}/knowledge-bases/{kb_id}"] = {
     "delete": op(
         "解除知识库与部门关联",
-        "解除后知识库 department 置空。需要 department:write。",
+        "仅解除与本部门的关联，其它部门关联保留。需要 department:write。",
         ["部门管理"],
         parameters=[path_param("id", "部门 UUID"), path_param("kb_id", "知识库 UUID")],
         responses={**resp("成功", ref("DepartmentDetail")), **err_resps(401, 403, 404, 500)},
@@ -1572,7 +1585,7 @@ paths["/knowledge-bases"] = {
     ),
     "post": op(
         "创建知识库",
-        "创建知识库；可见性由 department 派生。需要 kb:write。",
+        "创建知识库；可见性由 departments 派生。需要 kb:write。",
         ["知识库管理"],
         request_body=json_body("KnowledgeBaseCreate"),
         responses={**resp("创建成功", ref("KnowledgeBaseResponse"), 201), **err_resps(400, 401, 403, 422, 500)},
@@ -1588,7 +1601,7 @@ paths["/knowledge-bases/{id}"] = {
     ),
     "put": op(
         "修改知识库",
-        "更新元信息；改 department 会重新派生可见性。需要 kb:write。",
+        "更新元信息；改 departments 会重新派生可见性。需要 kb:write。",
         ["知识库管理"],
         parameters=[path_param("id", "知识库 UUID")],
         request_body=json_body("KnowledgeBaseUpdate"),

@@ -269,6 +269,32 @@ async def seed_departments() -> None:
             )
             .values(visibility=VISIBILITY_RESTRICTED)
         )
+        # 回填多对多关联：把历史单部门字段写入 kb_departments（幂等）
+        from uuid import uuid4
+
+        from .models.knowledge_base import KBDepartment
+
+        legacy_rows = (
+            await db.execute(
+                select(KnowledgeBase.id, KnowledgeBase.department).where(
+                    KnowledgeBase.department.is_not(None),
+                    KnowledgeBase.deleted_at.is_(None),
+                )
+            )
+        ).all()
+        for kb_id, dept_code in legacy_rows:
+            code = (dept_code or "").strip().upper()
+            if not code:
+                continue
+            exists_link = await db.scalar(
+                select(KBDepartment.id).where(
+                    KBDepartment.kb_id == kb_id,
+                    KBDepartment.department_code == code,
+                )
+            )
+            if exists_link:
+                continue
+            db.add(KBDepartment(id=uuid4(), kb_id=kb_id, department_code=code))
         await db.commit()
 
 

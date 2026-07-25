@@ -1900,6 +1900,37 @@ html[data-theme="dark"] .kb-card-cover > span:not(.badge) {
 
 .kb-card-access .badge {
   font-size: var(--font-size-2xs);
+  margin-right: 4px;
+  margin-bottom: 2px;
+}
+
+.dept-scope-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.dept-scope-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px 10px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  border-radius: var(--radius, 8px);
+  background: var(--color-surface-muted, rgba(0, 0, 0, 0.02));
+}
+
+.dept-scope-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin: 0;
+  cursor: pointer;
+  user-select: none;
 }
 
 /* 知识库列表：整卡可点进概览 */

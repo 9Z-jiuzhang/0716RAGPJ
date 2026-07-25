@@ -2115,7 +2115,12 @@ async function pageUpload() {
         <select class="form-control" id="kbSelect">
           ${kbs
             .map((k) => {
-              const dept = k.department ? ` · ${k.department}部门` : "";
+              const codes = Array.isArray(k.departments) && k.departments.length
+                ? k.departments.map((d) => String(d).toUpperCase())
+                : k.department
+                  ? [String(k.department).toUpperCase()]
+                  : [];
+              const dept = codes.length ? ` · ${codes.join("/")}` : "";
               return `<option value="${escapeHtml(k.id)}">${escapeHtml(k.name)}（${escapeHtml(k.visibility)}${escapeHtml(dept)}）</option>`;
             })
             .join("")}

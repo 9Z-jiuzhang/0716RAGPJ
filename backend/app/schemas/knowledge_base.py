@@ -9,10 +9,15 @@ class KnowledgeBaseCreate(BaseModel):
     type: KnowledgeBaseType = Field(..., description="知识库类型")
     tags: list[str] = Field(default=[], description="标签列表")
     description: str | None = Field(None, description="简介/描述")
-    # 可见性由部门派生（访客专用 GUEST -> public，其余 -> restricted），此字段可省略
+    # 可见性由部门列表派生（含 GUEST -> public，其余 -> restricted），此字段可省略
     visibility: Visibility | None = Field(None, description="可见性（由部门派生，可省略）")
+    departments: list[str] | None = Field(
+        None,
+        description="访问范围（多部门）：可同时关联多个部门；含 GUEST=访客/全员可见；空/不传=私有",
+    )
     department: str | None = Field(
-        None, description="访问范围/所属部门：GUEST=访客专用(所有人)，其余部门=部门隔离，空=私有"
+        None,
+        description="兼容单部门字段；若未传 departments 则按单值写入",
     )
     embedding_model: str = Field(..., description="使用的 Embedding 模型名称")
     chunk_size: int = Field(500, description="默认分段大小（字符数）")
@@ -25,7 +30,8 @@ class KnowledgeBaseUpdate(BaseModel):
     tags: list[str] | None = Field(None, description="标签列表")
     description: str | None = Field(None, description="简介/描述")
     visibility: Visibility | None = Field(None, description="可见性")
-    department: str | None = Field(None, description="所属部门 A/B")
+    departments: list[str] | None = Field(None, description="全量替换访问部门列表；空数组=私有")
+    department: str | None = Field(None, description="兼容单部门；未传 departments 时按单值全量替换")
     embedding_model: str | None = Field(None, description="使用的 Embedding 模型名称")
     chunk_size: int | None = Field(None, description="默认分段大小（字符数）")
     chunk_overlap: int | None = Field(None, description="默认分段重叠（字符数）")
@@ -38,7 +44,8 @@ class KnowledgeBaseResponse(BaseModel):
     tags: list[str] = Field(..., description="标签列表")
     description: str | None = Field(None, description="简介/描述")
     visibility: Visibility = Field(..., description="可见性")
-    department: str | None = Field(None, description="所属部门")
+    departments: list[str] = Field(default_factory=list, description="关联部门编码列表")
+    department: str | None = Field(None, description="首选部门（兼容；GUEST 优先）")
     embedding_model: str = Field(..., description="使用的 Embedding 模型名称")
     chunk_size: int = Field(..., description="默认分段大小（字符数）")
     chunk_overlap: int = Field(..., description="默认分段重叠（字符数）")

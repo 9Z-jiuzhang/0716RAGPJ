@@ -111,7 +111,7 @@ Authorization: Bearer <access_token>
 
 | 端 | 典型接口 | 说明 |
 |----|----------|------|
-| 访客端 | `/auth/*`、`/qa/ask` | 未登录仅可检索 `department=GUEST`（访客专用）的知识库 |
+| 访客端 | `/auth/*`、`/qa/ask` | 未登录仅可检索关联 `GUEST`（访客专用）的知识库 |
 | 管理端 | `/users`、`/roles`、`/departments`、`/knowledge-bases`、`/hit-tests`、`/ragas`、`/role-caches`、`/query-processing`、`/audit`、`/monitor/*` 等 | 需对应权限标识 |
 
 机器可读契约见 [`openapi.json`](./openapi.json)；第三方接入见 [`API_INTEGRATION_GUIDE.md`](./API_INTEGRATION_GUIDE.md)；云端部署见 [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md)。
@@ -275,7 +275,7 @@ Authorization: Bearer <access_token>
 
 ## 6. 部门管理 `/departments`
 
-需 `department:read` / `department:write`。部门以 `code` 关联用户（`users.department`）与知识库（`knowledge_bases.department`）。**GUEST（访客专用）部门受保护**：不可改 code、不可删除。
+需 `department:read` / `department:write`。用户仍以 `users.department`（单编码）归属一个部门；知识库通过 `kb_departments` **多对多**关联多个部门（响应含 `departments[]`，兼容字段 `department` 为首选编码）。**GUEST（访客专用）部门受保护**：不可改 code、不可删除。
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
@@ -283,11 +283,11 @@ Authorization: Bearer <access_token>
 | POST | `/departments` | `department:write` | 创建（`201`） |
 | GET | `/departments/{dept_id}` | `department:read` | 详情（含成员与知识库） |
 | PUT | `/departments/{dept_id}` | `department:write` | 更新 |
-| DELETE | `/departments/{dept_id}` | `department:write` | 删除（解除关联，KB `department=null`、可见性回落 restricted）；返回 `{deleted:true}` |
+| DELETE | `/departments/{dept_id}` | `department:write` | 删除（仅解除本部门与 KB/用户的关联，其它部门对同一 KB 的关联保留）；返回 `{deleted:true}` |
 | POST | `/departments/{dept_id}/members` | `department:write` | Body：`user_ids[]`（≥1） |
 | DELETE | `/departments/{dept_id}/members/{user_id}` | `department:write` | 移除成员 |
-| POST | `/departments/{dept_id}/knowledge-bases` | `department:write` | Body：`kb_ids[]`（≥1）；同步 KB 可见性 |
-| DELETE | `/departments/{dept_id}/knowledge-bases/{kb_id}` | `department:write` | 解除 KB 关联 |
+| POST | `/departments/{dept_id}/knowledge-bases` | `department:write` | Body：`kb_ids[]`（≥1）；**追加**关联，不覆盖其它部门 |
+| DELETE | `/departments/{dept_id}/knowledge-bases/{kb_id}` | `department:write` | 仅解除与本部门的关联 |
 
 **创建请求**（`DepartmentCreate`）：`code`(1–50)、`name`(1–100)、`description?`、`is_enabled`(默认 true)。
 **更新请求**（`DepartmentUpdate`）：以上字段均可选。
@@ -343,16 +343,23 @@ Authorization: Bearer <access_token>
 | embedding_model | 是 | 嵌入模型名 |
 | tags | 否 | 标签数组 |
 | description | 否 | 描述 |
-| department | 否 | **访问控制核心**：`GUEST`=访客/全员可见；具体部门=部门隔离；留空=仅创建者/授权者 |
-| visibility | 否 | 由 `department` 派生（GUEST→public，其余→restricted），一般无需手动传 |
+| departments | 否 | **访问范围（多选）**：可同时关联多个部门；含 `GUEST`=访客/全员可见；空/不传=仅创建者与管理员 |
+| department | 否 | 兼容单部门字段；未传 `departments` 时按单值写入 |
+| visibility | 否 | 由 `departments` 派生（含 GUEST→public，其余→restricted），一般无需手动传 |
 | chunk_size | 否 | 默认 500（100–5000） |
 | chunk_overlap | 否 | 默认 50（0–1000） |
 
-> **重要**：可见性由部门派生，创建/更新时传入的 `visibility` 会被忽略并按 `department` 重新计算。
+> **重要**：可见性由部门列表派生，创建/更新时传入的 `visibility` 会被忽略并按 `departments` 重新计算。更新时传 `departments: []` 表示改为私有。
+
+### 8.1.1 更新知识库请求（`KnowledgeBaseUpdate`）
+
+均可选：`name`、`type`、`tags`、`description`、`departments[]`（**全量替换**访问部门；空数组=私有）、`department`（兼容；未传 `departments` 时按单值全量替换）、`embedding_model`、`chunk_size`、`chunk_overlap`。传入的 `visibility` 仍被忽略。
+
+管理端 UI：创建/编辑弹窗中「访问范围」为多选复选框，提供「除访客外全选」「清空」；部门详情「关联知识库」为追加写入，不会覆盖其它部门已有关联。
 
 ### 8.2 知识库响应（`KnowledgeBaseResponse`）
 
-`id`、`name`、`type`、`tags[]`、`description?`、`visibility`、`department?`、`embedding_model`、`chunk_size`、`chunk_overlap`、`status`(active\|vectorizing\|archived\|deleted)、`current_index_version?`、`document_count`、`chunk_count`、`creator_id`、`created_at`、`updated_at`。
+`id`、`name`、`type`、`tags[]`、`description?`、`visibility`、`departments[]`、`department?`（首选，兼容）、`embedding_model`、`chunk_size`、`chunk_overlap`、`status`(active\|vectorizing\|archived\|deleted)、`current_index_version?`、`document_count`、`chunk_count`、`creator_id`、`created_at`、`updated_at`。
 
 ### 8.3 重向量化请求（`ReVectorizeRequest`，均可选）
 
@@ -449,8 +456,8 @@ Authorization: Bearer <access_token>
 
 **范围规则**：
 
-- 未登录：仅 `department=GUEST`（访客专用）知识库；
-- 已登录：GUEST ∪ 本部门 ∪ 本人创建 ∪ 授权库；指定 `kb_ids` 时取交集；
+- 未登录：仅关联 `GUEST`（访客专用）的知识库；
+- 已登录：GUEST ∪ 本部门关联库 ∪ 本人创建 ∪ 授权库；指定 `kb_ids` 时取交集；
 - 仅检索**有 `current_index_version`（已建索引）**的库；无可检索目标或 0 hits 时进入「无证据」兜底（严禁编造来源）。
 - **未命中默认拒答**：`QA_FALLBACK_LLM_ENABLED` 默认 `false`，只返回声明+固定短拒；显式开启后仅业务意图（`NEW_KB_QUERY` / 跟进问）可写 LLM 参考答。
 - **系统运行机制**类问题路由为 `SYSTEM_MECHANISM`，不进检索，返回短模板（不展开内部架构）。
@@ -635,6 +642,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.4 | 2026-07-25 | 知识库多部门访问：`departments[]` + `kb_departments`；部门侧关联改为追加/局部解除；管理端访问范围多选与「除访客外全选」 |
 | 2.1.3 | 2026-07-25 | Ask/`QA_DEFAULT_TOP_K` 默认 5；访客端引用区按相关度展开 Top-3、其余折叠；命中测试 TopK 仍默认 3 |
 | 2.1.2 | 2026-07-25 | 六维优化落地说明：SSE `route`、模型发布/版本/回滚、命中测试 TopK 默认 3、监控分析反馈/主题 API；见 `OPTIMIZATION_STATUS.md` |
 | 2.1.1 | 2026-07-23 | 补充审计批量删除 `POST /audit/logs/batch-delete`；注明 KB ACL 仅 API、管理端入口已下线 |

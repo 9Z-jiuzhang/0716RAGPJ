@@ -18,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utcnow
 
 if TYPE_CHECKING:
     from app.models.document import Document
@@ -39,8 +39,9 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     tags: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, server_default="{}", comment="标签列表")
     description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="描述")
     visibility: Mapped[str] = mapped_column(String(20), default="restricted", nullable=False, comment="可见性")
+    # 兼容字段：多部门关联的权威来源为 kb_departments；本列同步为首选部门（含 GUEST 优先）
     department: Mapped[str | None] = mapped_column(
-        String(50), nullable=True, comment="所属部门，如 A / B；空表示不限部门"
+        String(50), nullable=True, comment="首选部门编码（兼容旧逻辑；完整列表见 kb_departments）"
     )
     embedding_model: Mapped[str] = mapped_column(String(100), nullable=False, comment="嵌入模型标识")
     chunk_size: Mapped[int] = mapped_column(Integer, default=500, nullable=False, comment="默认分段大小")
@@ -64,8 +65,34 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         cascade="all, delete-orphan",
         lazy="noload",
     )
+    department_links: Mapped[list[KBDepartment]] = relationship(
+        "KBDepartment",
+        back_populates="knowledge_base",
+        cascade="all, delete-orphan",
+        lazy="noload",
+    )
 
     __table_args__ = (UniqueConstraint("name", "deleted_at", name="uq_kb_name_deleted"),)
+
+
+class KBDepartment(Base, UUIDPrimaryKeyMixin):
+    """知识库 ↔ 部门多对多关联（按部门 code）。"""
+
+    __tablename__ = "kb_departments"
+    __table_args__ = (UniqueConstraint("kb_id", "department_code", name="uq_kb_departments_kb_code"),)
+
+    kb_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    department_code: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True, comment="部门编码，如 GUEST / A / B"
+    )
+    created_at: Mapped[datetime_type] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    knowledge_base: Mapped[KnowledgeBase] = relationship("KnowledgeBase", back_populates="department_links")
 
 
 class KBPermission(Base, UUIDPrimaryKeyMixin, TimestampMixin):

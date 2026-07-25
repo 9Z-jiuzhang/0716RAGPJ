@@ -1,11 +1,12 @@
 """知识库检索范围解析（部门驱动的统一访问控制）。
 
 整合“可见性”与“部门”，以部门为唯一访问控制轴：
-- 未登录（访客）：仅“访客专用(GUEST)”部门的库，且 status=active
+- 未登录（访客）：仅关联“访客专用(GUEST)”部门的库，且 status=active
 - 已登录员工：访客专用库 ∪ 本部门库 ∪ 本人创建 ∪ 用户/角色 kb_permissions
   （员工权限覆盖访客：GUEST 部门内容对员工同样开放）
 - 全局管理员：全部 active 库
 - 指定 kb_ids 时取交集；仅返回已发布索引版本（current_index_version 非空）的库
+- 一个知识库可关联多个部门（kb_departments）
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from app.core.constants import GUEST_DEPARTMENT_CODE, normalize_department
 from app.models.identity import User
 from app.models.knowledge_base import KBPermission, KnowledgeBase
 from app.retrieval.types import KBTarget
+from app.services.kb_departments import kb_ids_with_department_subquery
 
 
 async def resolve_kb_targets(
@@ -59,10 +61,10 @@ async def _list_accessible_kbs(
     ]
 
     if user is None:
-        # 访客：仅“访客专用(GUEST)”部门的库
+        # 访客：仅关联“访客专用(GUEST)”的库
         stmt = select(KnowledgeBase).where(
             *base_filter,
-            KnowledgeBase.department == GUEST_DEPARTMENT_CODE,
+            KnowledgeBase.id.in_(kb_ids_with_department_subquery(GUEST_DEPARTMENT_CODE)),
         )
         return list((await db.scalars(stmt)).all())
 
@@ -85,12 +87,12 @@ async def _list_accessible_kbs(
 
     # 员工：访客专用库 ∪ 本部门库 ∪ 本人创建 ∪ 显式授权
     conditions = [
-        KnowledgeBase.department == GUEST_DEPARTMENT_CODE,
+        KnowledgeBase.id.in_(kb_ids_with_department_subquery(GUEST_DEPARTMENT_CODE)),
         KnowledgeBase.creator_id == user.id,
     ]
     dept = normalize_department(getattr(user, "department", None))
     if dept:
-        conditions.append(KnowledgeBase.department == dept)
+        conditions.append(KnowledgeBase.id.in_(kb_ids_with_department_subquery(dept)))
     if granted_ids:
         conditions.append(KnowledgeBase.id.in_(granted_ids))
 

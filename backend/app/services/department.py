@@ -7,13 +7,10 @@ import uuid
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import (
-    GUEST_DEPARTMENT_CODE,
-    derive_visibility,
-)
+from app.core.constants import GUEST_DEPARTMENT_CODE
 from app.models.department import Department
 from app.models.identity import User
-from app.models.knowledge_base import KnowledgeBase
+from app.models.knowledge_base import KBDepartment, KnowledgeBase
 from app.schemas.department import (
     DepartmentCreate,
     DepartmentDetail,
@@ -22,6 +19,11 @@ from app.schemas.department import (
     DepartmentListResponse,
     DepartmentMemberBrief,
     DepartmentUpdate,
+)
+from app.services.kb_departments import (
+    add_kb_department_link,
+    list_kb_department_codes,
+    remove_kb_department_link,
 )
 
 
@@ -85,10 +87,15 @@ class DepartmentService:
                 )
                 if clash:
                     raise ValueError(f"部门编码已存在：{new_code}")
-                # 同步迁移用户与知识库上的字符串关联
+                # 同步迁移用户、兼容列与多对多关联上的字符串编码
                 await self.db.execute(update(User).where(User.department == old_code).values(department=new_code))
                 await self.db.execute(
                     update(KnowledgeBase).where(KnowledgeBase.department == old_code).values(department=new_code)
+                )
+                await self.db.execute(
+                    update(KBDepartment)
+                    .where(KBDepartment.department_code == old_code)
+                    .values(department_code=new_code)
                 )
                 dept.code = new_code
 
@@ -112,13 +119,16 @@ class DepartmentService:
             return False
         if dept.code == GUEST_DEPARTMENT_CODE:
             raise ValueError("“访客专用”为内置部门，不能删除")
-        # 解除关联，保留用户/知识库记录；库解绑后回落为受限
+        # 解除本部门关联，保留其它部门；用户本部门清空
         await self.db.execute(update(User).where(User.department == dept.code).values(department=None))
-        await self.db.execute(
-            update(KnowledgeBase)
-            .where(KnowledgeBase.department == dept.code)
-            .values(department=None, visibility=derive_visibility(None))
+        linked_kb_ids = list(
+            (await self.db.scalars(select(KBDepartment.kb_id).where(KBDepartment.department_code == dept.code))).all()
         )
+        for kb_id in linked_kb_ids:
+            kb = await self.db.get(KnowledgeBase, kb_id)
+            if kb is None or kb.deleted_at is not None:
+                continue
+            await remove_kb_department_link(self.db, kb, dept.code)
         await self.db.delete(dept)
         await self.db.commit()
         return True
@@ -149,6 +159,7 @@ class DepartmentService:
         return await self._to_detail(dept)
 
     async def add_knowledge_bases(self, dept_id: uuid.UUID, kb_ids: list[uuid.UUID]) -> DepartmentDetail:
+        """追加关联：不覆盖知识库上其它部门的关联。"""
         dept = await self.db.get(Department, dept_id)
         if not dept:
             raise ValueError("部门不存在")
@@ -163,23 +174,22 @@ class DepartmentService:
         if len(kbs) != len(set(kb_ids)):
             raise ValueError("部分知识库不存在")
         for kb in kbs:
-            kb.department = dept.code
-            # 可见性由部门派生：归入访客专用即公开，其余为受限
-            kb.visibility = derive_visibility(dept.code)
+            await add_kb_department_link(self.db, kb, dept.code)
         await self.db.commit()
         return await self._to_detail(dept)
 
     async def remove_knowledge_base(self, dept_id: uuid.UUID, kb_id: uuid.UUID) -> DepartmentDetail:
+        """仅解除与本部门的关联，不影响其它部门。"""
         dept = await self.db.get(Department, dept_id)
         if not dept:
             raise ValueError("部门不存在")
         kb = await self.db.get(KnowledgeBase, kb_id)
         if not kb or kb.deleted_at is not None:
             raise ValueError("知识库不存在")
-        if (kb.department or "").strip().upper() != dept.code:
+        codes = await list_kb_department_codes(self.db, kb.id)
+        if dept.code not in codes:
             raise ValueError("该知识库未关联此部门")
-        kb.department = None
-        kb.visibility = derive_visibility(None)
+        await remove_kb_department_link(self.db, kb, dept.code)
         await self.db.commit()
         return await self._to_detail(dept)
 
@@ -190,11 +200,8 @@ class DepartmentService:
         return int(
             await self.db.scalar(
                 select(func.count())
-                .select_from(KnowledgeBase)
-                .where(
-                    KnowledgeBase.department == code,
-                    KnowledgeBase.deleted_at.is_(None),
-                )
+                .select_from(KBDepartment)
+                .where(KBDepartment.department_code == code)
             )
             or 0
         )
@@ -216,16 +223,27 @@ class DepartmentService:
         members = (
             await self.db.scalars(select(User).where(User.department == dept.code).order_by(User.username))
         ).all()
-        kbs = (
-            await self.db.scalars(
-                select(KnowledgeBase)
-                .where(
-                    KnowledgeBase.department == dept.code,
-                    KnowledgeBase.deleted_at.is_(None),
+        kb_ids = list(
+            (
+                await self.db.scalars(
+                    select(KBDepartment.kb_id).where(KBDepartment.department_code == dept.code).distinct()
                 )
-                .order_by(KnowledgeBase.name)
+            ).all()
+        )
+        kbs: list[KnowledgeBase] = []
+        if kb_ids:
+            kbs = list(
+                (
+                    await self.db.scalars(
+                        select(KnowledgeBase)
+                        .where(
+                            KnowledgeBase.id.in_(kb_ids),
+                            KnowledgeBase.deleted_at.is_(None),
+                        )
+                        .order_by(KnowledgeBase.name)
+                    )
+                ).all()
             )
-        ).all()
         base = await self._to_list_item(dept)
         return DepartmentDetail(
             **base.model_dump(),

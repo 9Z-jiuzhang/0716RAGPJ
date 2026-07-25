@@ -8,7 +8,7 @@ from .guard import GuardBlockedEvent
 from .hit_tests import TestCases, TestQuestions, TestResults, TestRuns
 from .identity import AuditLog, Permission, Role, User
 from .index_version import IndexVersion
-from .knowledge_base import KBPermission, KnowledgeBase
+from .knowledge_base import KBDepartment, KBPermission, KnowledgeBase
 from .model_config import ModelConfig
 from .qa import QAMessage, QASession
 from .query_processing import QueryProcessingConfig
@@ -25,6 +25,7 @@ __all__ = [
     "AuditLog",
     "Department",
     "KnowledgeBase",
+    "KBDepartment",
     "KBPermission",
     "TestCases",
     "TestQuestions",
