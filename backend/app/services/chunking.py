@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 from app.models.enums import (
     DEFAULT_CHUNK_OVERLAP,

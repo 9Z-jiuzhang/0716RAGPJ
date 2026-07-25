@@ -13,7 +13,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import (
-    GUEST_DEPARTMENT_CODE,
     derive_visibility_from_departments,
     normalize_department,
     normalize_departments,
@@ -33,9 +32,7 @@ async def list_kb_department_codes(db: AsyncSession, kb_id: uuid.UUID) -> list[s
     return [str(c) for c in rows]
 
 
-async def list_kb_department_codes_map(
-    db: AsyncSession, kb_ids: Sequence[uuid.UUID]
-) -> dict[uuid.UUID, list[str]]:
+async def list_kb_department_codes_map(db: AsyncSession, kb_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
     """批量读取知识库部门编码列表。"""
     if not kb_ids:
         return {}

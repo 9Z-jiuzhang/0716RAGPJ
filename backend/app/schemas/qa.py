@@ -82,7 +82,5 @@ class FeedbackRequest(BaseModel):
     """回答反馈请求。``rating=null`` 表示取消已有点赞/点踩。"""
 
     message_id: UUID = Field(description="被评价的助手消息 ID")
-    rating: Literal["useful", "useless"] | None = Field(
-        description="有用/无用；传 null 取消反馈并从统计表删除"
-    )
+    rating: Literal["useful", "useless"] | None = Field(description="有用/无用；传 null 取消反馈并从统计表删除")
     comment: str | None = Field(default=None, max_length=500, description="可选评论")

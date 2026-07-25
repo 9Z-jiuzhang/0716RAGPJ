@@ -199,9 +199,7 @@ class DepartmentService:
     async def _kb_count(self, code: str) -> int:
         return int(
             await self.db.scalar(
-                select(func.count())
-                .select_from(KBDepartment)
-                .where(KBDepartment.department_code == code)
+                select(func.count()).select_from(KBDepartment).where(KBDepartment.department_code == code)
             )
             or 0
         )

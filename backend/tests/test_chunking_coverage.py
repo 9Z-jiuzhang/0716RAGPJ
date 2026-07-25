@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 
 import pytest
-
 from app.services.chunking import (
     ChunkCoverageError,
     content_coverage_ratio,
@@ -13,7 +12,6 @@ from app.services.chunking import (
     merge_rules,
     split_text,
 )
-
 
 ALL_MODES = ("markdown", "paragraph", "fixed", "sliding", "heading")
 

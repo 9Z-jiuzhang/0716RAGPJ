@@ -7,7 +7,6 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from app.core.qa_pipeline import _NO_EVIDENCE_NOTICE, _REFERENCE_SYSTEM_PROMPT, QAPipeline
 from app.schemas.optimization_contracts import ConversationIntent, ConversationRouteDecision
 from app.services.conversation_router import conversation_router

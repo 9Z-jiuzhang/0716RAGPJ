@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-
 from app.schemas.optimization_contracts import QAFeedbackUpsert
 from app.services.analytics_events import AnalyticsEventService, _window_days
 

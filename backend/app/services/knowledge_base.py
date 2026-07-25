@@ -496,9 +496,7 @@ class KnowledgeBaseService:
                 for row in rows
             ]
         departments = (
-            list(department_codes)
-            if department_codes is not None
-            else await list_kb_department_codes(self.db, kb.id)
+            list(department_codes) if department_codes is not None else await list_kb_department_codes(self.db, kb.id)
         )
         return KnowledgeBaseResponse(
             id=kb.id,

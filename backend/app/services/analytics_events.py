@@ -189,9 +189,7 @@ class AnalyticsEventService:
             )
         )
         total_events = await db.scalar(
-            select(func.count())
-            .select_from(QARequestEvent)
-            .where(QARequestEvent.created_at >= since)
+            select(func.count()).select_from(QARequestEvent).where(QARequestEvent.created_at >= since)
         )
         actor_n = await db.scalar(
             select(func.count(func.distinct(QARequestEvent.actor_hash)))
