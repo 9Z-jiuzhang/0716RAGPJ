@@ -67,7 +67,9 @@ def normalize_score(raw: float, raw_type: str = "cosine_distance") -> UnifiedVec
         sim = max(0.0, min(1.0, float(raw)))
     return UnifiedVectorScore(
         raw_score=float(raw),
-        raw_score_type=raw_type if raw_type in {"cosine_similarity", "cosine_distance", "l2", "inner_product"} else "unknown",
+        raw_score_type=(
+            raw_type if raw_type in {"cosine_similarity", "cosine_distance", "l2", "inner_product"} else "unknown"
+        ),
         normalized_similarity=sim,
         normalization_version="v1",
     )

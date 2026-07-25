@@ -25,40 +25,42 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.config import settings
+from app.core.redis import get_redis_client
 from app.memory.models import ContextMessage
 from app.memory.session_store import SessionAccessError, session_store
+from app.memory.session_store_v2 import session_store_v2
 from app.models.identity import User
 from app.models.qa import QAMessage, QASession
 from app.retrieval import hybrid_retriever, resolve_kb_targets
 from app.retrieval.types import RetrievalHit, RetrievalStrategy
-from app.schemas.qa import AskRequest
-from app.services.history_retention import enforce_history_retention
-from app.services.langfuse_service import get_langfuse
-from app.services.llm import LLMServiceError, llm_service
-from app.services.llm_guard import llm_guard_service
-from app.services.query_processing import (
-    QueryProcessingOptions,
-    _sanitize_rewrite_output as _sanitize_rewrite_output,
-    _strip_model_reasoning,
-    get_query_processing_options,
-    query_processor,
-)
-from app.services.role_cache import role_cache_service
-from app.services.web_search import format_web_results, search_web
-from app.services.conversation_router import conversation_router
-from app.services.analytics_events import analytics_event_service, actor_hash_for, question_hash
-from app.services.model_config_registry import model_config_registry
-from app.services.model_concurrency import model_concurrency_gate
-from app.services.qa_cache import qa_cache_service
-from app.services.qa_queue import qa_queue_service
-from app.core.redis import get_redis_client
 from app.schemas.optimization_contracts import (
     CacheLookupRequest,
     ConversationIntent,
     ConversationRouteDecision,
     QARequestEventCreate,
 )
-from app.memory.session_store_v2 import session_store_v2
+from app.schemas.qa import AskRequest
+from app.services.analytics_events import actor_hash_for, analytics_event_service, question_hash
+from app.services.conversation_router import conversation_router
+from app.services.history_retention import enforce_history_retention
+from app.services.langfuse_service import get_langfuse
+from app.services.llm import LLMServiceError, llm_service
+from app.services.llm_guard import llm_guard_service
+from app.services.model_concurrency import model_concurrency_gate
+from app.services.model_config_registry import model_config_registry
+from app.services.qa_cache import qa_cache_service
+from app.services.qa_queue import qa_queue_service
+from app.services.query_processing import (
+    QueryProcessingOptions,
+    _strip_model_reasoning,
+    get_query_processing_options,
+    query_processor,
+)
+from app.services.query_processing import (
+    _sanitize_rewrite_output as _sanitize_rewrite_output,
+)
+from app.services.role_cache import role_cache_service
+from app.services.web_search import format_web_results, search_web
 from app.utils.confidence import aggregate_retrieval_confidence, clamp_display_score
 from app.utils.tracing import PerformanceTracker, new_request_id
 from sqlalchemy import select

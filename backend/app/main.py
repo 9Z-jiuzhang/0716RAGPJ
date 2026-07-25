@@ -386,9 +386,7 @@ async def lifespan(_: FastAPI):
             name="role-cache-scheduler",
         )
     elif settings.SCHEDULER_EXTERNAL_ENABLED:
-        logging.getLogger("app.main").info(
-            "SCHEDULER_EXTERNAL_ENABLED=true：API 进程不启动周期任务循环"
-        )
+        logging.getLogger("app.main").info("SCHEDULER_EXTERNAL_ENABLED=true：API 进程不启动周期任务循环")
 
     yield
 

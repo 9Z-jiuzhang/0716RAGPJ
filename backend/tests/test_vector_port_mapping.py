@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-
 from app.services.vector_store import search_via_port
 
 

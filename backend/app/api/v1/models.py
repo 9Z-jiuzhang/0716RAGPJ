@@ -152,9 +152,8 @@ async def list_model_versions(
     _: User = Depends(require_permission("model:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy import select
-
     from app.models.analytics import ModelConfigVersion
+    from sqlalchemy import select
 
     rows = (
         await db.scalars(

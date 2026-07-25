@@ -16,8 +16,8 @@ logger = logging.getLogger("scheduler_worker")
 
 async def main() -> None:
     from app.core.config import settings
-    from app.core.database import SessionLocal, engine, ensure_postgres_extensions, ensure_schema_patches
-    from app.core.redis import init_redis, close_redis
+    from app.core.database import engine, ensure_postgres_extensions, ensure_schema_patches
+    from app.core.redis import close_redis, init_redis
     from app.models.base import Base
     from app.services.scheduler import scheduler_loop
 

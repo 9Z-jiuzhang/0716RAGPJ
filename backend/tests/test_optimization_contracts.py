@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.core.config import Settings
 from app.core.redis_keys import qa_exact_cache_key, session_meta_key
 from app.schemas.optimization_contracts import CacheLookupRequest, ConversationIntent

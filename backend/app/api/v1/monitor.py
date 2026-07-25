@@ -63,9 +63,8 @@ async def analytics_topics(
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
     """主题聚类列表；全文明细需更高权限时再扩展。"""
-    from sqlalchemy import select
-
     from app.models.analytics import QATopicCluster
+    from sqlalchemy import select
 
     rows = (await db.scalars(select(QATopicCluster).order_by(QATopicCluster.sample_count.desc()).limit(50))).all()
     items = [

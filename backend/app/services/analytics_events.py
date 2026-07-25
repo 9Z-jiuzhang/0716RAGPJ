@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import logging
 from typing import Any
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -96,7 +95,7 @@ class AnalyticsEventService:
         """反馈汇总 + 路由/缓存分布 + 近 N 日趋势（供管理端图表）。"""
         from datetime import datetime, timedelta, timezone
 
-        from sqlalchemy import cast, Date, func
+        from sqlalchemy import Date, cast, func
 
         useful_n = await db.scalar(
             select(func.count()).select_from(QAFeedbackEvent).where(QAFeedbackEvent.rating == "useful")
@@ -177,12 +176,8 @@ class AnalyticsEventService:
             "unique_conversations": int(session_n or 0),
             "feedback_rate": round(feedback_total / request_total, 4) if request_total else 0.0,
             "avg_latency_ms": int(round(float(avg_latency))) if avg_latency is not None else None,
-            "route_distribution": [
-                {"label": (r[0] or "unknown"), "count": int(r[1])} for r in route_rows
-            ],
-            "cache_distribution": [
-                {"label": (r[0] or "none"), "count": int(r[1])} for r in cache_rows
-            ],
+            "route_distribution": [{"label": (r[0] or "unknown"), "count": int(r[1])} for r in route_rows],
+            "cache_distribution": [{"label": (r[0] or "none"), "count": int(r[1])} for r in cache_rows],
             "trend_days": days,
             "trend": [
                 {

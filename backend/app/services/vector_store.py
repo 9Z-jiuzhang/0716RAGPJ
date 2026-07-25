@@ -200,4 +200,3 @@ async def search_via_port(req: Any) -> list[dict[str, Any]]:
             }
         )
     return out
-
