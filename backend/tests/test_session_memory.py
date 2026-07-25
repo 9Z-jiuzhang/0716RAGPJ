@@ -41,5 +41,6 @@ def test_to_llm_messages_strips_reasoning_and_truncates() -> None:
     msgs = memory.to_llm_messages()
     assert len(msgs) == 1
     assert "很长的推理过程" not in msgs[0]["content"]
-    assert msgs[0]["content"].startswith("答案正文")
+    assert msgs[0]["content"].startswith("（以下为历史回答")
+    assert "答案正文" in msgs[0]["content"]
     assert len(msgs[0]["content"]) <= SessionMemory._LLM_MSG_MAX_CHARS + 1

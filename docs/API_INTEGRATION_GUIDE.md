@@ -231,7 +231,7 @@ X-Request-Id: <建议>
 | session_id | UUID | 否 | 不传则新建会话；多轮请带上一次返回的会话 ID |
 | kb_ids | UUID[] | 否 | 限定检索的知识库；不传则按权限可见范围检索 |
 | strategy | string | 否 | `vector` / `fulltext` / `hybrid`，默认 `hybrid` |
-| top_k | int | 否 | 引用片段数，1–20，默认 3 |
+| top_k | int | 否 | 引用片段数，1–20，默认 5（前端默认展示相关度最高 3 段，其余折叠） |
 | temperature | float | 否 | 生成温度 0–2，默认 0.7 |
 
 > **不要用普通 EventSource GET**：本接口是 **POST + body**，请用 OkHttp / HttpURLConnection 读流。
@@ -380,7 +380,7 @@ client.newCall(req).execute().use { resp ->
 val payload = JSONObject()
   .put("question", question)
   .put("strategy", "hybrid")
-  .put("top_k", 3)
+  .put("top_k", 5)   // 服务端默认 5；可不传。前端展示可只展开相关度最高 3 段
 sessionId?.let { payload.put("session_id", it) }
 
 val req = Request.Builder()

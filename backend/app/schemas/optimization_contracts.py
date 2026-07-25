@@ -19,6 +19,7 @@ class ConversationIntent(str, Enum):
     GREETING_CHAT = "GREETING_CHAT"
     THANKS_GOODBYE = "THANKS_GOODBYE"
     SYSTEM_HELP = "SYSTEM_HELP"
+    SYSTEM_MECHANISM = "SYSTEM_MECHANISM"
     PREVIOUS_ANSWER_TRANSFORM = "PREVIOUS_ANSWER_TRANSFORM"
     CONTEXT_FOLLOWUP_KB = "CONTEXT_FOLLOWUP_KB"
     NEW_KB_QUERY = "NEW_KB_QUERY"
@@ -61,7 +62,7 @@ class CacheLookupRequest(BaseModel):
     model_config_version: str = "env"
     prompt_version: str = "v1"
     query_processing_version: str = "v1"
-    top_k: int = 3
+    top_k: int = 5
     deadline_at: datetime | None = None
 
 

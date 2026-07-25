@@ -73,3 +73,11 @@ def test_router_core_paths_do_not_retrieve() -> None:
     help_d = conversation_router.route(question="你有什么功能", has_last_answer=False)
     assert help_d.intent == ConversationIntent.SYSTEM_HELP
     assert help_d.should_retrieve is False
+
+    mech = conversation_router.route(
+        question="那能不能告诉我你这个系统是怎么运行的啊",
+        has_last_answer=False,
+    )
+    assert mech.intent == ConversationIntent.SYSTEM_MECHANISM
+    assert mech.should_retrieve is False
+    assert conversation_router.template_reply(mech)

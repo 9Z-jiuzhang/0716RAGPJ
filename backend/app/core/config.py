@@ -179,7 +179,15 @@ class Settings(BaseSettings):
     QA_HISTORY_MAX_TURNS: int = 20
     QA_HISTORY_RETENTION_SWEEP_SECONDS: int = 300
     QA_DEFAULT_STRATEGY: str = "hybrid"
-    QA_DEFAULT_TOP_K: int = 3
+    QA_DEFAULT_TOP_K: int = 5
+    # 上下文跟进问抬升 top_k，缓解关键段挤不出前三
+    QA_FOLLOWUP_TOP_K: int = 5
+    # 跟进问合并上轮引文分段（粘性证据）；默认开启
+    QA_STICKY_EVIDENCE_ENABLED: bool = True
+    QA_STICKY_EVIDENCE_CAP: int = 8
+    # 命中后补同文档邻段（标题/正文拆开场景）
+    QA_NEIGHBOR_CHUNKS_ENABLED: bool = True
+    QA_NEIGHBOR_CHUNK_RADIUS: int = 1
     QA_RELEVANCE_THRESHOLD: float = 0.3
     QA_RRF_K: int = 60
     QA_GUEST_SESSION_TTL_MINUTES: int = 30
@@ -239,8 +247,8 @@ class Settings(BaseSettings):
     RAGAS_MAX_SAMPLE_LIMIT: int = 50
     RAGAS_MAX_CONTEXTS_PER_SAMPLE: int = 10
     RAGAS_CONTEXT_MAX_CHARS: int = 3000
-    # 检索无命中时：先声明知识库未找到依据，再调用 LLM 给出「参考答案」（不伪造 KB 引用）
-    QA_FALLBACK_LLM_ENABLED: bool = True
+    # 检索无命中时：默认仅固定拒答（prefer abstain）；显式开启后才对白名单意图写参考答案
+    QA_FALLBACK_LLM_ENABLED: bool = False
     # 可选：无命中时附加轻量联网检索结果，供参考答案提示词使用（无 API Key，默认关闭）
     QA_FALLBACK_WEB_SEARCH_ENABLED: bool = False
 

@@ -379,7 +379,7 @@ Authorization: Bearer <access_token>
 | GET | `.../documents/{doc_id}` | `doc:read` | 详情与状态 |
 | GET | `.../documents/{doc_id}/content` | `doc:read` | 原文/规范化文本预览 |
 | DELETE | `.../documents/{doc_id}` | `doc:write` | 删除文档 + 向量 + MinIO 对象 |
-| PUT | `.../documents/{doc_id}/segment-rules` | `doc:segment` | 仅保存规则 |
+| PUT | `.../documents/{doc_id}/segment-rules` | `doc:segment` | 仅保存**文档级**规则（不回写知识库默认、不重分段） |
 | POST | `.../documents/{doc_id}/segment-preview` | `doc:segment` | 对已存文档试分段（不落库） |
 | POST | `.../documents/segment-preview-file` | `doc:segment` | **multipart**：`file?` 或 `doc_id?` + `chunk_size?/chunk_overlap?/split_mode?`（Form）试分段 |
 | POST | `.../documents/{doc_id}/re-segment` | `doc:segment` | 重分段 + 向量化，异步 `202` |
@@ -393,6 +393,7 @@ Authorization: Bearer <access_token>
 - **Content-Type**：`multipart/form-data`（字段名 `file`）。
 - **体积**：反向代理 `client_max_body_size 100m`；超限 → `413`。
 - **格式**：首期支持 `pdf/doc/docx/txt/md`；`csv/xlsx/pptx` 明确拒绝并返回错误。
+- **默认分段**：按扩展名自动选择（`md`→`markdown`，`txt/pdf/doc/docx`→`paragraph`，其它→`fixed`），不继承知识库默认规则；之后可在文档工作台改规则并重分段。
 - **流水线状态**：`uploaded → parsing → processing → pending_segment → vectorizing → ready`，失败为 `error`（带 `error_message`）。
 
 ### 9.2 主要响应结构
@@ -421,7 +422,7 @@ Authorization: Bearer <access_token>
 | session_id | 否 | 不传则**始终新建会话**（不按 `X-Guest-Id` 自动复用）；传入则可多轮续聊（含已闲置过期的会话，会重新激活） |
 | kb_ids | 否 | 限定知识库；默认全部可访问范围（与可访问集取交集） |
 | strategy | 否 | `hybrid`(默认) / `vector` / `fulltext` |
-| top_k | 否 | 默认 3（1–20） |
+| top_k | 否 | 默认 5（1–20）；**上下文跟进问**实际检索取 `max(top_k, QA_FOLLOWUP_TOP_K)`（默认 5）；前端引用区默认展开相关度最高的 3 段，其余折叠 |
 | temperature | 否 | 字段保留；**默认不覆盖**已发布/环境模型配置（记兼容意图），仅在模型注册表允许覆盖时生效 |
 
 **SSE 事件**：
@@ -442,13 +443,17 @@ Authorization: Bearer <access_token>
 
 > 多级缓存 L1–L4 由功能开关控制；命中多级缓存时走短路径（无独立 `cache_hit` 事件名，元数据写入 `retrieval_meta`）。角色缓存仍发 `cache_hit`。
 
-**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`（向量相关度一般为 `1 - cosine_distance`）。
+**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky` 会话延续）。向量相关度一般为 `1 - cosine_distance`。
+
+**多轮粘性证据**（`QA_STICKY_EVIDENCE_ENABLED`，默认开）：路由为上下文跟进问且上轮助手消息含 citations 时，将上轮引用分段合并进本轮证据（并可补同文档邻段），避免 top_k 漏召回导致前后矛盾。会话历史仍**不得**替代检索证据；本轮无依据时说「本轮检索依据不足」，不得称上轮为幻觉。
 
 **范围规则**：
 
 - 未登录：仅 `department=GUEST`（访客专用）知识库；
 - 已登录：GUEST ∪ 本部门 ∪ 本人创建 ∪ 授权库；指定 `kb_ids` 时取交集；
-- 仅检索**有 `current_index_version`（已建索引）**的库；无可检索目标时进入「无证据」兜底（严禁编造来源）。
+- 仅检索**有 `current_index_version`（已建索引）**的库；无可检索目标或 0 hits 时进入「无证据」兜底（严禁编造来源）。
+- **未命中默认拒答**：`QA_FALLBACK_LLM_ENABLED` 默认 `false`，只返回声明+固定短拒；显式开启后仅业务意图（`NEW_KB_QUERY` / 跟进问）可写 LLM 参考答。
+- **系统运行机制**类问题路由为 `SYSTEM_MECHANISM`，不进检索，返回短模板（不展开内部架构）。
 
 **超时**：反向代理 SSE 读超时 600s。
 
@@ -460,7 +465,7 @@ Authorization: Bearer <access_token>
 | GET | `/qa/sessions/{session_id}` | 需登录 | 消息历史（含 citations，默认 `page_size=50`） |
 | PUT | `/qa/sessions/{session_id}` | 需登录 | Body：`title`(1–100) |
 | DELETE | `/qa/sessions/{session_id}` | 需登录 | 软删除并清理 Redis 缓存 |
-| POST | `/qa/feedback` | 需登录 | `message_id`、`rating`(useful\|useless)、`comment?`(≤500) |
+| POST | `/qa/feedback` | 需登录 | `message_id`、`rating`(useful\|useless\|**null 取消**)、`comment?`(≤500)；与统计事实表同事务，写入失败返回 500 |
 
 ### 10.3 管理员会话分析
 
@@ -550,7 +555,7 @@ Authorization: Bearer <access_token>
 | GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`uptime_seconds`；`checks` 含 postgres/redis/chroma/langfuse/minio 连通性 |
 | GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d` / `qa_trend_30d`、`hit_rate_trend_7d` / `hit_rate_trend_30d`、`error_24h`（4 桶）、`error_hourly_48h`（48 点）、`guard_blocked_24h`、`guard_blocked_7d`、`guard_recent_events` |
 | GET | `/monitor/guard-events` | `system:read` | 分页 Guard 拦截明细；默认 `page_size=50` |
-| GET | `/monitor/analytics/feedback` | `system:read` | 反馈汇总 + 路由/缓存分布 + 近 N 日趋势（Query：`days` 1–90，默认 14）；仅聚合 |
+| GET | `/monitor/analytics/feedback` | `system:read` | 近 N 日反馈汇总 + 路由/缓存分布 + 按日趋势（Query：`days` 1–90，默认 14；**汇总与趋势同一窗口**） |
 | GET | `/monitor/analytics/topics` | `system:read` | 主题簇列表（关键词粗聚类，聚合） |
 | POST | `/monitor/analytics/topics/rebuild` | `system:read` | 从近期问答事件重建主题簇 |
 | GET | `/metrics`（应用根，非 `/api/v1`） | 内部 | Prometheus 文本指标，**不走统一包装**；云端可借 `METRICS_PUBLIC=false` 限制暴露 |
@@ -630,6 +635,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.3 | 2026-07-25 | Ask/`QA_DEFAULT_TOP_K` 默认 5；访客端引用区按相关度展开 Top-3、其余折叠；命中测试 TopK 仍默认 3 |
 | 2.1.2 | 2026-07-25 | 六维优化落地说明：SSE `route`、模型发布/版本/回滚、命中测试 TopK 默认 3、监控分析反馈/主题 API；见 `OPTIMIZATION_STATUS.md` |
 | 2.1.1 | 2026-07-23 | 补充审计批量删除 `POST /audit/logs/batch-delete`；注明 KB ACL 仅 API、管理端入口已下线 |
 | 2.1.0 | 2026-07-22 | 补充管理员会话分析 `/qa/admin/sessions*`；核对监控统计字段与登录文案 |

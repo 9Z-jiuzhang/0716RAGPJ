@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 from uuid import UUID
 
-RetrievalStrategy = Literal["vector", "fulltext", "hybrid"]
+RetrievalStrategy = Literal["vector", "fulltext", "hybrid", "sticky"]
 
 
 @dataclass
@@ -30,11 +30,13 @@ class RetrievalHit:
     def to_citation(self) -> dict[str, Any]:
         """转换为 API CitationResponse 字段结构。"""
         return {
+            "chunk_id": self.chunk_id,
             "doc_id": self.doc_id,
             "doc_name": self.doc_name,
             "chunk_index": self.chunk_index,
             "content": self.content,
             "score": round(self.score, 6),
+            "source": self.source,
         }
 
 

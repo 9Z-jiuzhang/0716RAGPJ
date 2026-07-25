@@ -231,7 +231,7 @@ X-Request-Id: <建议>
 | session_id | UUID | 否 | 不传则新建会话；多轮请带上一次返回的会话 ID |
 | kb_ids | UUID[] | 否 | 限定检索的知识库；不传则按权限可见范围检索 |
 | strategy | string | 否 | `vector` / `fulltext` / `hybrid`，默认 `hybrid` |
-| top_k | int | 否 | 引用片段数，1–20，默认 3 |
+| top_k | int | 否 | 引用片段数，1–20，默认 5（前端默认展示相关度最高 3 段，其余折叠） |
 | temperature | float | 否 | 生成温度 0–2，默认 0.7 |
 
 > **不要用普通 EventSource GET**：本接口是 **POST + body**，请用 OkHttp / HttpURLConnection 读流。
@@ -266,7 +266,7 @@ data: {"content":"……"}
 4. 收到 `guard_blocked` / `error` → 展示 message，结束流  
 5. `route` / `intent` 等流水线事件可忽略或用于轻提示，不必写入回答正文
 
-> 六维优化开关与模块状态见站点文档 `docs/OPTIMIZATION_STATUS.md`（仓库根相对路径）。
+> 六维优化开关与模块状态见 [`OPTIMIZATION_STATUS.md`](./OPTIMIZATION_STATUS.md)。
 
 ### 6.4 会话与访客说明
 
@@ -333,7 +333,7 @@ data: {"content":"……"}
 
 ## 10. 其他模块索引（管理 / 质量）
 
-以下模块完整字段说明见 [`API.md`](./API.md)。第三方业务 App **通常不需要**直接集成，除非你在做管理壳或自动化运维。
+以下模块完整字段说明见仓库 `docs/API.md`。第三方业务 App **通常不需要**直接集成，除非你在做管理壳或自动化运维。
 
 | 模块前缀 | 功能解说（中文） |
 |----------|------------------|
@@ -380,7 +380,7 @@ client.newCall(req).execute().use { resp ->
 val payload = JSONObject()
   .put("question", question)
   .put("strategy", "hybrid")
-  .put("top_k", 3)
+  .put("top_k", 5)   // 服务端默认 5；可不传。前端展示可只展开相关度最高 3 段
 sessionId?.let { payload.put("session_id", it) }
 
 val req = Request.Builder()
@@ -443,9 +443,9 @@ client.newCall(req).execute().use { resp ->
 | 文档 | 用途 |
 |------|------|
 | 本文 `API_INTEGRATION_GUIDE.md` | 第三方 / 移动端接入指南（功能解说向） |
-| [`API.md`](./API.md) | 全量接口字段与约束 |
-| [`openapi.json`](./openapi.json) | 机器可读契约，可导入 Postman / 代码生成 |
-| [`CONTRACT.md`](./CONTRACT.md) | 契约变更流程 |
-| [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
+| 仓库 `docs/API.md` | 全量接口字段与约束 |
+| 运行时 [`/openapi.json`](/openapi.json) | 机器可读契约，可导入 Postman / 代码生成 |
+| 仓库 `docs/CONTRACT.md` | 契约变更流程 |
+| 仓库 `docs/CLOUD_DEPLOY.md` | 云端生产部署与安全加固 |
 
 管理端「API 接入指南」页面展示本文内容，并内嵌同源 Swagger（`/assets/vendor/swagger-ui/index.html`）。机器调试也可打开官方 `/docs`（本机默认 `http://localhost:18080/docs`），或导入 `openapi.json`。

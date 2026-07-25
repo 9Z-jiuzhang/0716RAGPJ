@@ -44,12 +44,12 @@ async def guard_events(
 
 @router.get("/analytics/feedback", response_model=BaseResponse, summary="问答反馈汇总")
 async def analytics_feedback(
-    days: int = Query(14, ge=1, le=90, description="趋势窗口天数"),
+    days: int = Query(14, ge=1, le=90, description="统计窗口天数（汇总与趋势同一口径）"),
     db: AsyncSession = Depends(get_db),
     _user=Depends(require_permission("system:read")),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
-    """管理端图表数据：反馈计数、路由/缓存分布与近 N 日趋势。"""
+    """管理端图表数据：近 N 日反馈计数、路由/缓存分布与按日趋势（同一窗口口径）。"""
     from app.services.analytics_events import analytics_event_service
 
     body = await analytics_event_service.feedback_summary(db, days=days)

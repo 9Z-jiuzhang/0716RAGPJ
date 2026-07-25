@@ -2,6 +2,7 @@
 
 from app.services.chunking import (
     adapt_rules_for_file_type,
+    default_rules_for_file_type,
     recommended_split_mode_for_file_type,
     split_text,
 )
@@ -16,6 +17,15 @@ def test_recommended_split_mode_by_file_type() -> None:
     assert recommended_split_mode_for_file_type("doc") == "paragraph"
     assert recommended_split_mode_for_file_type("docx") == "paragraph"
     assert recommended_split_mode_for_file_type("unknown") == "fixed"
+
+
+def test_upload_defaults_always_follow_file_type() -> None:
+    """上传默认规则始终按扩展名设 mode，不受其它规则影响。"""
+    assert default_rules_for_file_type("md")["split_mode"] == "markdown"
+    assert default_rules_for_file_type("pdf")["split_mode"] == "paragraph"
+    assert default_rules_for_file_type("txt")["split_mode"] == "paragraph"
+    assert default_rules_for_file_type(None)["split_mode"] == "fixed"
+    assert default_rules_for_file_type("md")["chunk_size"] == 500
 
 
 def test_markdown_file_uses_markdown_mode_by_default() -> None:
@@ -64,6 +74,49 @@ def test_markdown_split_keeps_heading_hierarchy() -> None:
     assert all(chunk.metadata["split_mode"] == "markdown" for chunk in chunks)
 
 
+def test_markdown_sibling_headings_do_not_nest() -> None:
+    """同级标题应替换栈顶，而不是追加成父子关系。"""
+    text = """### 手册
+
+#### 1.总则
+
+总则正文。
+
+#### 2.员工守则
+
+守则正文。
+"""
+    chunks = split_text(
+        text,
+        {"chunk_size": 500, "chunk_overlap": 0, "split_mode": "markdown"},
+    )
+    paths = [tuple(c.metadata.get("heading_path") or []) for c in chunks]
+    assert ("手册", "1.总则") in paths
+    assert ("手册", "2.员工守则") in paths
+    assert ("手册", "1.总则", "2.员工守则") not in paths
+
+
+def test_markdown_split_preserves_single_newline_lists() -> None:
+    """单换行连接的长列表不得被静默丢弃（历史 bug：条款编号跳跃、总字数骤减）。"""
+    items = "\n".join(f"（{i}）条款内容第{i}条，说明文字。" for i in range(1, 31))
+    text = f"#### 2.员工守则\n\n**2.1仪容**\n{items}\n"
+    chunks = split_text(
+        text,
+        {
+            "chunk_size": 500,
+            "chunk_overlap": 50,
+            "separators": ["\n\n", "\n", "。", ".", " "],
+            "split_mode": "markdown",
+        },
+    )
+    joined = "\n".join(c.content for c in chunks)
+    assert "（1）" in joined
+    assert "（15）" in joined
+    assert "（30）" in joined
+    # 允许 overlap 导致合计略大于原文，但不允许远小于原文
+    assert sum(c.char_count for c in chunks) >= len(text) * 0.9
+
+
 def test_markdown_split_does_not_break_fenced_code_block() -> None:
     """围栏代码块即使超过目标长度也必须保持起止围栏完整。"""
     text = """# 接口示例
@@ -105,3 +158,12 @@ def test_explicit_sliding_on_pdf_is_preserved() -> None:
         "pdf",
     )
     assert rules["split_mode"] == "sliding"
+
+
+def test_adapt_does_not_override_kb_inherited_paragraph_on_md() -> None:
+    """历史文档若已是 paragraph，重分段时保留用户/历史选择（不因 md 强制改 markdown）。"""
+    rules = adapt_rules_for_file_type(
+        {"chunk_size": 500, "chunk_overlap": 50, "split_mode": "paragraph"},
+        "md",
+    )
+    assert rules["split_mode"] == "paragraph"

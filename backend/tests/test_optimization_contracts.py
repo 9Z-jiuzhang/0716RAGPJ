@@ -12,12 +12,12 @@ from app.services.qa_cache import qa_cache_service
 from app.services.vector_port import normalize_score
 
 
-def test_ask_request_default_top_k_is_3() -> None:
+def test_ask_request_default_top_k_is_5() -> None:
     req = AskRequest(question="年假几天？")
-    assert req.top_k == 3
+    assert req.top_k == 5
     # Schema / Settings 字段默认值；运行时 .env 可覆盖 settings 单例
-    assert AskRequest.model_fields["top_k"].default == 3
-    assert Settings.model_fields["QA_DEFAULT_TOP_K"].default == 3
+    assert AskRequest.model_fields["top_k"].default == 5
+    assert Settings.model_fields["QA_DEFAULT_TOP_K"].default == 5
     assert Settings.model_fields["QA_QUERY_REWRITE_ENABLED"].default is False
 
 

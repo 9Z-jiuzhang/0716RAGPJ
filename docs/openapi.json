@@ -20711,7 +20711,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 20,
-            "default": 3
+            "default": 5
           },
           "temperature": {
             "type": "number",
@@ -21072,7 +21072,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 20,
-            "default": 5
+            "default": 3
           },
           "similarity_threshold": {
             "type": "number",
@@ -21133,7 +21133,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 20,
-            "default": 5
+            "default": 3
           },
           "similarity_threshold": {
             "type": "number",

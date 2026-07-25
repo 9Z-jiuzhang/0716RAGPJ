@@ -344,16 +344,16 @@ function pageChat() {
               <button type="button" data-question="请介绍当前可访问的知识库内容">了解知识库内容</button>
               <button type="button" data-question="如何上传并管理文档？">如何管理文档</button>
               <button type="button" data-question="请说明平台的权限访问规则">查看权限规则</button>
-            </div>
           </div>
+        </div>
         </div>
           <button type="button" class="qa-scroll-bottom" id="btnScrollBottom" title="回到底部" aria-label="回到底部" hidden>↓</button>
           <div class="qa-composer" id="qaComposer">
             <div class="qa-composer-resize" id="qaComposerResize" title="拖拽调整高度" role="separator" aria-orientation="horizontal"></div>
           <textarea class="form-control" id="questionInput" placeholder="请输入问题，Enter 发送，Shift+Enter 换行"></textarea>
           <button type="button" class="btn" id="btnSend">发送</button>
-          </div>
         </div>
+      </div>
       </div>
     </div>
   `;
@@ -440,7 +440,7 @@ function scrollMessagesToBottom() {
   const list = document.getElementById("msgList");
   if (!list) return;
   requestAnimationFrame(() => {
-    list.scrollTop = list.scrollHeight;
+  list.scrollTop = list.scrollHeight;
     updateScrollToBottomBtn();
   });
 }
@@ -709,16 +709,28 @@ function bindMsgActions(row) {
         return;
       }
       if (act === "up" || act === "down") {
+        const wasActive = btn.classList.contains("is-active");
         setRate(act);
         const messageId = row.dataset.messageId;
-        // 已登录且有 message_id 时同步到后端；访客仍仅本地态
+        // 已登录且有 message_id 时同步到后端；再次点击同一按钮为取消（rating=null）
         if (messageId && isLoggedIn()) {
           try {
             await api.post("/qa/feedback", {
               message_id: messageId,
-              rating: act === "up" ? "useful" : "useless",
+              rating: wasActive ? null : act === "up" ? "useful" : "useless",
             });
           } catch (err) {
+            // 回滚本地态，避免 UI 与后台不一致
+            if (wasActive) {
+              setRate(act);
+            } else {
+              const up = bar.querySelector('[data-msg-act="up"]');
+              const down = bar.querySelector('[data-msg-act="down"]');
+              up?.classList.remove("is-active");
+              down?.classList.remove("is-active");
+              up?.setAttribute("aria-pressed", "false");
+              down?.setAttribute("aria-pressed", "false");
+            }
             toast(err.message || "反馈提交失败", "error");
           }
         }
@@ -846,8 +858,8 @@ function promptDialog({ title = "请输入", message = "", defaultValue = "", co
           <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
           <button type="button" class="btn" data-act="ok">${escapeHtml(confirmText)}</button>
         </div>
-      </div>
-    `;
+    </div>
+  `;
     const finish = (value) => {
       mask.remove();
       resolve(value);
@@ -1215,15 +1227,45 @@ function ensureMsgFeed() {
   return feed;
 }
 
+/** 引用区默认展开相关度最高的条数；其余收入折叠区（检索仍可用默认 top_k=5） */
+const CITATION_PRIMARY_DISPLAY = 3;
+
+function citationRelevanceSortKey(c) {
+  const numeric = Number(c?.score);
+  return Number.isFinite(numeric) ? numeric : Number.NEGATIVE_INFINITY;
+}
+
+function sortCitationsByRelevance(citations) {
+  return [...(citations || [])].sort((a, b) => citationRelevanceSortKey(b) - citationRelevanceSortKey(a));
+}
+
+function renderCitationItemHtml(c) {
+  const docName = escapeHtml(c.doc_name || "未知文档");
+  const chunkIndex = escapeHtml(c.chunk_index);
+  const scoreLabel = formatRetrievalRelevance(c.score);
+  return `<details class="citation-item">
+    <summary class="citation-meta">${docName} · 分段 #${chunkIndex} · 检索相关度 ${scoreLabel}</summary>
+    <div class="citation-content">${escapeHtml(c.content || "")}</div>
+  </details>`;
+}
+
 function buildCitationsHtml(citations) {
-  const items = citations || [];
+  const items = sortCitationsByRelevance(citations);
   if (!items.length) return "";
-  return `<div class="citations"><div class="citation-heading">引用来源（共 ${items.length} 段，点击展开原文）</div>${items
-    .map(
-      (c) =>
-        `<details class="citation-item"><summary class="citation-meta">${escapeHtml(c.doc_name)} · #${c.chunk_index}</summary><div class="citation-content">${escapeHtml(c.content || "")}</div></details>`
-    )
-    .join("")}</div>`;
+  const primary = items.slice(0, CITATION_PRIMARY_DISPLAY);
+  const rest = items.slice(CITATION_PRIMARY_DISPLAY);
+  const primaryHtml = primary.map(renderCitationItemHtml).join("");
+  const restHtml = rest.length
+    ? `<details class="citations-folded">
+        <summary class="citations-folded-summary">其余 ${rest.length} 段引用（相关度较低，点击展开）</summary>
+        <div class="citations-folded-list">${rest.map(renderCitationItemHtml).join("")}</div>
+      </details>`
+    : "";
+  const hint =
+    rest.length > 0
+      ? `引用来源（共 ${items.length} 段，默认展示相关度最高 ${primary.length} 段）`
+      : `引用来源（共 ${items.length} 段，点击展开原文）`;
+  return `<div class="citations"><div class="citation-heading">${hint}</div>${primaryHtml}${restHtml}</div>`;
 }
 
 function buildMessageRowFromApi(m) {
@@ -1479,21 +1521,14 @@ async function sendQuestion(presetQuestion) {
             setAssistantStreamHtml(bubble, renderAssistantBubbleHtml(rawAssistantText));
             scrollMessagesToBottom();
           }
-          // 引用来源
+          // 引用来源：按相关度排序，默认展示 Top-3，其余折叠
           if (event === "citations") {
             const items = data.items || data.citations || data || [];
             const list = Array.isArray(items) ? items : [];
             if (!list.length) {
               citationsHtml = `<div class="citations text-muted">未命中可引用分段，不会编造来源。</div>`;
             } else {
-              citationsHtml = `<div class="citations"><div class="citation-heading">引用来源（共 ${list.length} 段，点击展开原文）</div>${list
-                .map(
-                  (c) => `<details class="citation-item">
-                    <summary class="citation-meta">${escapeHtml(c.doc_name || "未知文档")} · 分段 #${escapeHtml(c.chunk_index)} · 检索相关度 ${formatRetrievalRelevance(c.score)}</summary>
-                    <div class="citation-content">${escapeHtml(c.content || "")}</div>
-                  </details>`
-                )
-                .join("")}</div>`;
+              citationsHtml = buildCitationsHtml(list);
             }
           }
           // 结束
@@ -1622,15 +1657,15 @@ function pageMaterioAuth(mode = "login") {
               <h2 id="authTitle">欢迎回来</h2>
               <p id="authLead">登录账号后开始使用知识平台</p>
             </div>
-            <div class="auth-tabs" role="tablist">
+        <div class="auth-tabs" role="tablist">
               <button type="button" class="auth-tab ${mode !== "register" ? "active" : ""}" data-tab="login">登录</button>
               <button type="button" class="auth-tab ${mode === "register" ? "active" : ""}" data-tab="register">注册</button>
-            </div>
-            <div id="authPanel"></div>
+        </div>
+        <div id="authPanel"></div>
             <p class="auth-materio-guest">
               无需账号？<button type="button" class="btn-text" id="btnGuestEnter">以访客进入问答</button>
             </p>
-          </div>
+        </div>
         </section>
       </div>
     </div>
@@ -1985,17 +2020,17 @@ async function pageProfile() {
                 : `<div class="card-header-actions"><button type="button" class="btn btn-secondary btn-sm" id="btnChangePassword">修改密码</button></div>`
             }
           </div>
-          <div class="form-group"><label>用户名</label><input class="form-control" id="pfUser" value="${escapeHtml(me.username || "")}" disabled /></div>
-          <div class="form-group"><label>昵称</label><input class="form-control" id="pfNick" value="${escapeHtml(me.nickname || "")}" /></div>
-          <div class="form-group"><label>邮箱</label><input class="form-control" id="pfEmail" value="${escapeHtml(me.email || "")}" /></div>
-          <div class="form-group"><label>角色</label><div>${escapeHtml((me.roles || [me.role]).filter(Boolean).join(", ") || "-")}</div></div>
-          <div class="form-group"><label>最近登录</label><div class="text-muted">${formatDateTime(me.last_login_at)}</div></div>
+        <div class="form-group"><label>用户名</label><input class="form-control" id="pfUser" value="${escapeHtml(me.username || "")}" disabled /></div>
+        <div class="form-group"><label>昵称</label><input class="form-control" id="pfNick" value="${escapeHtml(me.nickname || "")}" /></div>
+        <div class="form-group"><label>邮箱</label><input class="form-control" id="pfEmail" value="${escapeHtml(me.email || "")}" /></div>
+        <div class="form-group"><label>角色</label><div>${escapeHtml((me.roles || [me.role]).filter(Boolean).join(", ") || "-")}</div></div>
+        <div class="form-group"><label>最近登录</label><div class="text-muted">${formatDateTime(me.last_login_at)}</div></div>
           ${
             isSuperAdmin()
               ? `<p class="text-muted" style="font-size:12px;margin:0 0 12px">超级管理员密码仅可通过服务器 <code>.env</code> 中的 <code>SUPER_ADMIN_PASSWORD</code> 配置，修改后需重启 API。</p>`
               : ""
           }
-          <button class="btn" id="btnSaveProfile">保存资料</button>
+        <button class="btn" id="btnSaveProfile">保存资料</button>
         </div>
         <div class="card span-6">
           <div class="card-header"><div class="card-header-text"><h3 class="card-title">我的上传记录</h3></div></div>
@@ -2095,17 +2130,17 @@ async function pageUpload() {
     <div class="card upload-progress-panel span-4">
       <div class="card-header"><div class="card-header-text"><h3 class="card-title">处理进度</h3></div></div>
       <div class="upload-progress-body">
-      <div id="uploadProgress" class="text-muted">尚未开始</div>
+          <div id="uploadProgress" class="text-muted">尚未开始</div>
       <div style="height:8px;background:var(--color-bg);border:1px solid var(--color-border);border-radius:4px;margin-top:12px;overflow:hidden">
-        <div id="uploadBar" style="height:100%;width:0;background:var(--color-primary);transition:width .2s"></div>
-      </div>
+            <div id="uploadBar" style="height:100%;width:0;background:var(--color-primary);transition:width .2s"></div>
+          </div>
       <div class="meta-list" style="margin-top:16px">
         <div class="meta-row"><span class="meta-label">文件类型</span><span class="meta-value">PDF / Word / TXT / MD</span></div>
         <div class="meta-row"><span class="meta-label">权限说明</span><span class="meta-value">员工限本部门或授权库</span></div>
         <div class="meta-row"><span class="meta-label">批量上传</span><span class="meta-value">支持一次选择多个文件</span></div>
       </div>
+        </div>
       </div>
-    </div>
     </div>`;
 
   const drop = document.getElementById("dropZone");

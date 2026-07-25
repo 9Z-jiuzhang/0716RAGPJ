@@ -24,6 +24,14 @@ async def test_no_evidence_streams_notice_then_llm_reference(monkeypatch: pytest
     pipeline = QAPipeline()
     meta: dict[str, Any] = {"reason": "no_relevant_hits"}
     tracker = PerformanceTracker(request_id="req-fallback-1")
+    from app.schemas.optimization_contracts import ConversationIntent, ConversationRouteDecision
+
+    route = ConversationRouteDecision(
+        intent=ConversationIntent.NEW_KB_QUERY,
+        confidence=0.75,
+        should_retrieve=True,
+        reason_code="default_kb",
+    )
 
     with patch("app.core.qa_pipeline.llm_service.stream_chat", side_effect=_fake_stream):
         parts: list[str] = []
@@ -34,6 +42,7 @@ async def test_no_evidence_streams_notice_then_llm_reference(monkeypatch: pytest
             temperature=0.2,
             retrieval_meta=meta,
             tracker=tracker,
+            route=route,
         ):
             parts.append(piece)
 
@@ -79,6 +88,14 @@ async def test_no_evidence_includes_web_when_enabled(monkeypatch: pytest.MonkeyP
     pipeline = QAPipeline()
     meta: dict[str, Any] = {"reason": "no_relevant_hits"}
     tracker = PerformanceTracker(request_id="req-fallback-3")
+    from app.schemas.optimization_contracts import ConversationIntent, ConversationRouteDecision
+
+    route = ConversationRouteDecision(
+        intent=ConversationIntent.NEW_KB_QUERY,
+        confidence=0.75,
+        should_retrieve=True,
+        reason_code="default_kb",
+    )
 
     async def _fake_web(_q: str, **_k: Any) -> list[dict[str, str]]:
         return [{"title": "公开资料", "snippet": "公开说明一段", "url": "https://example.com"}]
@@ -95,6 +112,7 @@ async def test_no_evidence_includes_web_when_enabled(monkeypatch: pytest.MonkeyP
             temperature=0.2,
             retrieval_meta=meta,
             tracker=tracker,
+            route=route,
         ):
             parts.append(piece)
 

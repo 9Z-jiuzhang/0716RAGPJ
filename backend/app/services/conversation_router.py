@@ -17,8 +17,19 @@ _THANKS = re.compile(
     r"^(谢谢|多谢|感谢|拜拜|再见|thanks|thank\s*you|bye|goodbye)[\s!！。.~～]*$",
     re.IGNORECASE,
 )
+# 能力说明 / 怎么用（不展开内部实现）
 _SYSTEM_HELP = re.compile(
-    r"(怎么用|如何使用|有什么功能|帮助|使用说明|你可以做什么|能做什么)",
+    r"(怎么用|如何使用|有什么功能|有哪些功能|帮助|使用说明|你可以做什么|能做什么|"
+    r"你是谁|你是什么|你会什么|能力介绍|使用帮助)",
+    re.IGNORECASE,
+)
+# 系统运行机制 / 内部架构 / RAG 自述（硬拦，不进检索）
+_SYSTEM_MECHANISM = re.compile(
+    r"(怎么运行|如何运行|如何工作|怎样工作|工作原理|运行机制|运行方式|"
+    r"系统架构|内部实现|实现原理|技术架构|底层(是)?怎么|"
+    r"提示词|system\s*prompt|模型参数|用的什么模型|什么大模型|"
+    r"检索链路|检索流程|向量(库|检索)|RAG\s*原理|rag\s*原理|"
+    r"你们?系统是怎么|这个系统是怎么|助手是怎么(运行|工作))",
     re.IGNORECASE,
 )
 _TRANSFORM = re.compile(
@@ -30,8 +41,18 @@ _FOLLOWUP = re.compile(
     re.IGNORECASE,
 )
 _OUT_OF_SCOPE = re.compile(
-    r"(帮我写代码|炒股|恋爱|算命|生成图片|下载电影)",
+    r"(帮我写代码|炒股|恋爱|算命|生成图片|下载电影|写小说|游戏攻略|写诗|作诗|讲笑话|"
+    r"恋爱文案|情书|星座运势)",
     re.IGNORECASE,
+)
+
+# 未命中时允许 LLM 参考答案的意图白名单（开关开启时仍生效）
+FALLBACK_LLM_ALLOWED_INTENTS = frozenset(
+    {
+        ConversationIntent.NEW_KB_QUERY,
+        ConversationIntent.CONTEXT_FOLLOWUP_KB,
+        ConversationIntent.ROUTE_FALLBACK,
+    }
 )
 
 
@@ -51,7 +72,7 @@ def _transform_type(question: str) -> str:
 class ConversationRouter:
     """高精度规则优先；低置信度时默认进入知识库查询，避免误判闲聊。"""
 
-    version = "rules-v1"
+    version = "rules-v2"
 
     def route(
         self,
@@ -85,7 +106,16 @@ class ConversationRouter:
                 reason_code="thanks_rule",
                 classifier_version=self.version,
             )
-        if _SYSTEM_HELP.search(text) and len(text) < 40:
+        # 机制类优先于帮助类，避免「怎么运行」被宽泛帮助规则误吸
+        if _SYSTEM_MECHANISM.search(text):
+            return ConversationRouteDecision(
+                intent=ConversationIntent.SYSTEM_MECHANISM,
+                confidence=0.92,
+                should_retrieve=False,
+                reason_code="system_mechanism_rule",
+                classifier_version=self.version,
+            )
+        if _SYSTEM_HELP.search(text) and len(text) < 80:
             return ConversationRouteDecision(
                 intent=ConversationIntent.SYSTEM_HELP,
                 confidence=0.9,
@@ -154,6 +184,13 @@ class ConversationRouter:
                 "我可以基于您有权限的知识库回答制度、流程与产品问题，"
                 "支持多轮追问，也可以请我将上一回答改得更简略或整理成表格。"
                 "我不会把知识库未命中的内容伪装成企业正式依据。"
+            )
+        if decision.intent == ConversationIntent.SYSTEM_MECHANISM:
+            return (
+                "我是企业知识库问答助手，仅基于您有权限的知识库文档作答，"
+                "不会展开本系统的内部实现、架构或模型配置细节。"
+                "运行机制与技术说明请以企业内部正式文档为准；"
+                "如需办理业务，请直接提问相关制度或流程。"
             )
         if decision.intent == ConversationIntent.OUT_OF_SCOPE:
             return "该请求超出企业知识库助手的能力范围。请提出与企业知识库相关的问题。"

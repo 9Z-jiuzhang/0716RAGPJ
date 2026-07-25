@@ -2753,6 +2753,49 @@ details.citation-item[open] > summary.citation-meta::before {
   color: var(--color-text-body);
 }
 
+.citations-folded {
+  margin-top: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+html[data-theme="light"] .citations-folded {
+  border-color: rgba(56, 135, 240, 0.22);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.citations-folded-summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
+
+.citations-folded-summary::-webkit-details-marker {
+  display: none;
+}
+
+.citations-folded-summary::before {
+  content: "▸ ";
+  color: var(--color-text-secondary);
+}
+
+.citations-folded[open] > .citations-folded-summary::before {
+  content: "▾ ";
+}
+
+.citations-folded-list {
+  margin-top: 4px;
+}
+
+.citations-folded-list .citation-item:first-child {
+  margin-top: 6px;
+}
+
 .confidence {
   margin-top: 10px;
   padding: 6px 10px;

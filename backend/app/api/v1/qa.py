@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID, uuid4
@@ -33,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 router = APIRouter(prefix="/qa", tags=["智能问答"])
+logger = logging.getLogger(__name__)
 
 
 def _request_id(x_request_id: str | None = Header(default=None, alias="X-Request-Id")) -> str:
@@ -284,7 +286,7 @@ async def submit_feedback(
     user: User = Depends(get_current_user),
     request_id: str = Depends(_request_id),
 ) -> BaseResponse:
-    """对助手消息标记有用/无用；同步 Upsert 到 qa_feedback_events。"""
+    """对助手消息标记有用/无用，或 ``rating=null`` 取消反馈；与事实表同一事务。"""
     from app.schemas.optimization_contracts import QAFeedbackUpsert
     from app.services.analytics_events import actor_hash_for, analytics_event_service
 
@@ -302,27 +304,48 @@ async def submit_feedback(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="消息不存在")
 
     meta = dict(msg.retrieval_meta or {})
-    meta["feedback"] = {
-        "rating": body.rating,
-        "comment": body.comment,
-        "user_id": str(user.id),
-    }
-    msg.retrieval_meta = meta
-    await db.commit()
-
+    actor = actor_hash_for(str(user.id), None)
     try:
+        if body.rating is None:
+            meta.pop("feedback", None)
+            msg.retrieval_meta = meta
+            await analytics_event_service.clear_feedback(
+                db,
+                message_id=body.message_id,
+                actor_hash=actor,
+                commit=False,
+            )
+            await db.commit()
+            return BaseResponse(message="反馈已取消", request_id=request_id)
+
+        meta["feedback"] = {
+            "rating": body.rating,
+            "comment": body.comment,
+            "user_id": str(user.id),
+        }
+        msg.retrieval_meta = meta
         await analytics_event_service.upsert_feedback(
             db,
             QAFeedbackUpsert(
                 message_id=body.message_id,
-                actor_hash=actor_hash_for(str(user.id), None),
+                actor_hash=actor,
                 rating=body.rating,  # type: ignore[arg-type]
                 comment=body.comment,
             ),
+            commit=False,
         )
-    except Exception:  # noqa: BLE001
-        # 反馈事实表失败不影响消息侧已写入的兼容字段
-        pass
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        logger.exception(
+            "feedback persist failed message_id=%s request_id=%s",
+            body.message_id,
+            request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="反馈统计写入失败，请稍后重试",
+        ) from exc
     return BaseResponse(message="反馈已记录", request_id=request_id)
 
 

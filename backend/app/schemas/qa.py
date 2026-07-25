@@ -18,6 +18,8 @@ class CitationSchema(BaseModel):
     chunk_index: int = Field(description="分段序号，从 0 开始")
     content: str = Field(description="引用原文片段")
     score: float = Field(description="相关性得分")
+    chunk_id: UUID | None = Field(default=None, description="分段 ID（粘性证据回溯用）")
+    source: str | None = Field(default=None, description="命中来源：vector/fulltext/hybrid/sticky")
 
 
 class AskRequest(BaseModel):
@@ -27,7 +29,7 @@ class AskRequest(BaseModel):
     session_id: UUID | None = Field(default=None, description="不传则创建新会话")
     kb_ids: list[UUID] | None = Field(default=None, description="限定检索知识库")
     strategy: Literal["vector", "fulltext", "hybrid"] = Field(default="hybrid", description="检索策略")
-    top_k: int = Field(default=3, ge=1, le=20, description="返回片段数量")
+    top_k: int = Field(default=5, ge=1, le=20, description="返回片段数量")
     temperature: float = Field(default=0.7, ge=0, le=2, description="生成温度")
 
 
@@ -77,8 +79,10 @@ class MessageListData(PaginationResponse[MessageSchema]):
 
 
 class FeedbackRequest(BaseModel):
-    """回答反馈请求。"""
+    """回答反馈请求。``rating=null`` 表示取消已有点赞/点踩。"""
 
     message_id: UUID = Field(description="被评价的助手消息 ID")
-    rating: Literal["useful", "useless"] = Field(description="有用/无用")
+    rating: Literal["useful", "useless"] | None = Field(
+        description="有用/无用；传 null 取消反馈并从统计表删除"
+    )
     comment: str | None = Field(default=None, max_length=500, description="可选评论")

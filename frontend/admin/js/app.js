@@ -3620,6 +3620,7 @@ async function pageDocuments(kbId, opts = {}) {
                 </select>
                 <label class="text-muted">separators（可选，逗号分隔）</label>
                 <input class="form-control" id="ruleSeps" style="margin:6px 0 10px" placeholder="例如 \\n\\n,\\n" />
+                <p class="text-muted" style="margin:0;font-size:12px">上传时按文件类型自动选择分段方式；修改后需「重新分段并向量化」才会生效（仅作用于当前文档）。</p>
               </div>
             </div>
           </div>
@@ -3749,26 +3750,12 @@ async function pageDocuments(kbId, opts = {}) {
             }
           };
         }
-        const btnSaveRules = mask.querySelector("#btnSaveRules");
-        if (btnSaveRules) {
-          btnSaveRules.onclick = async () => {
-            try {
-              const body = readRulesForm();
-              const doc = await api.put(`/knowledge-bases/${kbId}/documents/${docId}/segment-rules`, body);
-              rules = { ...(doc.segment_rules || body) };
-              fillRulesForm();
-              toast("分段规则已保存（未重分段）", "success");
-            } catch (e) {
-              toast(e.message || "保存失败", "error");
-            }
-          };
-        }
         const btnResegment = mask.querySelector("#btnResegment");
         if (btnResegment) {
           btnResegment.onclick = async () => {
             const ok = await confirmDialog({
               title: "重新分段",
-              message: "将按当前规则重新分段并向量化，可能耗时较长。确定继续？",
+              message: "将按当前规则重新分段并向量化（仅当前文档），可能耗时较长。确定继续？",
               confirmText: "重分段",
             });
             if (!ok) return;
@@ -3794,7 +3781,6 @@ async function pageDocuments(kbId, opts = {}) {
           parts.push(`<button type="button" class="btn btn-secondary btn-sm" id="btnNormalize">规范化</button>`);
         }
         if (tab === "rules" && canSegment) {
-          parts.push(`<button type="button" class="btn btn-success btn-sm" id="btnSaveRules">保存规则</button>`);
           parts.push(`<button type="button" class="btn btn-primary btn-sm" id="btnResegment">重新分段并向量化</button>`);
         }
         parts.push(`<button type="button" class="btn btn-danger btn-sm" data-close>关闭</button>`);
@@ -6764,6 +6750,7 @@ async function pageQaAnalytics() {
     topics = { items: [] };
   }
 
+  const days = Number(feedback?.days || feedback?.trend_days || feedback?.range?.days || 14);
   const useful = Number(feedback?.useful || 0);
   const useless = Number(feedback?.useless || 0);
   const fbTotal = useful + useless;
@@ -6797,7 +6784,7 @@ async function pageQaAnalytics() {
           }),
         }
       )
-    : `<p class="text-muted">暂无近 14 日问答趋势</p>`;
+    : `<p class="text-muted">暂无近 ${days} 日问答趋势</p>`;
 
   const routeDist = Array.isArray(feedback?.route_distribution) ? feedback.route_distribution : [];
   const cacheDist = Array.isArray(feedback?.cache_distribution) ? feedback.cache_distribution : [];
@@ -6842,34 +6829,34 @@ async function pageQaAnalytics() {
   document.getElementById("pageRoot").innerHTML = `
     ${pageHead({
       title: "问答统计",
-      desc: "反馈占比、问答趋势、路由/缓存分布与问题主题（聚合数据）。",
+      desc: `近 ${days} 日反馈占比、问答趋势、路由/缓存分布与问题主题（聚合数据，口径统一）。`,
       actions: `<button type="button" class="btn btn-secondary btn-sm" id="btnQaAnalyticsRefresh">刷新</button>`,
     })}
     <div class="page-grid monitor-page-grid">
     <div class="card span-6 monitor-equal-card">
       <div class="card-header">
-        <div class="card-header-text"><h3 class="card-title">问答反馈</h3>
-        <p class="card-sub">点赞 / 点踩占比（聚合）</p></div>
+        <div class="card-header-text"><h3 class="card-title">近 ${days} 日问答反馈</h3>
+        <p class="card-sub">点赞 / 点踩占比（与下方趋势同一窗口）</p></div>
       </div>
       <div class="monitor-stats-body">${feedbackPieHtml}</div>
     </div>
     <div class="card span-6 monitor-equal-card">
       <div class="card-header">
-        <div class="card-header-text"><h3 class="card-title">近 14 日问答量</h3>
+        <div class="card-header-text"><h3 class="card-title">近 ${days} 日问答量</h3>
         <p class="card-sub">按日请求事件数</p></div>
       </div>
       <div class="dash-chart-body monitor-chart-body">${trendHtml}</div>
     </div>
     <div class="card span-6">
       <div class="card-header">
-        <div class="card-header-text"><h3 class="card-title">路由分布</h3>
+        <div class="card-header-text"><h3 class="card-title">近 ${days} 日路由分布</h3>
         <p class="card-sub">意图路由计数</p></div>
       </div>
       <div class="dash-chart-body monitor-chart-body">${routeHtml}</div>
     </div>
     <div class="card span-6">
       <div class="card-header">
-        <div class="card-header-text"><h3 class="card-title">缓存层分布</h3>
+        <div class="card-header-text"><h3 class="card-title">近 ${days} 日缓存层分布</h3>
         <p class="card-sub">命中层级计数</p></div>
       </div>
       <div class="dash-chart-body monitor-chart-body">${cacheHtml}</div>

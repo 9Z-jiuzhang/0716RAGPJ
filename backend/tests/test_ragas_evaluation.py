@@ -234,6 +234,7 @@ async def test_resolve_samples_uses_specs_when_provided(monkeypatch: pytest.Monk
 @pytest.mark.asyncio
 async def test_build_metrics_supplies_embeddings_for_answer_relevancy() -> None:
     """真实构造 RAGAS 指标，防止依赖安装后才暴露缺少 embedding 的问题。"""
+    pytest.importorskip("ragas")
     metrics, clients = await RagasEvaluationService._build_metrics()
     try:
         assert set(metrics) == {

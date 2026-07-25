@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from app.models.enums import (
     DEFAULT_CHUNK_OVERLAP,
@@ -14,6 +16,11 @@ from app.models.enums import (
     SplitMode,
 )
 
+logger = logging.getLogger(__name__)
+
+# 分段结果相对原文的最低字符覆盖率（忽略空白）。低于此值视为内容丢失。
+MIN_CHUNK_COVERAGE_RATIO = 0.95
+
 
 @dataclass
 class ChunkPreview:
@@ -21,6 +28,18 @@ class ChunkPreview:
     content: str
     char_count: int
     metadata: dict[str, Any]
+
+
+class ChunkCoverageError(ValueError):
+    """分段后正文覆盖率过低，疑似内容丢失。"""
+
+    def __init__(self, ratio: float, source_chars: int, chunk_count: int) -> None:
+        self.ratio = ratio
+        self.source_chars = source_chars
+        self.chunk_count = chunk_count
+        super().__init__(
+            f"分段覆盖率过低: {ratio:.2%}（原文非空白 {source_chars} 字，产出 {chunk_count} 段），疑似内容丢失"
+        )
 
 
 def default_rules() -> dict[str, Any]:
@@ -42,7 +61,24 @@ def merge_rules(base: dict[str, Any] | None, patch: dict[str, Any] | None) -> di
         rules.update({k: v for k, v in patch.items() if v is not None})
     # P2迭代开发，当前仅配置存储，不启用语义切分
     rules["enable_semantic"] = bool(rules.get("enable_semantic", False))
+    rules["separators"] = _sanitize_separators(rules.get("separators"))
     return rules
+
+
+def _sanitize_separators(separators: Any) -> list[str]:
+    """去掉空分隔符，避免 str.split('') 抛错；无有效项时回退系统默认。"""
+    if not isinstance(separators, (list, tuple)):
+        return list(DEFAULT_SEPARATORS)
+    cleaned = [str(s) for s in separators if s is not None and str(s) != ""]
+    return cleaned or list(DEFAULT_SEPARATORS)
+
+
+def _clamp_chunk_params(chunk_size: int, overlap: int) -> tuple[int, int]:
+    size = max(1, int(chunk_size))
+    ov = max(0, int(overlap))
+    if ov >= size:
+        ov = size - 1
+    return size, ov
 
 
 # 按扩展名推荐的默认分段模式（仅在规则仍为通用 fixed 时自动应用）。
@@ -62,12 +98,19 @@ def recommended_split_mode_for_file_type(file_type: str | None) -> str:
     return _FILE_TYPE_DEFAULT_SPLIT_MODE.get(normalized, SplitMode.FIXED.value)
 
 
-def adapt_rules_for_file_type(rules: dict[str, Any] | None, file_type: str | None) -> dict[str, Any]:
-    """按文件类型自动选择默认分段方式。
+def default_rules_for_file_type(file_type: str | None) -> dict[str, Any]:
+    """上传时的文档默认规则：尺寸等用系统默认，``split_mode`` 强制按扩展名推荐。"""
+    rules = default_rules()
+    rules["split_mode"] = recommended_split_mode_for_file_type(file_type)
+    return rules
 
-    - 仅当当前 ``split_mode`` 仍是通用默认 ``fixed`` 时升级为类型推荐模式；
-    - 管理员在预览/重分段中显式选择的 heading / paragraph / markdown / sliding 等保持不变；
-    - 上传、入库前预览、重分段与重向量化流水线均调用本函数，保证行为一致。
+
+def adapt_rules_for_file_type(rules: dict[str, Any] | None, file_type: str | None) -> dict[str, Any]:
+    """补全规则，并在仍为通用 ``fixed`` 时按文件类型升级默认模式。
+
+    - 上传请用 ``default_rules_for_file_type``（始终按扩展名设模式）；
+    - 本函数用于预览/重分段：仅当 ``split_mode`` 仍是 ``fixed`` 时升级；
+    - 用户显式选择的 heading / paragraph / markdown / sliding 等保持不变。
     """
     adapted = merge_rules(None, rules)
     current = str(adapted.get("split_mode") or SplitMode.FIXED.value).strip().lower()
@@ -76,19 +119,96 @@ def adapt_rules_for_file_type(rules: dict[str, Any] | None, file_type: str | Non
     return adapted
 
 
+def content_coverage_ratio(source: str, chunks: Sequence[str]) -> float:
+    """估算分段对原文的覆盖率（忽略空白，按字符多重集合取交集）。
+
+    overlap 会使分段合计变长，但不降低覆盖率；静默丢段会显著拉低该值。
+    """
+    src = re.sub(r"\s+", "", source or "")
+    if not src:
+        return 1.0
+    joined = re.sub(r"\s+", "", "".join(chunks or []))
+    src_counts = Counter(src)
+    chunk_counts = Counter(joined)
+    covered = sum(min(cnt, chunk_counts.get(ch, 0)) for ch, cnt in src_counts.items())
+    return covered / len(src)
+
+
+def ensure_chunk_coverage(
+    source: str,
+    chunks: Sequence[ChunkPreview] | Sequence[str],
+    *,
+    min_ratio: float = MIN_CHUNK_COVERAGE_RATIO,
+) -> float:
+    """覆盖率低于阈值时抛出 ``ChunkCoverageError``。"""
+    contents = [c.content if isinstance(c, ChunkPreview) else str(c) for c in chunks]
+    ratio = content_coverage_ratio(source, contents)
+    src_chars = len(re.sub(r"\s+", "", source or ""))
+    if src_chars and ratio < min_ratio:
+        raise ChunkCoverageError(ratio=ratio, source_chars=src_chars, chunk_count=len(contents))
+    return ratio
+
+
 def split_text(text: str, rules: dict[str, Any] | None = None) -> list[ChunkPreview]:
-    """按 split_mode 分段。若 enable_semantic=True 也忽略，仍走规则切分。"""
+    """按 split_mode 分段。若 enable_semantic=True 也忽略，仍走规则切分。
+
+    结束后做正文覆盖率校验；若主策略丢失内容，自动回退到 sliding 保底，
+    仍不足则抛出 ``ChunkCoverageError``，避免文档以 ready 入库却缺段。
+    """
     rules = merge_rules(None, rules)
     # P2迭代开发，当前仅配置存储，不启用语义切分
     _ = rules.get("enable_semantic", False)
     mode = (rules.get("split_mode") or SplitMode.FIXED.value).lower()
-    chunk_size = int(rules.get("chunk_size") or DEFAULT_CHUNK_SIZE)
-    overlap = int(rules.get("chunk_overlap") or DEFAULT_CHUNK_OVERLAP)
-    separators = rules.get("separators") or list(DEFAULT_SEPARATORS)
+    chunk_size, overlap = _clamp_chunk_params(
+        int(rules.get("chunk_size") or DEFAULT_CHUNK_SIZE),
+        int(rules.get("chunk_overlap") or DEFAULT_CHUNK_OVERLAP),
+    )
+    separators = _sanitize_separators(rules.get("separators"))
 
     if not text or not text.strip():
         return []
 
+    chunks = _split_text_with_mode(
+        text,
+        mode=mode,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        separators=separators,
+    )
+    try:
+        ensure_chunk_coverage(text, chunks)
+        return chunks
+    except ChunkCoverageError as exc:
+        logger.warning(
+            "split_mode=%s coverage=%.2f%% below threshold; fallback to sliding",
+            mode,
+            exc.ratio * 100,
+        )
+        fallback = _split_text_with_mode(
+            text,
+            mode=SplitMode.SLIDING.value,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            separators=separators,
+        )
+        for item in fallback:
+            item.metadata = {
+                **item.metadata,
+                "split_mode": SplitMode.SLIDING.value,
+                "fallback_from": mode,
+            }
+        ensure_chunk_coverage(text, fallback)
+        return fallback
+
+
+def _split_text_with_mode(
+    text: str,
+    *,
+    mode: str,
+    chunk_size: int,
+    overlap: int,
+    separators: list[str],
+) -> list[ChunkPreview]:
     if mode == SplitMode.MARKDOWN.value:
         return _split_markdown(text, chunk_size=chunk_size, overlap=overlap, separators=separators)
     if mode == SplitMode.HEADING.value:
@@ -150,11 +270,14 @@ def _split_markdown(
     return output
 
 
+_HEADING_LINE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+
+
 def _markdown_sections(text: str) -> list[tuple[str, dict[str, Any]]]:
     """识别代码围栏外的 ATX 标题，生成章节正文和完整标题路径。"""
-    heading_pattern = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
     fence_pattern = re.compile(r"^\s*(```+|~~~+)")
-    heading_stack: list[str] = []
+    # (level, title)：按实际标题层级维护，支持从 ### 起稿、同级替换而非错误嵌套
+    heading_stack: list[tuple[int, str]] = []
     current_lines: list[str] = []
     current_meta: dict[str, Any] = {"heading_path": [], "heading_level": 0}
     sections: list[tuple[str, dict[str, Any]]] = []
@@ -169,15 +292,15 @@ def _markdown_sections(text: str) -> list[tuple[str, dict[str, Any]]]:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     for line in normalized.split("\n"):
         fence_match = fence_pattern.match(line)
-        heading_match = heading_pattern.match(line) if active_fence is None else None
+        heading_match = _HEADING_LINE.match(line) if active_fence is None else None
         if heading_match:
             flush()
             level = len(heading_match.group(1))
             title = heading_match.group(2).strip()
-            # 截断同级及更深标题，再写入当前标题，形成稳定的面包屑路径。
-            heading_stack[level - 1 :] = [title]
+            heading_stack = [(lv, t) for lv, t in heading_stack if lv < level]
+            heading_stack.append((level, title))
             current_meta = {
-                "heading_path": list(heading_stack),
+                "heading_path": [t for _, t in heading_stack],
                 "heading_level": level,
                 "heading": title,
             }
@@ -190,7 +313,79 @@ def _markdown_sections(text: str) -> list[tuple[str, dict[str, Any]]]:
             elif active_fence == marker:
                 active_fence = None
     flush()
-    return sections or [(text, {"heading_path": [], "heading_level": 0})]
+    raw_sections = sections or [(text, {"heading_path": [], "heading_level": 0})]
+    return _coalesce_heading_only_sections(raw_sections)
+
+
+def _is_heading_only_section(section_text: str) -> bool:
+    """章节是否仅含一行 ATX 标题（无正文），此类短段应并入下一节避免空洞分段。"""
+    lines = [ln for ln in section_text.split("\n") if ln.strip()]
+    return len(lines) == 1 and bool(_HEADING_LINE.match(lines[0]))
+
+
+def _coalesce_heading_only_sections(
+    sections: list[tuple[str, dict[str, Any]]],
+) -> list[tuple[str, dict[str, Any]]]:
+    """将「仅标题」章节合并进后续章节，保留标题文本、采用后续章节元数据。"""
+    if len(sections) <= 1:
+        return sections
+    merged: list[tuple[str, dict[str, Any]]] = []
+    pending_prefixes: list[str] = []
+    for text, meta in sections:
+        if _is_heading_only_section(text):
+            pending_prefixes.append(text.strip())
+            continue
+        if pending_prefixes:
+            text = "\n\n".join([*pending_prefixes, text])
+            pending_prefixes.clear()
+        merged.append((text, meta))
+    if pending_prefixes:
+        # 文末只剩标题：并入最后一节，或单独保留
+        if merged:
+            last_text, last_meta = merged[-1]
+            merged[-1] = ("\n\n".join([last_text, *pending_prefixes]), last_meta)
+        else:
+            merged.append(("\n\n".join(pending_prefixes), sections[-1][1]))
+    return merged or sections
+
+
+def _split_markdown_blocks(text: str) -> list[str]:
+    """按空行切成段落块，围栏代码保持完整；单换行连接的列表行合并为同一块，绝不跳过正文。
+
+    旧实现用 ``.+?(?=\\n\\s*\\n|\\Z)`` + ``finditer``：``.`` 不能跨行，导致「仅单换行、中间无空行」
+    的大段列表无法匹配而被静默丢弃（表现为条款编号跳跃、总字数远小于原文）。
+    """
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    fence_pattern = re.compile(r"^\s*(```+|~~~+)")
+    blocks: list[str] = []
+    buf: list[str] = []
+    active_fence: str | None = None
+
+    def flush_buf() -> None:
+        block = "\n".join(buf).strip()
+        if block:
+            blocks.append(block)
+        buf.clear()
+
+    for line in normalized.split("\n"):
+        fence_match = fence_pattern.match(line)
+        if active_fence is not None:
+            buf.append(line)
+            if fence_match and fence_match.group(1)[0] == active_fence:
+                active_fence = None
+                flush_buf()
+            continue
+        if fence_match:
+            flush_buf()
+            active_fence = fence_match.group(1)[0]
+            buf.append(line)
+            continue
+        if not line.strip():
+            flush_buf()
+            continue
+        buf.append(line)
+    flush_buf()
+    return blocks or ([normalized.strip()] if normalized.strip() else [])
 
 
 def _pack_markdown_blocks(
@@ -201,13 +396,9 @@ def _pack_markdown_blocks(
     separators: list[str],
 ) -> list[str]:
     """把段落与完整代码围栏装入目标长度的 Markdown 分段。"""
-    block_pattern = re.compile(
-        r"(```[\s\S]*?```|~~~[\s\S]*?~~~|.+?)(?=\n\s*\n|\Z)",
-        re.MULTILINE,
-    )
-    blocks = [match.group(0).strip() for match in block_pattern.finditer(text) if match.group(0).strip()]
+    blocks = _split_markdown_blocks(text)
     if not blocks:
-        blocks = [text]
+        return []
 
     chunks: list[str] = []
     buffer = ""
@@ -222,6 +413,7 @@ def _pack_markdown_blocks(
 
         is_fenced = block.lstrip().startswith(("```", "~~~"))
         if is_fenced:
+            # 超长围栏保持原子性，避免截断后缺少闭合标记
             chunks.append(block)
         elif len(block) > chunk_size:
             chunks.extend(_split_fixed(block, chunk_size, overlap, separators))
@@ -240,24 +432,28 @@ def _split_by_heading(text: str) -> list[str]:
 
 def _split_by_paragraph(text: str) -> list[str]:
     parts = re.split(r"\n\s*\n", text)
-    return [p.strip() for p in parts if p.strip()]
+    return [p.strip() for p in parts if p.strip()] or ([text.strip()] if text.strip() else [])
 
 
 def _split_sliding(text: str, chunk_size: int, overlap: int) -> list[str]:
     if chunk_size <= 0:
         return [text]
-    step = max(chunk_size - max(overlap, 0), 1)
+    chunk_size, overlap = _clamp_chunk_params(chunk_size, overlap)
+    step = max(chunk_size - overlap, 1)
     parts: list[str] = []
     i = 0
-    while i < len(text):
+    length = len(text)
+    while i < length:
         parts.append(text[i : i + chunk_size])
-        if i + chunk_size >= len(text):
+        if i + chunk_size >= length:
             break
         i += step
     return parts
 
 
 def _split_fixed(text: str, chunk_size: int, overlap: int, separators: list[str]) -> list[str]:
+    chunk_size, overlap = _clamp_chunk_params(chunk_size, overlap)
+    separators = _sanitize_separators(separators)
     units = _recursive_split(text, separators)
     chunks: list[str] = []
     buf = ""
@@ -273,8 +469,12 @@ def _split_fixed(text: str, chunk_size: int, overlap: int, separators: list[str]
             start = 0
             while start < len(unit):
                 end = start + chunk_size
-                chunks.append(unit[start:end].strip())
-                start = max(end - overlap, start + 1) if overlap else end
+                piece = unit[start:end]
+                if piece.strip():
+                    chunks.append(piece.strip())
+                if end >= len(unit):
+                    break
+                start = max(end - overlap, start + 1)
             buf = ""
         else:
             if overlap and chunks:
@@ -292,7 +492,7 @@ def _recursive_split(text: str, separators: list[str]) -> list[str]:
         return [text]
     sep = separators[0]
     rest = separators[1:]
-    if sep not in text:
+    if not sep or sep not in text:
         return _recursive_split(text, rest) if rest else [text]
     pieces = text.split(sep)
     result: list[str] = []

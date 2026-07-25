@@ -91,5 +91,13 @@ class SessionMemory:
             )
         for msg in self.messages:
             if msg.role in ("user", "assistant", "system") and msg.content.strip():
-                out.append({"role": msg.role, "content": self._compact_for_llm(msg.content)})
+                content = self._compact_for_llm(msg.content)
+                if msg.role == "assistant":
+                    prefix = "（以下为历史回答，仅供理解指代与省略，非本轮检索证据）\n"
+                    # 标注计入上限，避免历史膨胀
+                    budget = max(64, self._LLM_MSG_MAX_CHARS - len(prefix))
+                    if len(content) > budget:
+                        content = content[:budget] + "…"
+                    content = prefix + content
+                out.append({"role": msg.role, "content": content})
         return out

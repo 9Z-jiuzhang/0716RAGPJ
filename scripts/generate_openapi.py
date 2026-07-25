@@ -765,7 +765,7 @@ schemas["AskRequest"] = {
             "description": "限定检索知识库；默认全部可访问范围（取交集）",
         },
         "strategy": prop("string", enum=_STRATEGIES, default="hybrid"),
-        "top_k": prop("integer", minimum=1, maximum=20, default=3),
+        "top_k": prop("integer", minimum=1, maximum=20, default=5),
         "temperature": prop("number", minimum=0, maximum=2, default=0.7),
     },
 }
@@ -903,7 +903,7 @@ schemas["TestRunRequest"] = {
         "kb_ids": {"type": "array", "minItems": 1, "items": uuid_prop()},
         "doc_ids": {"type": "array", "items": uuid_prop(), "nullable": True},
         "strategy": prop("string", enum=_STRATEGIES),
-        "top_k": prop("integer", minimum=1, maximum=20, default=5),
+        "top_k": prop("integer", minimum=1, maximum=20, default=3),
         "similarity_threshold": prop("number", minimum=0, maximum=1, default=0.5),
         "questions": {"type": "array", "items": prop("string"), "nullable": True},
     },
@@ -921,7 +921,7 @@ schemas["CompareTestRequest"] = {
             "items": prop("string", enum=_STRATEGIES),
             "description": "默认三种策略",
         },
-        "top_k": prop("integer", minimum=1, maximum=20, default=5),
+        "top_k": prop("integer", minimum=1, maximum=20, default=3),
         "similarity_threshold": prop("number", minimum=0, maximum=1, default=0.5),
     },
 }

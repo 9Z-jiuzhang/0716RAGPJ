@@ -200,7 +200,7 @@ app/
 | 大模型管理 | `/api/v1/models` | `model_config.py`、`model_usage.py` | LLM/Embedding/Rerank 配置、Langfuse 用量 |
 | 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py` | KB CRUD、重向量化、进度；`KBPermission` API（管理端不下发 ACL 编辑卡） |
 | 文档管理 | `/api/v1/knowledge-bases/{kb_id}/documents` | `document_service.py`、`document_pipeline.py` | 上传、解析、分段、规范化、chunk 编辑、重试 |
-| 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`conversation_router.py`、`qa_cache.py`、`llm_guard.py` | SSE 流式问答（Guard + 业务路由 + 多级缓存）、会话、反馈；访客可用 |
+| 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`conversation_router.py`、`qa_cache.py`、`llm_guard.py` | SSE 流式问答（Guard + 业务路由 + 多级缓存）、会话、反馈；默认检索 TopK=5；访客端引用区展开相关度最高 3 段、其余折叠 |
 | 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例、执行、多策略对比；默认 TopK=3；得分=命中片段相关度均值 |
 | 快照管理 | `/api/v1/knowledge-bases/{kb_id}/snapshots` | `snapshot.py` | 快照创建、回退预览与回退 |
 | RAGAS 评估 | `/api/v1/ragas` | `ragas_evaluation.py` | 样本预览/生成、评估运行与详情 |
@@ -253,7 +253,7 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 |------|------|
 | parsing | `parsers.extract_text` 提取正文（txt/md/pdf/docx/doc） |
 | processing | `normalize.normalize_text` 规范化（统一换行、去空白、去重复块，保留 markdown 标题） |
-| pending_segment | 依据 `KbChunkRule` / 文档 `segment_rules` 准备分段 |
+| pending_segment | 依据文档 `segment_rules` 准备分段（上传时按文件类型自动选择默认模式） |
 | vectorizing | `chunking.split_text` 分段 → `embedding.embed_texts`（批大小 `EMBEDDING_BATCH_SIZE=10`，DashScope v3 上限）→ `vector_store.upsert_chunks` 写入 Chroma |
 | ready | 写入 `doc.index_version`；若 KB 无激活索引则设 `current_index_version` |
 
@@ -276,7 +276,7 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度、置信提示）、登录/注册、对话历史、个人中心（含改密）、**多文件批量上传**（员工/管理员）。
+- **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度 Top-3 展开/其余折叠、置信提示）、登录/注册、对话历史、个人中心（含改密）、**多文件批量上传**（员工/管理员）。
 - **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势与错误分桶）与安全窗口、用户/角色/部门、大模型与用量（参数配置/版本发布）、知识库/文档工作台/快照、命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
 - **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、主题/动效、公共 CSS、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
 
@@ -454,6 +454,7 @@ docker compose ps
 │   ├── openapi.json              # OpenAPI 契约
 │   ├── API.md                    # 中文接口文档
 │   ├── API_INTEGRATION_GUIDE.md  # 第三方接入指南
+│   ├── OPTIMIZATION_STATUS.md    # 六维优化落地状态与开关
 │   ├── CLOUD_DEPLOY.md           # 云端部署指南
 │   └── CONTRACT.md               # 契约说明
 ├── scripts/                      # 契约生成 / 种子与运维脚本

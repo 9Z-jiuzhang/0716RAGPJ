@@ -34,7 +34,11 @@ from app.schemas.document import (
     UpdateSegmentRulesRequest,
 )
 from app.services import storage, vector_store
-from app.services.chunking import adapt_rules_for_file_type, default_rules, merge_rules
+from app.services.chunking import (
+    adapt_rules_for_file_type,
+    default_rules_for_file_type,
+    merge_rules,
+)
 from app.services.document_state import apply_status
 from app.services.normalize import normalize_text
 from app.services.observability import record_metric, write_audit
@@ -118,19 +122,8 @@ async def upload_document(
     await assert_kb_mutable(db, kb_id)
     file_type = _validate_upload(filename, content)
     await take_auto_snapshot(db, kb_id, SnapshotTrigger.AUTO_UPLOAD, user.id, name=f"upload:{filename}")
-    kb_rule = await doc_repo.get_or_create_kb_rule(db, kb_id)
-    rules = merge_rules(
-        default_rules(),
-        {
-            "chunk_size": kb_rule.chunk_size,
-            "chunk_overlap": kb_rule.chunk_overlap,
-            "separators": kb_rule.separators,
-            "split_mode": kb_rule.split_mode,
-            # P2迭代开发，当前仅配置存储，不启用语义切分
-            "enable_semantic": kb_rule.enable_semantic,
-        },
-    )
-    rules = adapt_rules_for_file_type(rules, file_type)
+    # 上传默认规则按文件类型自动检测，不再继承知识库级 KbChunkRule
+    rules = default_rules_for_file_type(file_type)
     object_path = storage.upload_bytes(str(kb_id), filename, content)
     doc = Document(
         kb_id=kb_id,
@@ -302,18 +295,7 @@ async def preview_segment_source(
         raw = parsers.extract_text(filename, content, file_type)
         source, _stats = normalize_text(raw)
         preview_source = "normalized_text"
-        kb_rule = await doc_repo.get_kb_rule(db, kb_id)
-        base_rules = merge_rules(
-            default_rules(),
-            {
-                "chunk_size": getattr(kb_rule, "chunk_size", None),
-                "chunk_overlap": getattr(kb_rule, "chunk_overlap", None),
-                "separators": getattr(kb_rule, "separators", None),
-                "split_mode": getattr(kb_rule, "split_mode", None),
-                # P2迭代开发，当前仅配置存储，不启用语义切分
-                "enable_semantic": getattr(kb_rule, "enable_semantic", None),
-            },
-        )
+        base_rules = default_rules_for_file_type(file_type)
     else:
         raise DocumentError("file 与 doc_id 至少提供其一", http_status=400)
 
@@ -453,17 +435,8 @@ async def update_segment_rules(
     if body.enable_semantic is not None:
         # P2迭代开发，当前仅配置存储，不启用语义切分
         patch["enable_semantic"] = body.enable_semantic
+    # 仅写文档级规则，不再回写知识库默认分段规则
     doc.segment_rules = merge_rules(doc.segment_rules, patch)
-    kb_rule = await doc_repo.get_or_create_kb_rule(db, kb_id)
-    kb_rule.chunk_size = body.chunk_size
-    kb_rule.chunk_overlap = body.chunk_overlap
-    if body.separators is not None:
-        kb_rule.separators = body.separators
-    if body.split_mode is not None:
-        kb_rule.split_mode = body.split_mode
-    if body.enable_semantic is not None:
-        # P2迭代开发，当前仅配置存储，不启用语义切分
-        kb_rule.enable_semantic = body.enable_semantic
     await write_audit(
         db,
         user_id=user.id,

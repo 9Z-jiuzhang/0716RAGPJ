@@ -13,7 +13,13 @@ from app.models import DocumentChunk
 from app.models.enums import DocumentStatus, SnapshotTrigger
 from app.repositories import document as doc_repo
 from app.services import embedding, parsers, storage, vector_store
-from app.services.chunking import adapt_rules_for_file_type, merge_rules, split_text
+from app.services.chunking import (
+    ChunkCoverageError,
+    adapt_rules_for_file_type,
+    content_coverage_ratio,
+    merge_rules,
+    split_text,
+)
 from app.services.document_state import apply_status
 from app.services.normalize import normalize_text
 from app.services.observability import langfuse_span, record_metric, write_audit
@@ -192,7 +198,23 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
     rules = adapt_rules_for_file_type(merge_rules(doc.segment_rules, None), doc.file_type)
     # 写回适配后的规则，避免界面仍显示 fixed 而实际按类型推荐模式切分。
     doc.segment_rules = dict(rules)
-    previews = split_text(doc.normalized_text or "", rules)
+    source = doc.normalized_text or ""
+    try:
+        previews = split_text(source, rules)
+    except ChunkCoverageError as exc:
+        logger.error(
+            "segment coverage failure doc=%s ratio=%.2f%% chunks=%s",
+            doc.id,
+            exc.ratio * 100,
+            exc.chunk_count,
+        )
+        raise
+    coverage = content_coverage_ratio(source, [p.content for p in previews])
+    if previews:
+        # 将覆盖率写入首段元数据，便于排查；不改变正文
+        meta0 = dict(previews[0].metadata or {})
+        meta0["coverage_ratio"] = round(coverage, 4)
+        previews[0].metadata = meta0
     chunks = [
         DocumentChunk(
             kb_id=doc.kb_id,

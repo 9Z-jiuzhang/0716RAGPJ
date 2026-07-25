@@ -167,10 +167,7 @@ async def test_segment_preview_file_returns_offsets_without_persistence():
     text = "第一段内容。\n\n第二段内容更长一些用于验证切分效果。\n\n第三段结尾。"
     content = text.encode("utf-8")
 
-    with (
-        patch("app.repositories.document.get_knowledge_base", AsyncMock(return_value=MagicMock())),
-        patch("app.repositories.document.get_kb_rule", AsyncMock(return_value=None)),
-    ):
+    with patch("app.repositories.document.get_knowledge_base", AsyncMock(return_value=MagicMock())):
         resp = await preview_segment_source(
             db,
             uuid4(),
