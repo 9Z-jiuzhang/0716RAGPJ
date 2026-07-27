@@ -327,6 +327,9 @@ docker compose up -d grafana
 **本地开发**：要求 **Python 3.10**。可在 `api` 容器内执行测试，或：
 
 ```bash
+# 容器内（镜像已包含 /app/tests；连 compose 网络中的 postgres/redis）
+docker compose exec api pytest -q
+
 pip install -r requirements.txt
 # 宿主机调试时：POSTGRES/REDIS/CHROMA 指向 localhost；CHROMA_PORT=18001；REDIS_PORT=16379
 uvicorn app.main:app --reload --app-dir backend --port 8000

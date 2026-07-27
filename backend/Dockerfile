@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY backend/app /app/app
 COPY backend/alembic.ini /app/alembic.ini
 COPY backend/alembic /app/alembic
+COPY backend/tests /app/tests
+COPY backend/pytest.docker.ini /app/pytest.ini
 COPY backend/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 

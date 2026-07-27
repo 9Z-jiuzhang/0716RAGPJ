@@ -11,9 +11,10 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
 
+    # 使用 ECR Public 的 Docker Hub 官方镜像代理，降低 GHA 匿名拉取 Docker Hub 失败率
     services:
       postgres:
-        image: postgres:16-alpine
+        image: public.ecr.aws/docker/library/postgres:16-alpine
         env:
           POSTGRES_USER: kb_user
           POSTGRES_PASSWORD: test_password
@@ -27,7 +28,7 @@ jobs:
           --health-retries 5
 
       redis:
-        image: redis:7-alpine
+        image: public.ecr.aws/docker/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
