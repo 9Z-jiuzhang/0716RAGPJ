@@ -158,12 +158,14 @@ pre,
 }
 
 body:has(.auth-materio) .mesh-atmosphere,
+body:has(.landing-page) .mesh-atmosphere,
 body:has(.app-shell) .mesh-atmosphere {
   display: block;
 }
 
 /* 启用底图时：清掉旧 body 渐变，让 mesh 画布接管 */
 body:has(.auth-materio),
+body:has(.landing-page),
 body:has(.app-shell) {
   background-color: var(--mesh-canvas);
   background-image: none;

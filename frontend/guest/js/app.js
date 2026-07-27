@@ -1,7 +1,8 @@
 /**
  * 访客端应用入口（手册 5.1.1）
- * - 默认落地页：统一入口（访客 ENTER / 账号 SIGN IN）
- * - 未登录访客：可 ENTER 进入智能问答
+ * - 默认落地页：营销首页（第一组文案）+ 本项目底图 + 环境粒子
+ * - ENTER / SIGN IN：弹出本项目登录卡片
+ * - 未登录访客：可「以访客进入问答」
  * - 注册用户：问答 + 历史 + 个人中心
  * - 员工：再加文档上传
  * - 管理员：统一登录后进入管理端
@@ -30,6 +31,7 @@ import {
 import { escapeHtml, formatDateTime, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=gap-opt-0721i";
 import { initMotion } from "/assets/js/motion.js?v=bug-ui-palette-0721bs";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721i";
+import { mountEnvParticleField } from "/assets/js/env-particle-field.js?v=landing-particle-0727f";
 
 clearDemoFlags();
 initTheme();
@@ -43,6 +45,45 @@ let askAbort = null;
 let isAskStreaming = false;
 /** 待从历史打开的会话 ID（跳转问答页后由 pageChat 加载） */
 let pendingOpenSessionId = null;
+/** 落地页粒子场句柄 */
+let landingParticleApi = null;
+
+/** 落地页文案（对齐 RAG-第一组营销首页） */
+const LANDING_COPY = {
+  statusLabel: "知识即服务",
+  brandName: "RAG 智能知识平台",
+  heroTagline: "让企业知识即问即答",
+  footer: "powered by RAG · JZ",
+};
+
+/** 落地页公司矢量标：每次进入随机一种几何构图 */
+function landingBrandMarkSvg() {
+  const variants = [
+    `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <rect x="6" y="6" width="16" height="16" rx="3" fill="currentColor" opacity="0.92"/>
+      <rect x="26" y="6" width="16" height="16" rx="3" fill="currentColor" opacity="0.55"/>
+      <rect x="6" y="26" width="16" height="16" rx="3" fill="currentColor" opacity="0.55"/>
+      <circle cx="34" cy="34" r="8" fill="currentColor" opacity="0.85"/>
+    </svg>`,
+    `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <path d="M24 5L42 15.5V32.5L24 43L6 32.5V15.5L24 5Z" stroke="currentColor" stroke-width="2.4" opacity="0.9"/>
+      <circle cx="24" cy="24" r="7" fill="currentColor"/>
+      <path d="M24 5V17M42 15.5L31 21M42 32.5L31 27M24 43V31M6 32.5L15 27M6 15.5L15 21" stroke="currentColor" stroke-width="1.6" opacity="0.45"/>
+    </svg>`,
+    `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <path d="M8 34L24 8L40 34H8Z" fill="currentColor" opacity="0.88"/>
+      <rect x="18" y="28" width="12" height="12" rx="2.5" fill="currentColor" opacity="0.45"/>
+      <circle cx="24" cy="22" r="4" fill="var(--landing-mark-bg, #0b1220)"/>
+    </svg>`,
+    `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <rect x="8" y="10" width="32" height="28" rx="6" stroke="currentColor" stroke-width="2.4" opacity="0.9"/>
+      <path d="M14 28C17 22 21 19 24 19C27 19 31 22 34 28" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="18.5" cy="20" r="2.2" fill="currentColor"/>
+      <circle cx="29.5" cy="20" r="2.2" fill="currentColor"/>
+    </svg>`,
+  ];
+  return variants[Math.floor(Math.random() * variants.length)];
+}
 /** 会话消息分页（上拉加载更早历史） */
 const sessionHistory = {
   sessionId: null,
@@ -279,10 +320,14 @@ function playPageEnter() {
 function dispatchRender() {
   playPageEnter();
   const path = currentPath();
-  // 默认入口即为统一登录（无营销落地页）
+  // 营销落地页；登录/注册以弹层打开我们的登录卡片
   if (path === "/" || path === "/login" || path === "/register") {
-    return pageMaterioAuth(path === "/register" ? "register" : "login");
+    return pageLanding({
+      openAuth: path === "/login" || path === "/register",
+      mode: path === "/register" ? "register" : "login",
+    });
   }
+  destroyLandingParticles();
   if (path === "/chat") return pageChat();
   if (path === "/favorites") return pageFavorites();
   if (path === "/history") return pageHistory();
@@ -295,6 +340,157 @@ function dispatchRender() {
       <button type="button" class="btn btn-sm" id="btnGoChat404">返回智能问答</button>
     </div>`;
   document.getElementById("btnGoChat404")?.addEventListener("click", () => navigate("/chat"));
+}
+
+function destroyLandingParticles() {
+  if (landingParticleApi) {
+    landingParticleApi.destroy();
+    landingParticleApi = null;
+  }
+  document.body.classList.remove("is-landing");
+  const oldFx = document.querySelector(".bg-fx");
+  if (oldFx) oldFx.style.display = "";
+}
+
+/**
+ * 营销落地页：第一组首页文案 + 本项目 mesh 底图 + 环境粒子；
+ * ENTER / SIGN IN 打开本项目登录卡片弹层。
+ */
+function pageLanding({ openAuth = false, mode = "login" } = {}) {
+  if (isLoggedIn()) {
+    redirectAfterLogin();
+    return;
+  }
+
+  destroyLandingParticles();
+  document.body.classList.add("is-landing");
+  const oldFx = document.querySelector(".bg-fx");
+  if (oldFx) oldFx.style.display = "none";
+
+  document.getElementById("app").innerHTML = `
+    <div class="landing-page" id="landingPage" tabindex="-1">
+      <div class="landing-particle-host" id="landingParticleHost"></div>
+      <button type="button" class="theme-toggle auth-theme-toggle landing-theme-toggle" data-theme-toggle aria-label="切换主题" title="切换主题">
+        <span class="icon-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></span>
+        <span class="icon-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></svg></span>
+      </button>
+      <header class="landing-nav">
+        <button type="button" class="landing-signin" id="btnLandingSignIn">SIGN IN</button>
+      </header>
+      <main class="landing-hero">
+        <div class="landing-brand-mark" aria-hidden="true">${landingBrandMarkSvg()}</div>
+        <div class="landing-badge"><i></i><span>${escapeHtml(LANDING_COPY.statusLabel)}</span></div>
+        <h1>
+          <span class="landing-brand-title">${escapeHtml(LANDING_COPY.brandName)}</span>
+          <span class="landing-sub">${escapeHtml(LANDING_COPY.heroTagline)}</span>
+        </h1>
+        <div class="landing-cta-row">
+          <div class="landing-enter-wrap">
+            <button type="button" class="landing-enter" id="btnLandingEnter"><span>ENTER</span></button>
+          </div>
+        </div>
+      </main>
+      <p class="landing-foot">${escapeHtml(LANDING_COPY.footer)}</p>
+      <div class="landing-modal" id="landingAuthModal" hidden>
+        <div class="landing-modal-card" id="landingAuthCard">
+          <button type="button" class="landing-modal-close" id="btnLandingAuthClose" aria-label="关闭登录框" title="关闭">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+          <div class="auth-materio landing-auth-scope">
+            <div class="auth-materio-card" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+              <div class="auth-materio-head">
+                <h2 id="authTitle">欢迎回来</h2>
+                <p id="authLead">登录账号后开始使用知识平台</p>
+              </div>
+              <div class="auth-tabs" role="tablist">
+                <button type="button" class="auth-tab" data-tab="login">登录</button>
+                <button type="button" class="auth-tab" data-tab="register">注册</button>
+              </div>
+              <div id="authPanel"></div>
+              <p class="auth-materio-guest">
+                无需账号？<button type="button" class="btn-text" id="btnGuestEnter">以访客进入问答</button>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const host = document.getElementById("landingParticleHost");
+  landingParticleApi = mountEnvParticleField(host, { fixed: true });
+
+  const openAuthModal = (tab = "login") => {
+    const modal = document.getElementById("landingAuthModal");
+    if (!modal) return;
+    modal.hidden = false;
+    landingParticleApi?.setPausePointerFocus(true);
+    const next = tab === "register" ? "#/register" : "#/login";
+    if (location.hash !== next) history.replaceState(null, "", next);
+    showLandingAuthTab(tab);
+  };
+
+  const closeAuthModal = () => {
+    const modal = document.getElementById("landingAuthModal");
+    if (!modal) return;
+    modal.hidden = true;
+    landingParticleApi?.setPausePointerFocus(false);
+    if (location.hash !== "#/" && location.hash !== "") history.replaceState(null, "", "#/");
+  };
+
+  document.getElementById("btnLandingEnter")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openAuthModal("login");
+  });
+  document.getElementById("btnLandingSignIn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openAuthModal("login");
+  });
+  document.getElementById("btnLandingAuthClose")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeAuthModal();
+  });
+  document.getElementById("landingAuthModal")?.addEventListener("click", (e) => {
+    // 点击遮罩空白处关闭；点在卡片内不关
+    if (!e.target.closest("#landingAuthCard")) closeAuthModal();
+  });
+  document.getElementById("landingPage")?.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      const modal = document.getElementById("landingAuthModal");
+      if (modal && !modal.hidden) closeAuthModal();
+    }
+  });
+
+  document.querySelectorAll(".auth-tab").forEach((btn) => {
+    btn.addEventListener("click", () => showLandingAuthTab(btn.dataset.tab));
+  });
+  document.getElementById("btnGuestEnter")?.addEventListener("click", () => {
+    navigate("/chat");
+    dispatchRender();
+  });
+
+  if (openAuth) openAuthModal(mode);
+  applyTheme(getTheme());
+  document.getElementById("landingPage")?.focus({ preventScroll: true });
+}
+
+function showLandingAuthTab(tab) {
+  const next = tab === "register" ? "#/register" : "#/login";
+  if (location.hash !== next) history.replaceState(null, "", next);
+  document.querySelectorAll(".auth-tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  const panel = document.getElementById("authPanel");
+  const title = document.getElementById("authTitle");
+  const lead = document.getElementById("authLead");
+  if (!panel) return;
+  if (tab === "register") {
+    if (title) title.textContent = "创建账号";
+    if (lead) lead.textContent = "注册后默认可问答；权限由管理员分配";
+    renderRegisterForm(panel);
+  } else {
+    if (title) title.textContent = "欢迎回来";
+    if (lead) lead.textContent = "访客 / 员工 / 管理员同一入口，登录后自动分流";
+    renderLoginForm(panel);
+  }
 }
 
 /* ========================= 问答首页 / ========================= */
@@ -1649,117 +1845,10 @@ async function sendQuestion(presetQuestion) {
   }
 }
 
-/* ========================= 统一登录入口（沉浸一体布局） ========================= */
-/** 全页动效舞台 + 大标题 + 嵌入式登录卡（无左右分割） */
+/* ========================= 统一登录入口（弹层复用卡片；全页版保留兼容） ========================= */
+/** 兼容旧调用：改为落地页 + 登录弹层 */
 function pageMaterioAuth(mode = "login") {
-  if (isLoggedIn()) {
-    redirectAfterLogin();
-    return;
-  }
-
-  document.getElementById("app").innerHTML = `
-    <div class="auth-materio">
-      <button type="button" class="theme-toggle auth-theme-toggle" data-theme-toggle aria-label="切换主题" title="切换主题">
-        <span class="icon-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></span>
-        <span class="icon-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></svg></span>
-      </button>
-      <div class="auth-materio-canvas" aria-hidden="true">
-        <span class="auth-blob auth-blob-a"></span>
-        <span class="auth-blob auth-blob-b"></span>
-        <span class="auth-blob auth-blob-c"></span>
-        <span class="auth-blob auth-blob-d"></span>
-        <div class="auth-materio-mesh"></div>
-        <div class="auth-stars"></div>
-      </div>
-      <div class="auth-materio-shell">
-        <aside class="auth-materio-visual">
-          <header class="auth-materio-brand">
-            <i class="landing-logo"></i>
-            <strong>AI 知识库</strong>
-          </header>
-          <div class="auth-materio-hero">
-            <p class="auth-materio-kicker">Enterprise Knowledge OS</p>
-            <h1>企业知识，<span>即问即答</span></h1>
-            <p class="auth-materio-lead">统一入口连接问答、知识库与管理控制台。<br/>安全、可审计、可扩展。</p>
-            <ul class="auth-materio-points">
-              <li>混合检索 · 流式问答</li>
-              <li>RBAC · 部门隔离</li>
-              <li>命中评测 · 全链路观测</li>
-            </ul>
-          </div>
-          <div class="auth-materio-stage-art" aria-hidden="true">
-            <div class="auth-figure">
-              <span class="auth-figure-ring auth-figure-ring-a"></span>
-              <span class="auth-figure-ring auth-figure-ring-b"></span>
-              <span class="auth-figure-core"><em></em></span>
-              <span class="auth-figure-orbit">
-                <i></i><i></i><i></i><i></i>
-              </span>
-              <span class="auth-figure-beam"></span>
-            </div>
-            <div class="auth-materio-geo">
-              <span class="auth-geo auth-geo-a"></span>
-              <span class="auth-geo auth-geo-b"></span>
-              <span class="auth-geo auth-geo-c"></span>
-              <span class="auth-geo auth-geo-d"></span>
-              <span class="auth-geo auth-geo-e"></span>
-              <span class="auth-geo auth-geo-f"></span>
-              <span class="auth-geo auth-geo-g"></span>
-              <span class="auth-geo auth-geo-h"></span>
-              <span class="auth-geo auth-geo-i"></span>
-              <span class="auth-geo auth-geo-j"></span>
-              <span class="auth-geo auth-geo-k"></span>
-              <span class="auth-geo auth-geo-l"></span>
-            </div>
-          </div>
-        </aside>
-        <section class="auth-materio-panel">
-          <div class="auth-materio-card">
-            <div class="auth-materio-head">
-              <h2 id="authTitle">欢迎回来</h2>
-              <p id="authLead">登录账号后开始使用知识平台</p>
-            </div>
-        <div class="auth-tabs" role="tablist">
-              <button type="button" class="auth-tab ${mode !== "register" ? "active" : ""}" data-tab="login">登录</button>
-              <button type="button" class="auth-tab ${mode === "register" ? "active" : ""}" data-tab="register">注册</button>
-        </div>
-        <div id="authPanel"></div>
-            <p class="auth-materio-guest">
-              无需账号？<button type="button" class="btn-text" id="btnGuestEnter">以访客进入问答</button>
-            </p>
-        </div>
-        </section>
-      </div>
-    </div>
-  `;
-
-  const panel = document.getElementById("authPanel");
-  const showTab = (tab) => {
-    const next = tab === "register" ? "#/register" : "#/";
-    if (location.hash !== next) history.replaceState(null, "", next);
-    document.querySelectorAll(".auth-tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-    const title = document.getElementById("authTitle");
-    const lead = document.getElementById("authLead");
-    if (tab === "register") {
-      title.textContent = "创建账号";
-      lead.textContent = "注册后默认可问答；权限由管理员分配";
-      renderRegisterForm(panel);
-    } else {
-      title.textContent = "欢迎回来";
-      lead.textContent = "访客 / 员工 / 管理员同一入口，登录后自动分流";
-      renderLoginForm(panel);
-    }
-  };
-
-  document.querySelectorAll(".auth-tab").forEach((btn) => {
-    btn.addEventListener("click", () => showTab(btn.dataset.tab));
-  });
-  document.getElementById("btnGuestEnter").onclick = () => {
-    navigate("/chat");
-    dispatchRender();
-  };
-  showTab(mode === "register" ? "register" : "login");
-  applyTheme(getTheme());
+  return pageLanding({ openAuth: true, mode });
 }
 
 /** 登录表单 */
