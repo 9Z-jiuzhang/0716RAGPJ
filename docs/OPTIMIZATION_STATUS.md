@@ -3,7 +3,7 @@
 > 本文描述**当前仓库已落地能力**；高风险能力默认开关关闭，开启后即可生效。  
 > 外部「六维核查修订版」计划文档包不在本仓库内；以本文与 `.env.example` / `config.py` 为准。
 
-最后核对日期：2026-07-25（含知识库多部门访问）。
+最后核对日期：2026-07-27（含反馈率口径修正与 ZYUI 前端体验合并）。
 
 ## 总览
 
@@ -97,3 +97,21 @@
 | 检索/鉴权 | `retrieval/scope.py`、`assert_kb_access`、列表过滤均按多部门判断 |
 | 回填 | 启动 `seed_departments` 将历史单部门字段幂等写入 `kb_departments` |
 | 测试 | `backend/tests/test_kb_multi_departments.py` |
+
+## 反馈率口径（2026-07-27）
+
+| 项 | 说明 |
+|----|------|
+| 问题 | 旧口径用「近 N 日反馈条数 / 近 N 日问答事件」，补评旧回答会使反馈率 >100% |
+| 现行 | `feedback_rate = matched_feedback / answerable_events`（窗口内带 `message_id` 的问答中已反馈占比，钳制 ≤1） |
+| 有用/无用 | 仍按反馈 `created_at` 统计近 N 日活动量 |
+| 前端 | 首页/问答统计展示钳制 0–100%；hover 说明口径 |
+| 测试 | `backend/tests/test_analytics_feedback.py` |
+
+## 前端体验补强（ZYUI-develop-ui-0725，2026-07-25）
+
+| 端 | 要点 |
+|----|------|
+| 管理端 | 列表全量拉取 + 本地分页；用户排序/部门筛选/深链高亮；首页反馈 KPI；部门列宽与图表贴底 |
+| 访客端 | 流式回答「中止」；顶栏历史/收藏；本机收藏清理；未知路由 404 卡片 |
+| 共享 | `askStream` 401 refresh 重试；`formatStatNumber` |

@@ -562,13 +562,24 @@ Authorization: Bearer <access_token>
 | GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`uptime_seconds`；`checks` 含 postgres/redis/chroma/langfuse/minio 连通性 |
 | GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d` / `qa_trend_30d`、`hit_rate_trend_7d` / `hit_rate_trend_30d`、`error_24h`（4 桶）、`error_hourly_48h`（48 点）、`guard_blocked_24h`、`guard_blocked_7d`、`guard_recent_events` |
 | GET | `/monitor/guard-events` | `system:read` | 分页 Guard 拦截明细；默认 `page_size=50` |
-| GET | `/monitor/analytics/feedback` | `system:read` | 近 N 日反馈汇总 + 路由/缓存分布 + 按日趋势（Query：`days` 1–90，默认 14）。有用/无用按反馈创建时间；**反馈率** = 窗口内带 `message_id` 的问答中已反馈占比（按消息对齐，≤100%） |
+| GET | `/monitor/analytics/feedback` | `system:read` | 近 N 日反馈汇总 + 路由/缓存分布 + 按日趋势（Query：`days` 1–90，默认 14） |
 | GET | `/monitor/analytics/topics` | `system:read` | 主题簇列表（关键词粗聚类，聚合） |
 | POST | `/monitor/analytics/topics/rebuild` | `system:read` | 从近期问答事件重建主题簇 |
 | GET | `/metrics`（应用根，非 `/api/v1`） | 内部 | Prometheus 文本指标，**不走统一包装**；云端可借 `METRICS_PUBLIC=false` 限制暴露 |
 
+**反馈汇总字段要点**（`GET /monitor/analytics/feedback`）：
+
+| 字段 | 说明 |
+|------|------|
+| `useful` / `useless` | 近 N 日**按反馈创建时间**统计的有用/无用条数 |
+| `request_events` | 近 N 日问答事件总数 |
+| `answerable_events` | 近 N 日带 `message_id`、可对齐反馈的问答数 |
+| `matched_feedback` | 落在上述问答消息上的反馈条数 |
+| `feedback_rate` | `matched_feedback / answerable_events`，范围 **0–1（≤100%）**；不可用「反馈创建数 / 问答创建数」直接相除（补评旧答会虚高） |
+| `trend[]` | 按日：`requests` / `useful` / `useless`（有用无用仍按反馈创建日） |
+
 > `/api/v1/monitor/metrics` 为 `307` 重定向到 `/metrics`（隐藏于 schema）。  
-> 管理端：**系统监控**页仅健康/系统统计/Grafana；**质量评测 → 问答统计**页展示反馈与主题图表。
+> 管理端：**首页**展示近 14 日反馈 KPI（含反馈率）；**系统监控**页为健康/系统统计/Grafana；**质量评测 → 问答统计**页展示反馈环形图、趋势与主题。
 
 **Guard 事件项**（`GuardBlockedEventItem`）：`id`、`created_at`、`intent`、`reason_code`、`detector`、`confidence`、`actor_label`（用户名或「访客」）、`client_ip?`、`user_id?`、`is_registered`、`question_preview?`（脱敏短摘要，不含完整原文）。
 
@@ -642,6 +653,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.5 | 2026-07-27 | 反馈率口径修正（按窗口内问答消息对齐，≤100%）；补充 `answerable_events` / `matched_feedback`；首页反馈 KPI；访客端流式中止与列表体验见 README / OPTIMIZATION_STATUS |
 | 2.1.4 | 2026-07-25 | 知识库多部门访问：`departments[]` + `kb_departments`；部门侧关联改为追加/局部解除；管理端访问范围多选与「除访客外全选」 |
 | 2.1.3 | 2026-07-25 | Ask/`QA_DEFAULT_TOP_K` 默认 5；访客端引用区按相关度展开 Top-3、其余折叠；命中测试 TopK 仍默认 3 |
 | 2.1.2 | 2026-07-25 | 六维优化落地说明：SSE `route`、模型发布/版本/回滚、命中测试 TopK 默认 3、监控分析反馈/主题 API；见 `OPTIMIZATION_STATUS.md` |

@@ -276,9 +276,9 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、引用相关度 Top-3 展开/其余折叠、置信提示）、登录/注册、对话历史、个人中心（含改密）、**多文件批量上传**（员工/管理员）。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势与错误分桶）与安全窗口、用户/角色/部门、大模型与用量（参数配置/版本发布）、知识库/文档工作台/快照（知识库「访问范围」**多选部门**，含「除访客外全选」）、命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
-- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、主题/动效、公共 CSS、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
+- **访客端** `frontend/guest/`（挂载 `/`）：智能问答（SSE、**流式中止**、引用相关度 Top-3 展开/其余折叠、置信提示）、登录/注册、对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（员工/管理员）；`askStream` 遇 401 自动 refresh 后重试。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势、错误分桶、**近 14 日问答反馈 KPI/趋势**）与安全窗口；用户/角色/部门（全量拉取 + 本地分页，用户表可排序/按部门筛选）；大模型与用量；知识库/文档工作台/快照（「访问范围」**多选部门**，含「除访客外全选」）；命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
+- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、主题/动效（含统计数字格式化）、公共 CSS、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
 
 ### 2.7 可观测性
 
