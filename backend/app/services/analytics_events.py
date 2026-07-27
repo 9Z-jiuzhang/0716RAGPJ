@@ -262,15 +262,42 @@ class AnalyticsEventService:
             elif rating == "useless":
                 useless_map[key] = int(n)
 
-        feedback_total = int(useful_n or 0) + int(useless_n or 0)
         request_total = int(total_events or 0)
+        # 反馈率口径：窗口内产生的问答（有 message_id）中，已收到反馈的占比。
+        # 不可用「反馈.created_at / 问答.created_at」直接相除——补评旧回答会把比率抬过 100%。
+        request_msg_ids = (
+            select(QARequestEvent.message_id)
+            .where(
+                QARequestEvent.created_at >= since,
+                QARequestEvent.message_id.is_not(None),
+            )
+            .distinct()
+        )
+        request_answerable = await db.scalar(
+            select(func.count())
+            .select_from(QARequestEvent)
+            .where(
+                QARequestEvent.created_at >= since,
+                QARequestEvent.message_id.is_not(None),
+            )
+        )
+        matched_feedback = await db.scalar(
+            select(func.count()).select_from(QAFeedbackEvent).where(QAFeedbackEvent.message_id.in_(request_msg_ids))
+        )
+        answerable_n = int(request_answerable or 0)
+        matched_n = int(matched_feedback or 0)
+        raw_rate = (matched_n / answerable_n) if answerable_n else 0.0
+        feedback_rate = round(min(1.0, max(0.0, raw_rate)), 4)
+
         return {
             "useful": int(useful_n or 0),
             "useless": int(useless_n or 0),
             "request_events": request_total,
+            "answerable_events": answerable_n,
+            "matched_feedback": matched_n,
             "unique_actors": int(actor_n or 0),
             "unique_conversations": int(session_n or 0),
-            "feedback_rate": round(feedback_total / request_total, 4) if request_total else 0.0,
+            "feedback_rate": feedback_rate,
             "avg_latency_ms": int(round(float(avg_latency))) if avg_latency is not None else None,
             "route_distribution": [{"label": (r[0] or "unknown"), "count": int(r[1])} for r in route_rows],
             "cache_distribution": [{"label": (r[0] or "none"), "count": int(r[1])} for r in cache_rows],
@@ -291,6 +318,7 @@ class AnalyticsEventService:
                 for d in day_keys
             ],
             "privacy": "aggregate_only",
+            "rate_definition": "matched_feedback / answerable_events (requests with message_id in window)",
         }
 
 

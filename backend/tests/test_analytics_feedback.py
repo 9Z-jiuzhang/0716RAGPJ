@@ -22,7 +22,8 @@ async def test_feedback_summary_filters_by_days_window() -> None:
     svc = AnalyticsEventService()
     db = AsyncMock()
     # scalar 依次：useful / useless / total_events / actors / sessions / avg_latency
-    db.scalar = AsyncMock(side_effect=[2, 1, 10, 3, 4, 120.0])
+    # / answerable_events / matched_feedback
+    db.scalar = AsyncMock(side_effect=[2, 1, 10, 3, 4, 120.0, 8, 3])
 
     empty_result = MagicMock()
     empty_result.all.return_value = []
@@ -34,11 +35,31 @@ async def test_feedback_summary_filters_by_days_window() -> None:
     assert body["useful"] == 2
     assert body["useless"] == 1
     assert body["request_events"] == 10
+    assert body["answerable_events"] == 8
+    assert body["matched_feedback"] == 3
+    assert body["feedback_rate"] == 0.375
     assert body["range"]["days"] == 7
     assert len(body["trend"]) >= 7
 
-    assert db.scalar.await_count == 6
+    assert db.scalar.await_count == 8
     assert db.execute.await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_feedback_rate_never_exceeds_one() -> None:
+    """补评旧答导致反馈条数 > 窗口问答时，反馈率仍不超过 1。"""
+    svc = AnalyticsEventService()
+    db = AsyncMock()
+    # useful=5 useless=2 request=3 actors sessions latency answerable=3 matched=3
+    db.scalar = AsyncMock(side_effect=[5, 2, 3, 1, 1, 50.0, 3, 3])
+    empty_result = MagicMock()
+    empty_result.all.return_value = []
+    db.execute = AsyncMock(return_value=empty_result)
+
+    body = await svc.feedback_summary(db, days=14)
+    assert body["useful"] + body["useless"] > body["request_events"]
+    assert 0.0 <= body["feedback_rate"] <= 1.0
+    assert body["feedback_rate"] == 1.0
 
 
 @pytest.mark.asyncio

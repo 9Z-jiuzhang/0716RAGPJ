@@ -694,10 +694,11 @@ async function pageDashboard() {
     const useless = Number(feedback?.useless || 0);
     const fbTotal = useful + useless;
     const requestEvents = Number(feedback?.request_events || 0);
+    const answerableEvents = Number(feedback?.answerable_events ?? requestEvents);
+    const rawRate = Number(feedback?.feedback_rate);
+    const boundedRate = Number.isFinite(rawRate) ? Math.min(1, Math.max(0, rawRate)) : 0;
     const feedbackRateDisplay =
-      requestEvents > 0
-        ? `${(Number(feedback?.feedback_rate || 0) * 100).toFixed(2)}%`
-        : "—";
+      answerableEvents > 0 ? `${(boundedRate * 100).toFixed(2)}%` : "—";
     const fbTrend = Array.isArray(feedback?.trend) ? feedback.trend : [];
     const fbTrendLabels = fbTrend.map((x) => {
       const d = String(x.date || "");
@@ -707,7 +708,7 @@ async function pageDashboard() {
       ? `<div class="stat-grid dash-stat-grid dash-feedback-grid">
           <div class="stat-card"><div class="label">有用（近 ${fbDays} 日）</div><div class="value" data-count-up="${useful}">0</div></div>
           <div class="stat-card"><div class="label">无用（近 ${fbDays} 日）</div><div class="value" data-count-up="${useless}">0</div></div>
-          <div class="stat-card"><div class="label">反馈率</div><div class="value">${escapeHtml(feedbackRateDisplay)}</div></div>
+          <div class="stat-card" title="近 ${fbDays} 日问答中已收到反馈的占比（按消息对齐，不超过 100%）"><div class="label">反馈率</div><div class="value">${escapeHtml(feedbackRateDisplay)}</div></div>
           <div class="stat-card"><div class="label">已反馈条数</div><div class="value" data-count-up="${fbTotal}">0</div></div>
         </div>`
       : `<p class="text-muted">暂无点赞/点踩统计（需登录用户提交反馈）</p>`;
@@ -7448,15 +7449,18 @@ async function pageQaAnalytics() {
   const fbTotal = useful + useless;
   const usefulPct = fbTotal ? Math.round((useful / fbTotal) * 100) : 0;
   const requestEvents = Number(feedback?.request_events || 0);
+  const answerableEvents = Number(feedback?.answerable_events ?? requestEvents);
+  const rawRate = Number(feedback?.feedback_rate);
+  const boundedRate = Number.isFinite(rawRate) ? Math.min(1, Math.max(0, rawRate)) : 0;
   const feedbackRateDisplay =
-    requestEvents > 0 ? `${(Number(feedback?.feedback_rate || 0) * 100).toFixed(2)}%` : "—";
+    answerableEvents > 0 ? `${(boundedRate * 100).toFixed(2)}%` : "—";
   const feedbackPieHtml = feedback
     ? `<div class="monitor-feedback-chart">
         <div class="monitor-pie" style="--useful:${usefulPct}" title="有用 ${useful} / 无用 ${useless}" aria-label="反馈占比"></div>
         <ul class="list-plain monitor-stats-list">
           <li><span class="monitor-stat-label">问答事件</span><span class="monitor-stat-value">${requestEvents}</span></li>
           <li><span class="monitor-stat-label">独立会话</span><span class="monitor-stat-value">${feedback.unique_conversations ?? 0}</span></li>
-          <li><span class="monitor-stat-label">反馈率</span><span class="monitor-stat-value">${escapeHtml(feedbackRateDisplay)}</span></li>
+          <li title="近 ${days} 日问答中已收到反馈的占比（按消息对齐，不超过 100%）"><span class="monitor-stat-label">反馈率</span><span class="monitor-stat-value">${escapeHtml(feedbackRateDisplay)}</span></li>
           <li><span class="monitor-stat-label"><span class="legend-dot legend-useful"></span>有用（累计）</span><span class="monitor-stat-value">${useful}</span></li>
           <li><span class="monitor-stat-label"><span class="legend-dot legend-useless"></span>无用（累计）</span><span class="monitor-stat-value">${useless}</span></li>
           ${

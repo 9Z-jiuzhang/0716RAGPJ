@@ -562,7 +562,7 @@ Authorization: Bearer <access_token>
 | GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`uptime_seconds`；`checks` 含 postgres/redis/chroma/langfuse/minio 连通性 |
 | GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d` / `qa_trend_30d`、`hit_rate_trend_7d` / `hit_rate_trend_30d`、`error_24h`（4 桶）、`error_hourly_48h`（48 点）、`guard_blocked_24h`、`guard_blocked_7d`、`guard_recent_events` |
 | GET | `/monitor/guard-events` | `system:read` | 分页 Guard 拦截明细；默认 `page_size=50` |
-| GET | `/monitor/analytics/feedback` | `system:read` | 近 N 日反馈汇总 + 路由/缓存分布 + 按日趋势（Query：`days` 1–90，默认 14；**汇总与趋势同一窗口**） |
+| GET | `/monitor/analytics/feedback` | `system:read` | 近 N 日反馈汇总 + 路由/缓存分布 + 按日趋势（Query：`days` 1–90，默认 14）。有用/无用按反馈创建时间；**反馈率** = 窗口内带 `message_id` 的问答中已反馈占比（按消息对齐，≤100%） |
 | GET | `/monitor/analytics/topics` | `system:read` | 主题簇列表（关键词粗聚类，聚合） |
 | POST | `/monitor/analytics/topics/rebuild` | `system:read` | 从近期问答事件重建主题簇 |
 | GET | `/metrics`（应用根，非 `/api/v1`） | 内部 | Prometheus 文本指标，**不走统一包装**；云端可借 `METRICS_PUBLIC=false` 限制暴露 |
