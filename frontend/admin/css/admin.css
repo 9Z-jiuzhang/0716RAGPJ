@@ -816,9 +816,22 @@ html[data-theme="dark"] .usage-notice {
 .sidebar-brand .logo-dot {
   width: 34px;
   height: 34px;
-  border-radius: 12px;
-  background: var(--color-primary-gradient);
-  box-shadow: 0 0 22px color-mix(in srgb, var(--color-primary) 40%, transparent);
+  border-radius: var(--radius, 12px);
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-card, #fff));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 28%, transparent);
+  color: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.sidebar-brand .brand-mark svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .sidebar-brand span {
@@ -1191,6 +1204,18 @@ html[data-theme="light"] .app-shell-admin .sidebar .nav-item.active {
   flex-shrink: 0;
 }
 
+/* 欢迎区双按钮：形状与主按钮一致，颜色仍由 .btn / .btn-secondary 各自决定 */
+.dash-welcome-actions > .btn {
+  height: 40px;
+  min-height: 40px;
+  padding: 0 20px;
+  border-radius: var(--radius-control, var(--radius)) !important;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  box-sizing: border-box;
+}
+
 /* 日间：欢迎区改为青绿透亮玻璃，去掉炭灰底 */
 html[data-theme="light"] .dash-welcome {
   background:
@@ -1241,6 +1266,49 @@ html[data-theme="light"] .dash-welcome p {
 .dash-stat-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 24px;
+}
+
+.dash-stat-grid-8 {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/*
+ * 底部留空原因：全局 .stat-card 设了 min-height(110/96px)，内容顶对齐，
+ * 多出的高度堆在下方；左侧色条还占了 padding-left。
+ * 八格首页改为内容垂直居中，并取消强制过高的 min-height。
+ */
+.dash-stat-grid-8 .stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 16px 10px;
+  text-align: center;
+}
+
+.dash-stat-grid-8 .stat-card::before {
+  display: none;
+}
+
+.dash-stat-grid-8 .stat-card .label {
+  padding-left: 0;
+  margin: 0;
+  width: 100%;
+  text-align: left;
+  font-size: var(--font-size-xs, 12px);
+  line-height: 1.35;
+}
+
+.dash-stat-grid-8 .stat-card .value {
+  padding-left: 0;
+  margin: 0;
+  width: 100%;
+  text-align: center;
+  font-size: clamp(1.45rem, 2.2vw, 1.85rem);
+  line-height: 1.1;
 }
 
 .dash-bento {
@@ -1505,7 +1573,7 @@ html[data-theme="light"] .dash-chart-card .chart-range-select {
   margin-top: auto;
   padding-top: 16px;
   display: flex;
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 
 .dash-security-actions .btn {
@@ -1534,6 +1602,13 @@ html[data-theme="light"] .dash-chart-card .chart-range-select {
   margin: 8px 0 12px;
 }
 
+.dash-security-metrics > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
 .dash-security-metrics .label {
   display: block;
   font-size: var(--font-size-xs);
@@ -1555,16 +1630,19 @@ html[data-theme="light"] .dash-chart-card .chart-range-select {
 }
 
 .dash-shortcut-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
+  width: 100%;
 }
 
 .dash-shortcut {
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+  min-width: min(140px, 100%);
   padding: 14px 16px;
   border: var(--glass-border);
   border-radius: var(--radius-card);
@@ -1575,6 +1653,7 @@ html[data-theme="light"] .dash-chart-card .chart-range-select {
   text-align: left;
   font: inherit;
   transition: var(--transition);
+  box-sizing: border-box;
 }
 
 .dash-shortcut strong {
@@ -1605,13 +1684,20 @@ html[data-theme="dark"] .app-shell-admin .dash-shortcut-grid .dash-shortcut:hove
   transform: translateY(-2px) !important;
 }
 
+@media (max-width: 1200px) {
+  .dash-stat-grid-8 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 960px) {
   .dash-welcome {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .dash-stat-grid {
+  .dash-stat-grid,
+  .dash-stat-grid-8 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1621,7 +1707,8 @@ html[data-theme="dark"] .app-shell-admin .dash-shortcut-grid .dash-shortcut:hove
 }
 
 @media (max-width: 640px) {
-  .dash-stat-grid {
+  .dash-stat-grid,
+  .dash-stat-grid-8 {
     grid-template-columns: 1fr;
   }
 }

@@ -9,12 +9,22 @@ import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?
 import { api, clearDemoFlags } from "/assets/js/api.js?v=ask-auth-refresh-0725a";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js?v=gap-opt-0721s";
 import { escapeHtml, formatDateTime, formatDateTimeHtml, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=bug-ui-palette-0721ea";
-import { initMotion, runCountUps } from "/assets/js/motion.js?v=stat-num-0725a";
+import { initMotion, runCountUps, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721s";
+import { getBrandMarkSvg } from "/assets/js/brand-mark.js?v=brand-mark-0727a";
 
 clearDemoFlags();
 initTheme();
 initMotion();
+
+/** 统计类 count：千分位；≥1 万用「x.xx万」；小数保留 2 位（页码/百分比/金额勿用） */
+function fmtCount(n) {
+  if (n === "—" || n === "-" || n === "–") return String(n);
+  if (n == null || n === "") return "0";
+  const v = Number(n);
+  if (!Number.isFinite(v)) return String(n);
+  return formatStatNumber(v);
+}
 
 /** 将 0~1 置信度安全格式化为百分比文案；非法则 -- */
 function formatPercentCell(value) {
@@ -242,9 +252,9 @@ const MENU_GROUPS = [
     id: "quality",
     title: "质量评测",
     items: [
-      { path: "/admin/ragas", label: "RAGAS 评估", perm: "system:read" },
-      { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
       { path: "/admin/qa-analytics", label: "问答统计", perm: "system:read" },
+      { path: "/admin/hit-test", label: "命中率测试", perm: "test:read" },
+      { path: "/admin/ragas", label: "RAGAS 评估", perm: "system:read" },
     ],
   },
   {
@@ -252,9 +262,9 @@ const MENU_GROUPS = [
     title: "系统运维与安全",
     items: [
       { path: "/admin/role-caches", label: "角色缓存", perm: "system:read" },
-      { path: "/admin/guard", label: "LLM Guard 拦截", perm: "system:read" },
       { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
       { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
+      { path: "/admin/guard", label: "LLM Guard 拦截", perm: "system:read" },
     ],
   },
   {
@@ -343,7 +353,7 @@ function renderShell(title) {
     <div class="app-shell app-shell-admin">
       <aside class="sidebar" aria-label="管理导航">
         <div class="sidebar-brand" data-go="/admin" title="管理首页">
-          <i class="logo-dot"></i>
+          <span class="brand-mark logo-dot" aria-hidden="true">${getBrandMarkSvg()}</span>
           <span><b>Knowledge</b> AI<small>智能知识中枢</small></span>
         </div>
         <nav class="sidebar-nav" aria-label="管理导航分组">
@@ -515,7 +525,7 @@ async function dispatchRender() {
     try {
       if (!sessionStorage.getItem("kb_legacy_docs_tip")) {
         sessionStorage.setItem("kb_legacy_docs_tip", "1");
-        setTimeout(() => toast("文档管理已并入知识库工作区「文档上传」页签", "info"), 0);
+        setTimeout(() => toast("文档管理已并入知识库工作区「文档管理」页签", "info"), 0);
       }
     } catch {
       /* ignore */
@@ -552,7 +562,7 @@ async function dispatchRender() {
   return pageDashboard();
 }
 
-/* ========== 首页 /admin：精简欢迎区 + 指标 + 图表 + 快捷入口 ========== */
+/* ========== 首页 /admin：精简欢迎区 + 核心指标 + 图表 ========== */
 function renderDashboardWelcome() {
   const user = getUser() || {};
   const name = escapeHtml(user.nickname || user.username || "用户");
@@ -569,6 +579,9 @@ function renderDashboardWelcome() {
   if (isSuperAdmin()) focus = "可配置模型、权限与全库资产。";
   else if (hasPermission("user:read") || hasPermission("role:read")) focus = "可管理用户、知识库与系统运维。";
 
+  const kbLabel =
+    MENUS.find((m) => m.path === "/admin/knowledge-bases")?.label || "知识库管理";
+
   return `
     <section class="dash-welcome">
       <div class="dash-welcome-main">
@@ -577,35 +590,8 @@ function renderDashboardWelcome() {
         <p>当前身份 <strong>${roleLabel}</strong> · ${focus}</p>
       </div>
       <div class="dash-welcome-actions">
-        ${hasPermission("kb:read") ? `<button type="button" class="btn" data-go="/admin/knowledge-bases">知识库</button>` : ""}
+        ${hasPermission("kb:read") ? `<button type="button" class="btn" data-go="/admin/knowledge-bases">${escapeHtml(kbLabel)}</button>` : ""}
         <a class="btn btn-secondary" href="/#/chat">去问答</a>
-      </div>
-    </section>`;
-}
-
-function renderDashboardShortcuts() {
-  const items = [
-    { path: "/admin/knowledge-bases", label: "知识库", perm: "kb:read", desc: "文档与向量" },
-    { path: "/admin/users", label: "用户", perm: "user:read", desc: "账号与角色" },
-    { path: "/admin/hit-test", label: "命中测试", perm: "test:read", desc: "检索评测" },
-    { path: "/admin/qa-analytics", label: "问答统计", perm: "system:read", desc: "反馈与主题" },
-    { path: "/admin/qa-sessions", label: "会话分析", perm: "system:read", desc: "问答洞察" },
-    { path: "/admin/monitor", label: "系统监控", perm: "system:read", desc: "Grafana" },
-    { path: "/admin/audit", label: "审计日志", perm: "audit:read", desc: "操作追踪" },
-  ].filter((i) => hasPermission(i.perm));
-
-  if (!items.length) return "";
-  return `
-    <section class="dash-section">
-      <div class="dash-section-head"><h2>快捷入口</h2></div>
-      <div class="dash-shortcut-grid">
-        ${items
-          .map(
-            (i) => `<button type="button" class="dash-shortcut" data-go="${i.path}">
-              <strong>${i.label}</strong><span>${i.desc}</span>
-            </button>`
-          )
-          .join("")}
       </div>
     </section>`;
 }
@@ -698,20 +684,12 @@ async function pageDashboard() {
     const rawRate = Number(feedback?.feedback_rate);
     const boundedRate = Number.isFinite(rawRate) ? Math.min(1, Math.max(0, rawRate)) : 0;
     const feedbackRateDisplay =
-      answerableEvents > 0 ? `${(boundedRate * 100).toFixed(2)}%` : "—";
+      feedback && answerableEvents > 0 ? `${(boundedRate * 100).toFixed(2)}%` : "—";
     const fbTrend = Array.isArray(feedback?.trend) ? feedback.trend : [];
     const fbTrendLabels = fbTrend.map((x) => {
       const d = String(x.date || "");
       return d.length >= 10 ? d.slice(5) : d;
     });
-    const feedbackKpiHtml = feedback
-      ? `<div class="stat-grid dash-stat-grid dash-feedback-grid">
-          <div class="stat-card"><div class="label">有用（近 ${fbDays} 日）</div><div class="value" data-count-up="${useful}">0</div></div>
-          <div class="stat-card"><div class="label">无用（近 ${fbDays} 日）</div><div class="value" data-count-up="${useless}">0</div></div>
-          <div class="stat-card" title="近 ${fbDays} 日问答中已收到反馈的占比（按消息对齐，不超过 100%）"><div class="label">反馈率</div><div class="value">${escapeHtml(feedbackRateDisplay)}</div></div>
-          <div class="stat-card"><div class="label">已反馈条数</div><div class="value" data-count-up="${fbTotal}">0</div></div>
-        </div>`
-      : `<p class="text-muted">暂无点赞/点踩统计（需登录用户提交反馈）</p>`;
     const feedbackTrendHtml = fbTrend.length
       ? `<div class="dash-fb-trend">
           <div class="dash-fb-trend-block">
@@ -771,22 +749,20 @@ async function pageDashboard() {
 
     document.getElementById("pageRoot").innerHTML = `
       ${welcome}
-      ${renderDashboardShortcuts()}
-      <section class="dash-section">
-        <div class="dash-section-head"><h2>核心指标</h2><span class="text-muted">刷新时统计</span></div>
-        <div class="stat-grid dash-stat-grid">
-          <div class="stat-card"><div class="label">知识库</div><div class="value" data-count-up="${s.kb_count ?? 0}">0</div></div>
-          <div class="stat-card"><div class="label">文档</div><div class="value" data-count-up="${s.doc_count ?? 0}">0</div></div>
-          <div class="stat-card"><div class="label">用户</div><div class="value" data-count-up="${s.user_count ?? 0}">0</div></div>
-          <div class="stat-card"><div class="label">活跃会话</div><div class="value" data-count-up="${s.active_sessions ?? 0}">0</div></div>
-        </div>
-      </section>
       <section class="dash-section">
         <div class="dash-section-head">
-          <h2>问答反馈</h2>
-          <span class="text-muted">近 ${fbDays} 日点赞 / 点踩 · <a href="#/admin/qa-analytics" data-go="/admin/qa-analytics">查看详情</a></span>
+          <h2>核心指标</h2>
         </div>
-        ${feedbackKpiHtml}
+        <div class="stat-grid dash-stat-grid dash-stat-grid-8">
+          <div class="stat-card"><div class="label">知识库数</div><div class="value" data-count-up="${s.kb_count ?? 0}">0</div></div>
+          <div class="stat-card"><div class="label">文档数</div><div class="value" data-count-up="${s.doc_count ?? 0}">0</div></div>
+          <div class="stat-card"><div class="label">用户数</div><div class="value" data-count-up="${s.user_count ?? 0}">0</div></div>
+          <div class="stat-card"><div class="label">活跃会话</div><div class="value" data-count-up="${s.active_sessions ?? 0}">0</div></div>
+          <div class="stat-card"><div class="label">近${fbDays}日点赞</div><div class="value" data-count-up="${useful}">0</div></div>
+          <div class="stat-card"><div class="label">近${fbDays}日点踩</div><div class="value" data-count-up="${useless}">0</div></div>
+          <div class="stat-card" title="近 ${fbDays} 日问答中已收到反馈的占比（按消息对齐，不超过 100%）"><div class="label">反馈覆盖率</div><div class="value">${escapeHtml(feedbackRateDisplay)}</div></div>
+          <div class="stat-card"><div class="label">反馈总数</div><div class="value" data-count-up="${fbTotal}">0</div></div>
+        </div>
       </section>
       <section class="dash-section page-grid dash-bento">
         <div class="card dash-chart-card span-8">
@@ -1308,7 +1284,7 @@ async function pageUsers() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">用户列表</h3>
-            <p class="card-sub">共 ${escapeHtml(total)} 人${escapeHtml(filterHint)} · 第 ${listPage}/${totalPages} 页 · 超管/管理员置顶${allUsers.length >= 5000 ? " · 已加载达上限" : ""}</p>
+            <p class="card-sub">共 ${escapeHtml(fmtCount(total))} 人${escapeHtml(filterHint)} · 第 ${listPage}/${totalPages} 页 · 超管/管理员置顶${allUsers.length >= 5000 ? " · 已加载达上限" : ""}</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-users">
@@ -1639,7 +1615,7 @@ async function pageRoles() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">角色列表</h3>
-            <p class="card-sub">共 ${escapeHtml(total)} 个角色 · 第 ${listPage}/${totalPages} 页</p>
+            <p class="card-sub">共 ${escapeHtml(fmtCount(total))} 个角色 · 第 ${listPage}/${totalPages} 页</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-roles">
@@ -1925,7 +1901,7 @@ async function pageDepartments() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">部门列表</h3>
-            <p class="card-sub">共 ${escapeHtml(total)} 个部门 · 第 ${listPage}/${totalPages} 页</p>
+            <p class="card-sub">共 ${escapeHtml(fmtCount(total))} 个部门 · 第 ${listPage}/${totalPages} 页</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-depts">
@@ -1956,8 +1932,8 @@ async function pageDepartments() {
                         <td class="col-name"><strong>${escapeHtml(departmentDisplayName(d))}</strong></td>
                         <td class="col-code"><code>${escapeHtml(d.code)}</code></td>
                         <td class="col-desc" title="${escapeHtml(d.description || "")}">${escapeHtml(d.description || "-")}</td>
-                        <td class="col-num">${escapeHtml(d.member_count ?? 0)}</td>
-                        <td class="col-num">${escapeHtml(d.kb_count ?? 0)}</td>
+                        <td class="col-num">${escapeHtml(fmtCount(d.member_count ?? 0))}</td>
+                        <td class="col-num">${escapeHtml(fmtCount(d.kb_count ?? 0))}</td>
                         <td class="col-status">${d.is_enabled ? `<span class="badge badge-success">启用</span>` : `<span class="badge badge-danger">停用</span>`}</td>
                         <td class="col-actions">
                           <div class="table-actions table-actions-stack">
@@ -2839,8 +2815,7 @@ async function openModelVersionsModal(model) {
 }
 
 function fmtNum(n) {
-  const v = Number(n || 0);
-  return v.toLocaleString("zh-CN");
+  return fmtCount(n);
 }
 
 async function renderModelUsage(model, days) {
@@ -2929,7 +2904,7 @@ async function renderModelUsage(model, days) {
 
 /* ========== 知识库工作区（同页 Tab + ?tab=） ========== */
 const KB_WS_TABS = ["overview", "docs", "snaps"];
-const KB_WS_TAB_LABELS = { overview: "知识库详情", docs: "文档上传", snaps: "历史快照" };
+const KB_WS_TAB_LABELS = { overview: "知识库详情", docs: "文档管理", snaps: "历史快照" };
 
 function normalizeKbTab(tab) {
   const t = String(tab || "overview").toLowerCase();
@@ -3079,7 +3054,7 @@ async function pageKbList() {
           <div class="kb-card-body">
             <div class="kb-card-heading"><h3>${escapeHtml(k.name)}</h3><span class="status-dot ${st === "processing" || st === "vectorizing" ? "is-processing" : ""}">${escapeHtml(statusLabel(k.status))}</span></div>
             <p>${escapeHtml(k.description || "暂未填写知识库简介，可进入详情页补充说明。")}</p>
-            <div class="kb-card-meta"><span>${escapeHtml(k.document_count ?? k.doc_count ?? 0)} 份文档</span><span>${formatDateTime(k.updated_at)}</span></div>
+            <div class="kb-card-meta"><span>${escapeHtml(fmtCount(k.document_count ?? k.doc_count ?? 0))} 份文档</span><span>${formatDateTime(k.updated_at)}</span></div>
             <div class="kb-card-access kb-card-tags">${accessScopeBadge(k)}</div>
             <div class="kb-card-actions">
               <button type="button" class="btn btn-sm kb-card-btn kb-card-btn-detail" data-kb-detail="${escapeHtml(k.id)}">知识库详情</button>
@@ -3371,8 +3346,8 @@ async function pageKbDetail(id, opts = {}) {
             <div class="card-header"><div class="card-header-text"><h3 class="card-title">概览</h3></div></div>
             <div class="kb-detail-overview-body">
               <div class="stat-grid" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
-                <div class="stat-card"><div class="label">文档数</div><div class="value">${escapeHtml(k.document_count ?? k.doc_count ?? 0)}</div></div>
-                <div class="stat-card"><div class="label">分段数</div><div class="value">${escapeHtml(k.chunk_count ?? 0)}</div></div>
+                <div class="stat-card"><div class="label">文档数</div><div class="value">${escapeHtml(fmtCount(k.document_count ?? k.doc_count ?? 0))}</div></div>
+                <div class="stat-card"><div class="label">分段数</div><div class="value">${escapeHtml(fmtCount(k.chunk_count ?? 0))}</div></div>
               </div>
               <div class="meta-list">
                 <div class="meta-row"><span class="meta-label">创建</span><span class="meta-value">${formatDateTime(k.created_at)}</span></div>
@@ -4172,8 +4147,8 @@ async function pageDocuments(kbId, opts = {}) {
             <p class="text-muted doc-wb-meta">
               状态 <span class="badge">${escapeHtml(status)}</span>
               · 分段 <span id="docWbChunkCount">${escapeHtml(reportedChunks)}</span>（已加载 ${escapeHtml(chunks.length)}）
-              · 清洗 ${escapeHtml(content.normalized_char_count ?? 0)} 字
-              · 原文 ${escapeHtml(content.raw_char_count ?? 0)} 字
+              · 清洗 ${escapeHtml(fmtCount(content.normalized_char_count ?? 0))} 字
+              · 原文 ${escapeHtml(fmtCount(content.raw_char_count ?? 0))} 字
               ${chunkCapHint}
               ${content.error_message || detail?.error_message ? ` · <span class="text-danger">${escapeHtml(content.error_message || detail.error_message)}</span>` : ""}
             </p>
@@ -4249,7 +4224,7 @@ async function pageDocuments(kbId, opts = {}) {
                 const disabled = c.is_enabled === false;
                 return `<div data-chunk-id="${escapeHtml(c.id)}" style="border:1px solid var(--color-border,#e0e0e0);border-radius:8px;padding:10px;margin-bottom:8px;opacity:${disabled ? "0.65" : "1"}">
                   <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px">
-                    <div class="text-muted" style="font-size:12px">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字${disabled ? " · <span class='badge badge-warning'>不参与检索</span>" : ""}</div>
+                    <div class="text-muted" style="font-size:12px">#${escapeHtml(c.chunk_index)} · ${escapeHtml(fmtCount(c.char_count))} 字${disabled ? " · <span class='badge badge-warning'>不参与检索</span>" : ""}</div>
                     ${canSegment ? `<label style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" data-enable-chunk ${c.is_enabled !== false ? "checked" : ""} /> 启用</label>` : ""}
                   </div>
                   ${
@@ -4304,10 +4279,10 @@ async function pageDocuments(kbId, opts = {}) {
         try {
           const body = readRulesForm();
           const preview = await api.post(`/knowledge-bases/${kbId}/documents/${docId}/segment-preview`, body);
-          effectListEl.innerHTML = `<p class="text-muted">共 ${escapeHtml(preview.total_chunks ?? 0)} 段（未写库）</p>${(preview.chunks || [])
+          effectListEl.innerHTML = `<p class="text-muted">共 ${escapeHtml(fmtCount(preview.total_chunks ?? 0))} 段（未写库）</p>${(preview.chunks || [])
             .map(
               (c) => `<div style="border:1px solid var(--color-border);border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px">
-                <div class="text-muted">#${escapeHtml(c.chunk_index)} · ${escapeHtml(c.char_count)} 字</div>
+                <div class="text-muted">#${escapeHtml(c.chunk_index)} · ${escapeHtml(fmtCount(c.char_count))} 字</div>
                 <div style="white-space:pre-wrap">${escapeHtml(c.content || "")}</div>
               </div>`
             )
@@ -4566,7 +4541,7 @@ async function pageDocuments(kbId, opts = {}) {
                   <td class="col-time">${formatDateTimeHtml(d.created_at)}</td>
                   <td class="col-name"><span class="cell-primary">${escapeHtml(d.filename || d.name)}</span></td>
                   <td class="col-size">${escapeHtml(formatSize(d.file_size ?? d.size))}</td>
-                  <td class="col-num">${escapeHtml(d.chunk_count ?? 0)}</td>
+                  <td class="col-num">${escapeHtml(fmtCount(d.chunk_count ?? 0))}</td>
                   <td class="col-status">${docStatusBadge(st)}${
                     isError && d.error_message
                       ? `<div class="text-danger" style="font-size:12px;margin-top:4px;line-height:1.35;max-width:9.5rem;margin-inline:auto;word-break:break-word">${escapeHtml(String(d.error_message).slice(0, 100))}</div>`
@@ -4868,7 +4843,7 @@ async function pageSnapshots(kbId, opts = {}) {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">历史快照与回退</h3>
-            <p class="card-sub">共 ${escapeHtml(total)} 份（上限 50）· 第 ${snapListPage}/${totalPages} 页</p>
+            <p class="card-sub">共 ${escapeHtml(fmtCount(total))} 份（上限 50）· 第 ${snapListPage}/${totalPages} 页</p>
           </div>
         </div>
         ${
@@ -4911,8 +4886,8 @@ async function pageSnapshots(kbId, opts = {}) {
                   <td class="col-time">${formatDateTimeHtml(s.created_at)}</td>
                   <td class="col-name">${formatSnapNameHtml(s.name)}</td>
                   <td class="col-trigger">${triggerBadge(s.trigger)}</td>
-                  <td class="col-num">${escapeHtml(s.document_count ?? 0)}</td>
-                  <td class="col-num">${escapeHtml(s.total_chunks ?? 0)}</td>
+                  <td class="col-num">${escapeHtml(fmtCount(s.document_count ?? 0))}</td>
+                  <td class="col-num">${escapeHtml(fmtCount(s.total_chunks ?? 0))}</td>
                   <td class="col-desc">${escapeHtml(s.description || "—")}</td>
                   <td class="col-actions"><div class="table-actions">${ops.join("")}</div></td>
                 </tr>`;
@@ -5035,7 +5010,7 @@ async function pageSnapshots(kbId, opts = {}) {
                           .slice(0, 50)
                           .map(
                             (doc) =>
-                              `<tr><td>${escapeHtml(doc.filename || "-")}</td><td>${escapeHtml(doc.status || "-")}</td><td>${escapeHtml(doc.chunk_count ?? 0)}</td></tr>`
+                              `<tr><td>${escapeHtml(doc.filename || "-")}</td><td>${escapeHtml(doc.status || "-")}</td><td>${escapeHtml(fmtCount(doc.chunk_count ?? 0))}</td></tr>`
                           )
                           .join("")
                       : `<tr><td colspan="3" class="text-muted">无文档</td></tr>`
@@ -5061,7 +5036,7 @@ async function pageSnapshots(kbId, opts = {}) {
             title: `回退差异预览 · ${preview.snapshot_name || ""}`,
             width: "min(900px,calc(100vw - 24px))",
             bodyHtml: `
-              <p class="text-muted">将影响 <strong>${escapeHtml(preview.total_changes ?? affected.length)}</strong> 份文档；
+              <p class="text-muted">将影响 <strong>${escapeHtml(fmtCount(preview.total_changes ?? affected.length))}</strong> 份文档；
                 回退前会自动创建保护快照；确认后仅恢复元数据并生成 <code>building</code> 索引，向量重建完成后才会原子切换。</p>
               ${
                 configChanges.length
@@ -5111,8 +5086,8 @@ async function pageSnapshots(kbId, opts = {}) {
                                     : ""
                             }">${escapeHtml(SNAPSHOT_CHANGE_LABELS[a.change_type] || a.change_type)}</span></td>
                             <td class="col-name">${escapeHtml(a.filename)}</td>
-                            <td>${escapeHtml(a.current_chunk_count ?? "—")}</td>
-                            <td>${escapeHtml(a.snapshot_chunk_count ?? "—")}</td>
+                            <td>${escapeHtml(a.current_chunk_count == null || a.current_chunk_count === "" ? "—" : fmtCount(a.current_chunk_count))}</td>
+                            <td>${escapeHtml(a.snapshot_chunk_count == null || a.snapshot_chunk_count === "" ? "—" : fmtCount(a.snapshot_chunk_count))}</td>
                             <td class="col-desc text-muted">${escapeHtml(a.detail || "")}</td>
                           </tr>`;
                         })
@@ -5230,7 +5205,7 @@ async function pageHitTest() {
   };
 
   const formatRunSummaryLine = (summary) =>
-    `策略 ${escapeHtml(strategyLabel(summary.strategy))} · TopK ${escapeHtml(summary.top_k)} · 命中 ${escapeHtml(summary.hit_count)}/${escapeHtml(summary.total_questions)} · 命中率 ${pct(summary.hit_rate ?? summary.recall_at_k)} · 得分（相关度）${pct(summary.score)} · MRR ${summary.mrr != null ? Number(summary.mrr).toFixed(3) : "-"} · 均耗时 ${summary.avg_elapsed_ms != null ? Math.round(summary.avg_elapsed_ms) + "ms" : "-"}`;
+    `策略 ${escapeHtml(strategyLabel(summary.strategy))} · TopK ${escapeHtml(summary.top_k)} · 命中 ${escapeHtml(fmtCount(summary.hit_count))}/${escapeHtml(fmtCount(summary.total_questions))} · 命中率 ${pct(summary.hit_rate ?? summary.recall_at_k)} · 得分（相关度）${pct(summary.score)} · MRR ${summary.mrr != null ? Number(summary.mrr).toFixed(3) : "-"} · 均耗时 ${summary.avg_elapsed_ms != null ? Math.round(summary.avg_elapsed_ms) + "ms" : "-"}`;
 
   const recallTipOf = (chunks) =>
     (chunks || [])
@@ -5546,7 +5521,7 @@ async function pageHitTest() {
                             <input type="checkbox" value="${escapeHtml(cid)}" data-pick-case="${escapeHtml(cid)}" aria-label="选用用例" />
                           </td>
                           <td class="col-name">${escapeHtml(c.name)}</td>
-                          <td class="col-num">${escapeHtml(c.question_count)}</td>
+                          <td class="col-num">${escapeHtml(fmtCount(c.question_count))}</td>
                           <td class="col-desc">${escapeHtml(c.description || "-")}</td>
                           <td class="col-actions">
                             ${
@@ -5772,7 +5747,7 @@ async function pageHitTest() {
             <td class="col-score"><strong>${pct(r.score)}</strong></td>
             <td class="col-hit">
               <div class="ht-run-hit-stack">
-                <span class="ht-run-hit-ratio">${escapeHtml(r.hit_count)}/${escapeHtml(r.total_questions)}</span>
+                <span class="ht-run-hit-ratio">${escapeHtml(fmtCount(r.hit_count))}/${escapeHtml(fmtCount(r.total_questions))}</span>
                 <span class="ht-run-hit-pct">${r.hit_rate != null ? escapeHtml(pct(r.hit_rate)) : "—"}</span>
               </div>
             </td>
@@ -5890,7 +5865,7 @@ async function pageHitTest() {
               const run = await api.post("/hit-tests/runs", { ...base, case_id: caseId });
               lastRunId = run?.id || lastRunId;
               summaries.push(
-                `${caseNameOf(caseId)} ${run.hit_count}/${run.total_questions}（相关度 ${pct(run.score)}）`
+                `${caseNameOf(caseId)} ${fmtCount(run.hit_count)}/${fmtCount(run.total_questions)}（相关度 ${pct(run.score)}）`
               );
             }
             toast(`已完成 ${summaries.length} 个用例：${summaries.join("；")}`, "success");
@@ -5906,7 +5881,7 @@ async function pageHitTest() {
             const run = await api.post("/hit-tests/runs", { ...base, questions });
             lastRunId = run?.id || null;
             toast(
-              `临时问题完成：命中 ${run.hit_count}/${run.total_questions}（相关度 ${pct(run.score)}）`,
+              `临时问题完成：命中 ${fmtCount(run.hit_count)}/${fmtCount(run.total_questions)}（相关度 ${pct(run.score)}）`,
               "success"
             );
           }
@@ -6121,7 +6096,7 @@ async function pageRagas() {
       if (ragasListPage > totalPages) ragasListPage = totalPages;
       const start = (ragasListPage - 1) * RAGAS_PAGE_SIZE;
       const pageItems = runs.slice(start, start + RAGAS_PAGE_SIZE);
-      if (sub) sub.textContent = `共 ${total} 次 · 第 ${ragasListPage}/${totalPages} 页`;
+      if (sub) sub.textContent = `共 ${fmtCount(total)} 次 · 第 ${ragasListPage}/${totalPages} 页`;
       tbody.innerHTML = pageItems.length
         ? pageItems
             .map(
@@ -6134,7 +6109,7 @@ async function pageRagas() {
                               ? "badge-danger"
                               : "badge-info"
                         }">${run.status === "completed" ? "已完成" : run.status === "failed" ? "失败" : "运行中"}</span>${run.error_message ? `<div class="text-danger" style="max-width:220px">${escapeHtml(run.error_message)}</div>` : ""}</td>
-                        <td>${escapeHtml(run.sample_count ?? 0)}</td>
+                        <td>${escapeHtml(fmtCount(run.sample_count ?? 0))}</td>
                         <td>${ragasScore(run.metric_scores?.faithfulness)}</td>
                         <td>${ragasScore(run.metric_scores?.answer_relevancy)}</td>
                         <td>${ragasScore(run.metric_scores?.context_precision)}</td>
@@ -6183,7 +6158,7 @@ async function pageRagas() {
             : "";
           const contextHint =
             draft.source === "history"
-              ? `<span class="badge">${escapeHtml(draft.context_count || 0)} 段引用</span>`
+              ? `<span class="badge">${escapeHtml(fmtCount(draft.context_count || 0))} 段引用</span>`
               : draft.source === "generated"
                 ? `<span class="badge">将现问现答后评分</span>`
                 : `<span class="badge">将检索并生成回答</span>`;
@@ -6277,7 +6252,7 @@ async function pageRagas() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">评估记录</h3>
-            <p class="card-sub" id="ragasRunsSub">共 ${escapeHtml(runs.length)} 次</p>
+            <p class="card-sub" id="ragasRunsSub">共 ${escapeHtml(fmtCount(runs.length))} 次</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table">
@@ -6428,7 +6403,7 @@ async function pageRagas() {
           sample_limit: samples.length,
           samples,
         });
-        toast(`RAGAS 评估完成，共处理 ${result.sample_count || 0} 个样本`);
+        toast(`RAGAS 评估完成，共处理 ${fmtCount(result.sample_count || 0)} 个样本`);
         await pageRagas();
       } catch (error) {
         toast(`RAGAS 评估失败：${error.message}`, "error");
@@ -6484,7 +6459,7 @@ async function openRagasRunDetail(runId) {
       <div class="modal" role="dialog" aria-modal="true" style="width:min(1050px,calc(100vw - 24px));max-height:92vh;overflow:auto">
         <div class="modal-header"><h3>RAGAS 详细结果 · ${escapeHtml(run.kb_name || "知识库")}</h3></div>
         <div class="modal-body">
-          <p class="text-muted" style="margin-top:0">状态：${escapeHtml(run.status)} · 样本 ${escapeHtml(run.sample_count ?? 0)} 个 · 完成时间 ${formatDateTime(run.completed_at)}</p>
+          <p class="text-muted" style="margin-top:0">状态：${escapeHtml(run.status)} · 样本 ${escapeHtml(fmtCount(run.sample_count ?? 0))} 个 · 完成时间 ${formatDateTime(run.completed_at)}</p>
           ${itemHtml}
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>关闭</button></div>
@@ -6570,7 +6545,7 @@ async function pageQaSessions() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">Query 预处理审计</h3>
-            <p class="card-sub">原始 Query、改写、扩展与 HyDE · 共 ${escapeHtml(total)} 个会话 · 第 ${listPage}/${totalPages} 页</p>
+            <p class="card-sub">原始 Query、改写、扩展与 HyDE · 共 ${escapeHtml(fmtCount(total))} 个会话 · 第 ${listPage}/${totalPages} 页</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table">
@@ -6584,7 +6559,7 @@ async function pageQaSessions() {
                         <td>${escapeHtml(session.title || "未命名会话")}</td>
                         <td>${escapeHtml(session.owner || "-")}</td>
                         <td>${session.owner_type === "guest" ? "访客" : "注册用户"}</td>
-                        <td>${escapeHtml(session.message_count ?? 0)}</td>
+                        <td>${escapeHtml(fmtCount(session.message_count ?? 0))}</td>
                         <td class="col-time">${formatDateTimeHtml(session.last_active_at)}</td>
                         <td><button type="button" class="btn btn-text btn-sm" data-session-detail="${escapeHtml(session.id)}">查看处理结果</button></td>
                       </tr>`
@@ -6708,7 +6683,7 @@ async function pageRoleCaches() {
                       (cache) => `<tr data-role-cache-row="${escapeHtml(cache.role_id)}">
                         <td class="col-name" title="${escapeHtml(cache.name)}"><strong class="cell-primary">${escapeHtml(cache.name)}</strong></td>
                         <td class="col-role" title="${escapeHtml(cache.role_description || cache.role_name || "")}">${escapeHtml(cache.role_description || cache.role_name)}</td>
-                        <td class="col-num">${escapeHtml(cache.question_count ?? 0)}</td>
+                        <td class="col-num">${escapeHtml(fmtCount(cache.question_count ?? 0))}</td>
                         <td class="col-cycle">
                           <label class="cell-inline-control">
                             <input class="form-control" style="width:64px" type="number" min="1" max="365" value="${escapeHtml(cache.interval_days)}" data-cache-interval ${canWrite ? "" : "disabled"} /> 天
@@ -6808,7 +6783,7 @@ async function openRoleCacheQuestions(roleId, cacheName, options = {}) {
           }
         </div>
         <div class="modal-body">
-          <p class="text-muted" style="margin-top:0">共 ${escapeHtml(data.total ?? items.length)} 个缓存问题。文档生成与历史高频问题都必须携带知识库来源范围才能被问答链路命中。</p>
+          <p class="text-muted" style="margin-top:0">共 ${escapeHtml(fmtCount(data.total ?? items.length))} 个缓存问题。文档生成与历史高频问题都必须携带知识库来源范围才能被问答链路命中。</p>
           <div class="table-wrap"><table class="table">
             <thead><tr><th>问题</th><th>答案摘要</th><th>来源</th><th>历史频次</th><th>缓存命中</th><th class="col-time">更新时间</th></tr></thead>
             <tbody>
@@ -6820,8 +6795,8 @@ async function openRoleCacheQuestions(roleId, cacheName, options = {}) {
                           <td>${escapeHtml(item.question)}</td>
                           <td style="max-width:320px">${escapeHtml((item.answer || "").slice(0, 160))}${(item.answer || "").length > 160 ? "…" : ""}</td>
                           <td>${item.source === "history_frequent" ? "历史高频" : "文档生成"}</td>
-                          <td>${escapeHtml(item.occurrence_count ?? 1)}</td>
-                          <td>${escapeHtml(item.hit_count ?? 0)}</td>
+                          <td>${escapeHtml(fmtCount(item.occurrence_count ?? 1))}</td>
+                          <td>${escapeHtml(fmtCount(item.hit_count ?? 0))}</td>
                           <td class="col-time">${formatDateTimeHtml(item.updated_at)}</td>
                         </tr>`
                       )
@@ -6901,7 +6876,7 @@ async function openQaSessionDetail(sessionId) {
                   <span class="text-muted">改写 Query</span><div>${escapeHtml(rewritten)}</div>
                   <span class="text-muted">扩展 Query</span><div>${expansions.length ? expansions.map((item) => `<code style="display:inline-block;margin:0 6px 6px 0">${escapeHtml(item)}</code>`).join("") : "-"}</div>
                   <span class="text-muted">HyDE 假设文档</span><div style="white-space:pre-wrap">${hyde ? escapeHtml(hyde) : "-"}</div>
-                  <span class="text-muted">检索结果</span><div>命中 ${escapeHtml(meta.hit_count ?? 0)} 段；扩展 Query ${escapeHtml(meta.expanded_query_count ?? expansions.length)} 条；HyDE ${meta.hyde_used ? "已参与向量检索" : "未参与"}</div>
+                  <span class="text-muted">检索结果</span><div>命中 ${escapeHtml(fmtCount(meta.hit_count ?? 0))} 段；扩展 Query ${escapeHtml(fmtCount(meta.expanded_query_count ?? expansions.length))} 条；HyDE ${meta.hyde_used ? "已参与向量检索" : "未参与"}</div>
                   <span class="text-muted">Rerank</span><div>${rerank.applied ? `${escapeHtml(rerank.provider || "-")} / ${escapeHtml(rerank.model || "-")}` : `未应用${rerank.error ? `（${escapeHtml(rerank.error)}）` : ""}`}</div>
                   <span class="text-muted">用户反馈</span><div>${escapeHtml(fbLabel)}${fbComment ? ` · ${escapeHtml(fbComment)}` : ""}</div>
                   <span class="text-muted">最终回答</span><div style="white-space:pre-wrap">${escapeHtml(turn.answer?.content || "-")}</div>
@@ -6917,7 +6892,7 @@ async function openQaSessionDetail(sessionId) {
       <div class="modal" role="dialog" aria-modal="true" style="width:min(960px,calc(100vw - 24px));max-height:90vh;overflow:auto">
         <div class="modal-header"><h3>${escapeHtml(session.title || "会话详情")}</h3></div>
         <div class="modal-body">
-          <p class="text-muted" style="margin-top:0">用户：${escapeHtml(session.owner || "-")} · 消息 ${escapeHtml(session.message_count ?? messages.length)} 条 · 最后活跃 ${formatDateTime(session.last_active_at)}</p>
+          <p class="text-muted" style="margin-top:0">用户：${escapeHtml(session.owner || "-")} · 消息 ${escapeHtml(fmtCount(session.message_count ?? messages.length))} 条 · 最后活跃 ${formatDateTime(session.last_active_at)}</p>
           ${turnHtml}
         </div>
         <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>关闭</button></div>
@@ -7084,14 +7059,14 @@ async function pageAudit() {
         const rows = await fetchAuditPages(pages);
         if (!rows.length) return toast("指定页没有可导出的记录", "error");
         downloadCsv(`audit-pages-${stamp}.csv`, CSV_HEADER, rows.map(auditToCsvRow));
-        toast(`已导出 ${pages.length} 页共 ${rows.length} 条`, "success");
+        toast(`已导出 ${fmtCount(pages.length)} 页共 ${fmtCount(rows.length)} 条`, "success");
         return;
       }
       if (mode === "all") {
         toast("正在全库导出，请稍候…");
         const rows = await fetchAuditAll({ action: "", resource_type: "", result: "" });
         downloadCsv(`audit-all-${stamp}.csv`, CSV_HEADER, rows.map(auditToCsvRow));
-        toast(`已全库导出 ${rows.length} 条`, "success");
+        toast(`已全库导出 ${fmtCount(rows.length)} 条`, "success");
         return;
       }
       toast("未知导出方式", "error");
@@ -7220,7 +7195,7 @@ async function pageAudit() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">操作审计</h3>
-            <p class="card-sub" id="auditListSub">共 ${escapeHtml(total)} 条 · 第 ${listPage}/${totalPages} 页 · 每页 ${AUDIT_PAGE_SIZE} 条 · 已选 0 条</p>
+            <p class="card-sub" id="auditListSub">共 ${escapeHtml(fmtCount(total))} 条 · 第 ${listPage}/${totalPages} 页 · 每页 ${AUDIT_PAGE_SIZE} 条 · 已选 0 条</p>
           </div>
           <div class="card-header-actions">
             <select class="form-control" id="auditAction" style="width:160px;height:32px">
@@ -7358,7 +7333,7 @@ async function pageAudit() {
       }
       if (btnDel) btnDel.disabled = selected.length === 0;
       if (sub) {
-        sub.textContent = `共 ${total} 条 · 第 ${listPage}/${totalPages} 页 · 每页 ${AUDIT_PAGE_SIZE} 条 · 已选 ${selected.length} 条`;
+        sub.textContent = `共 ${fmtCount(total)} 条 · 第 ${listPage}/${totalPages} 页 · 每页 ${AUDIT_PAGE_SIZE} 条 · 已选 ${fmtCount(selected.length)} 条`;
       }
     };
 
@@ -7456,16 +7431,16 @@ async function pageQaAnalytics() {
     answerableEvents > 0 ? `${(boundedRate * 100).toFixed(2)}%` : "—";
   const feedbackPieHtml = feedback
     ? `<div class="monitor-feedback-chart">
-        <div class="monitor-pie" style="--useful:${usefulPct}" title="有用 ${useful} / 无用 ${useless}" aria-label="反馈占比"></div>
+        <div class="monitor-pie" style="--useful:${usefulPct}" title="有用 ${fmtCount(useful)} / 无用 ${fmtCount(useless)}" aria-label="反馈占比"></div>
         <ul class="list-plain monitor-stats-list">
-          <li><span class="monitor-stat-label">问答事件</span><span class="monitor-stat-value">${requestEvents}</span></li>
-          <li><span class="monitor-stat-label">独立会话</span><span class="monitor-stat-value">${feedback.unique_conversations ?? 0}</span></li>
+          <li><span class="monitor-stat-label">问答事件</span><span class="monitor-stat-value">${escapeHtml(fmtCount(requestEvents))}</span></li>
+          <li><span class="monitor-stat-label">独立会话</span><span class="monitor-stat-value">${escapeHtml(fmtCount(feedback.unique_conversations ?? 0))}</span></li>
           <li title="近 ${days} 日问答中已收到反馈的占比（按消息对齐，不超过 100%）"><span class="monitor-stat-label">反馈率</span><span class="monitor-stat-value">${escapeHtml(feedbackRateDisplay)}</span></li>
-          <li><span class="monitor-stat-label"><span class="legend-dot legend-useful"></span>有用（累计）</span><span class="monitor-stat-value">${useful}</span></li>
-          <li><span class="monitor-stat-label"><span class="legend-dot legend-useless"></span>无用（累计）</span><span class="monitor-stat-value">${useless}</span></li>
+          <li><span class="monitor-stat-label"><span class="legend-dot legend-useful"></span>有用（累计）</span><span class="monitor-stat-value">${escapeHtml(fmtCount(useful))}</span></li>
+          <li><span class="monitor-stat-label"><span class="legend-dot legend-useless"></span>无用（累计）</span><span class="monitor-stat-value">${escapeHtml(fmtCount(useless))}</span></li>
           ${
             feedback.avg_latency_ms != null
-              ? `<li><span class="monitor-stat-label">平均耗时</span><span class="monitor-stat-value">${feedback.avg_latency_ms} ms</span></li>`
+              ? `<li><span class="monitor-stat-label">平均耗时</span><span class="monitor-stat-value">${escapeHtml(fmtCount(Number(feedback.avg_latency_ms)))} ms</span></li>`
               : ""
           }
         </ul>
@@ -7533,7 +7508,7 @@ async function pageQaAnalytics() {
         (x) =>
           `<li><span class="monitor-stat-label" title="${escapeHtml(x.label || "")}">${escapeHtml(
             labelFn(x.label)
-          )}</span><span class="monitor-stat-value">${escapeHtml(x.count ?? 0)}</span></li>`
+          )}</span><span class="monitor-stat-value">${escapeHtml(fmtCount(x.count ?? 0))}</span></li>`
       )
       .join("")}</ul>`;
   };
@@ -7560,7 +7535,7 @@ async function pageQaAnalytics() {
             return `<tr>
               <td>${escapeHtml(t.name || "—")}</td>
               <td class="text-muted">${escapeHtml(kws || "—")}</td>
-              <td>${Number(t.sample_count || 0)}</td>
+              <td>${escapeHtml(fmtCount(t.sample_count || 0))}</td>
               <td class="text-muted" title="${escapeHtml(t.representative_question || "")}">${escapeHtml(
                 (t.representative_question || "—").slice(0, 80)
               )}</td>
@@ -7744,13 +7719,13 @@ async function pageMonitor() {
   const statsHtml =
     stats && !stats.error
       ? `<ul class="list-plain monitor-stats-list">
-        <li><span class="monitor-stat-label">用户数</span><span class="monitor-stat-value">${stats.user_count ?? 0}</span></li>
-        <li><span class="monitor-stat-label">知识库</span><span class="monitor-stat-value">${stats.kb_count ?? 0}</span></li>
-        <li><span class="monitor-stat-label">文档数</span><span class="monitor-stat-value">${stats.doc_count ?? 0}</span></li>
-        <li><span class="monitor-stat-label">活跃会话</span><span class="monitor-stat-value">${stats.active_sessions ?? 0}</span></li>
-        <li><span class="monitor-stat-label">任务队列</span><span class="monitor-stat-value">${stats.task_queue_size ?? 0}</span></li>
-        <li><span class="monitor-stat-label">LLM Guard 近 24 小时阻拦</span><span class="monitor-stat-value">${stats.guard_blocked_24h ?? 0}</span></li>
-        <li><span class="monitor-stat-label">LLM Guard 近 7 天阻拦</span><span class="monitor-stat-value">${stats.guard_blocked_7d ?? 0}</span></li>
+        <li><span class="monitor-stat-label">用户数</span><span class="monitor-stat-value">${escapeHtml(fmtCount(stats.user_count ?? 0))}</span></li>
+        <li><span class="monitor-stat-label">知识库</span><span class="monitor-stat-value">${escapeHtml(fmtCount(stats.kb_count ?? 0))}</span></li>
+        <li><span class="monitor-stat-label">文档数</span><span class="monitor-stat-value">${escapeHtml(fmtCount(stats.doc_count ?? 0))}</span></li>
+        <li><span class="monitor-stat-label">活跃会话</span><span class="monitor-stat-value">${escapeHtml(fmtCount(stats.active_sessions ?? 0))}</span></li>
+        <li><span class="monitor-stat-label">任务队列</span><span class="monitor-stat-value">${escapeHtml(fmtCount(stats.task_queue_size ?? 0))}</span></li>
+        <li><span class="monitor-stat-label">LLM Guard 近 24 小时阻拦</span><span class="monitor-stat-value">${escapeHtml(fmtCount(stats.guard_blocked_24h ?? 0))}</span></li>
+        <li><span class="monitor-stat-label">LLM Guard 近 7 天阻拦</span><span class="monitor-stat-value">${escapeHtml(fmtCount(stats.guard_blocked_7d ?? 0))}</span></li>
       </ul>`
       : `<p class="text-muted">${escapeHtml(stats?.error || "暂无统计")}</p>`;
   document.getElementById("pageRoot").innerHTML = `
@@ -7874,7 +7849,7 @@ async function pageGuardEvents() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">阻拦记录</h3>
-            <p class="card-sub">接口共 ${escapeHtml(meta.total ?? total)} 条 · 本页加载 ${escapeHtml(total)} 条（最多 ${GUARD_MAX}）· 第 ${listPage}/${totalPages} 页</p>
+            <p class="card-sub">接口共 ${escapeHtml(fmtCount(meta.total ?? total))} 条 · 本页加载 ${escapeHtml(fmtCount(total))} 条（最多 ${GUARD_MAX}）· 第 ${listPage}/${totalPages} 页</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table">

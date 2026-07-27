@@ -503,19 +503,19 @@ html[data-theme="light"] .landing-modal {
   max-width: none;
 }
 
-/* 弹层日间：更浅更干净的白/淡蓝玻璃，减轻右下发暗 */
+/* 弹层日间：保留淡蓝渐变，末端用更亮冷蓝替代发灰暖色 */
 html[data-theme="light"] .landing-modal .auth-materio-card {
   background: linear-gradient(
-    145deg,
-    rgba(255, 255, 255, 0.9) 0%,
-    rgba(236, 244, 252, 0.86) 42%,
-    rgba(250, 246, 236, 0.28) 100%
+    135deg,
+    rgba(224, 238, 250, 0.88) 0%,
+    rgba(216, 230, 248, 0.76) 46%,
+    rgba(198, 228, 255, 0.68) 100%
   );
-  border: 1px solid rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.7);
   box-shadow:
     0 24px 52px rgba(80, 110, 150, 0.12),
     0 8px 20px rgba(80, 110, 150, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 html[data-theme="dark"] .landing-modal .auth-materio-card {
@@ -1158,7 +1158,7 @@ html[data-theme="light"] .auth-materio-card {
     135deg,
     rgba(224, 238, 250, 0.78) 0%,
     rgba(216, 230, 248, 0.58) 48%,
-    rgba(240, 228, 198, 0.22) 100%
+    rgba(198, 228, 255, 0.55) 100%
   );
   backdrop-filter: blur(28px) saturate(1.08);
   -webkit-backdrop-filter: blur(28px) saturate(1.08);

@@ -29,13 +29,23 @@ import {
   isSuperAdmin,
 } from "/assets/js/auth.js?v=gap-opt-0721i";
 import { escapeHtml, formatDateTime, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=gap-opt-0721i";
-import { initMotion } from "/assets/js/motion.js?v=bug-ui-palette-0721bs";
+import { initMotion, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721i";
 import { mountEnvParticleField } from "/assets/js/env-particle-field.js?v=landing-particle-0727f";
+import { getBrandMarkSvg, resolveBrandMarkSvg } from "/assets/js/brand-mark.js?v=brand-mark-0727a";
 
 clearDemoFlags();
 initTheme();
 initMotion();
+
+/** 统计类 count：千分位；≥1 万用「x.xx万」；小数保留 2 位 */
+function fmtCount(n) {
+  if (n === "—" || n === "-" || n === "–") return String(n);
+  if (n == null || n === "") return "0";
+  const v = Number(n);
+  if (!Number.isFinite(v)) return String(n);
+  return formatStatNumber(v);
+}
 
 /** 当前问答会话 ID（多轮上下文） */
 let currentSessionId = null;
@@ -53,37 +63,8 @@ const LANDING_COPY = {
   statusLabel: "知识即服务",
   brandName: "RAG 智能知识平台",
   heroTagline: "让企业知识即问即答",
-  footer: "powered by RAG · JZ",
+  footer: "Powered by 9Z · RAG",
 };
-
-/** 落地页公司矢量标：每次进入随机一种几何构图 */
-function landingBrandMarkSvg() {
-  const variants = [
-    `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <rect x="6" y="6" width="16" height="16" rx="3" fill="currentColor" opacity="0.92"/>
-      <rect x="26" y="6" width="16" height="16" rx="3" fill="currentColor" opacity="0.55"/>
-      <rect x="6" y="26" width="16" height="16" rx="3" fill="currentColor" opacity="0.55"/>
-      <circle cx="34" cy="34" r="8" fill="currentColor" opacity="0.85"/>
-    </svg>`,
-    `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <path d="M24 5L42 15.5V32.5L24 43L6 32.5V15.5L24 5Z" stroke="currentColor" stroke-width="2.4" opacity="0.9"/>
-      <circle cx="24" cy="24" r="7" fill="currentColor"/>
-      <path d="M24 5V17M42 15.5L31 21M42 32.5L31 27M24 43V31M6 32.5L15 27M6 15.5L15 21" stroke="currentColor" stroke-width="1.6" opacity="0.45"/>
-    </svg>`,
-    `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <path d="M8 34L24 8L40 34H8Z" fill="currentColor" opacity="0.88"/>
-      <rect x="18" y="28" width="12" height="12" rx="2.5" fill="currentColor" opacity="0.45"/>
-      <circle cx="24" cy="22" r="4" fill="var(--landing-mark-bg, #0b1220)"/>
-    </svg>`,
-    `<svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <rect x="8" y="10" width="32" height="28" rx="6" stroke="currentColor" stroke-width="2.4" opacity="0.9"/>
-      <path d="M14 28C17 22 21 19 24 19C27 19 31 22 34 28" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-      <circle cx="18.5" cy="20" r="2.2" fill="currentColor"/>
-      <circle cx="29.5" cy="20" r="2.2" fill="currentColor"/>
-    </svg>`,
-  ];
-  return variants[Math.floor(Math.random() * variants.length)];
-}
 /** 会话消息分页（上拉加载更早历史） */
 const sessionHistory = {
   sessionId: null,
@@ -268,7 +249,7 @@ function renderShell(activeTitle, { wide = false } = {}) {
     <div class="app-shell">
       <header class="topnav">
         <div class="topnav-brand" data-go="/chat" title="回到问答">
-          <i class="logo-dot"></i>
+          <span class="brand-mark logo-dot" aria-hidden="true">${getBrandMarkSvg()}</span>
           <span>AI 知识库</span>
         </div>
         <nav class="topnav-links" aria-label="主导航">${buildNavItems(path, role)}</nav>
@@ -378,7 +359,7 @@ function pageLanding({ openAuth = false, mode = "login" } = {}) {
         <button type="button" class="landing-signin" id="btnLandingSignIn">SIGN IN</button>
       </header>
       <main class="landing-hero">
-        <div class="landing-brand-mark" aria-hidden="true">${landingBrandMarkSvg()}</div>
+        <div class="landing-brand-mark" aria-hidden="true">${resolveBrandMarkSvg({ reshuffle: true })}</div>
         <div class="landing-badge"><i></i><span>${escapeHtml(LANDING_COPY.statusLabel)}</span></div>
         <h1>
           <span class="landing-brand-title">${escapeHtml(LANDING_COPY.brandName)}</span>
@@ -1149,7 +1130,7 @@ function renderChatSidebarItems(items) {
       const id = escapeHtml(s.id);
       const rawTitle = s.title || "未命名会话";
       const title = escapeHtml(rawTitle);
-      const meta = `${formatSidebarDate(s.updated_at || s.last_active_at)} · ${escapeHtml(s.message_count || 0)} 条`;
+      const meta = `${formatSidebarDate(s.updated_at || s.last_active_at)} · ${escapeHtml(fmtCount(s.message_count || 0))} 条`;
       const active = currentSessionId && String(currentSessionId) === String(s.id) ? " is-active" : "";
       const isPinned = pinned.has(String(s.id));
       const pinClass = isPinned ? " is-pinned" : "";
@@ -2030,7 +2011,7 @@ async function pageFavorites() {
               (s) => `<div class="history-item" data-id="${escapeHtml(s.id)}">
                 <div class="history-item-main">
                   <strong>${escapeHtml(s.title || "未命名会话")}</strong>
-                  <div class="text-muted">${formatDateTime(s.updated_at)} · ${escapeHtml(s.message_count || 0)} 条消息</div>
+                  <div class="text-muted">${formatDateTime(s.updated_at)} · ${escapeHtml(fmtCount(s.message_count || 0))} 条消息</div>
                 </div>
                 <div class="history-item-actions" style="display:flex;gap:6px;flex-wrap:wrap">
                   <button class="btn btn-secondary btn-sm" data-open-fav="${escapeHtml(s.id)}">打开</button>
@@ -2093,7 +2074,7 @@ async function pageHistory() {
               (s) => `<div class="history-item" data-id="${escapeHtml(s.id)}">
                 <div class="history-item-main">
                   <strong class="history-title" data-title-for="${escapeHtml(s.id)}">${escapeHtml(s.title || "未命名会话")}</strong>
-                  <div class="text-muted">${formatDateTime(s.updated_at)} · ${escapeHtml(s.message_count || 0)} 条消息</div>
+                  <div class="text-muted">${formatDateTime(s.updated_at)} · ${escapeHtml(fmtCount(s.message_count || 0))} 条消息</div>
                 </div>
                 <div class="history-item-actions" style="display:flex;gap:6px;flex-wrap:wrap">
                 <button class="btn btn-secondary btn-sm" data-open="${escapeHtml(s.id)}">打开</button>
@@ -2445,7 +2426,7 @@ async function handleUpload(file, opts = {}) {
       );
       bar.style.width = total > 1 ? `${Math.round((index / total) * 100)}%` : "100%";
       if (finalDoc.status === "ready") {
-        prog.innerHTML = `<span class="text-success">${prefix}处理完成（ready）· 分段 ${escapeHtml(finalDoc.chunk_count ?? 0)}</span>`;
+        prog.innerHTML = `<span class="text-success">${prefix}处理完成（ready）· 分段 ${escapeHtml(fmtCount(finalDoc.chunk_count ?? 0))}</span>`;
       } else {
         prog.innerHTML = `<span class="text-danger">${prefix}处理失败：${escapeHtml(finalDoc.error_message || finalDoc.status || "error")}</span>`;
       }

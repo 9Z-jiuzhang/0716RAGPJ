@@ -151,8 +151,8 @@ function bindSpotlight() {
 
 /**
  * 统计数字展示：
- * - < 1 万：千分位（整数不强制小数；有小数则保留 2 位）
- * - ≥ 1 万：缩写为「x.xx万」
+ * - < 1 万：千分位（整数无小数；有小数则固定 2 位）
+ * - ≥ 1 万：缩写为「x.xx万」（始终 2 位小数）
  */
 export function formatStatNumber(n) {
   const v = Number(n);
