@@ -653,6 +653,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.6 | 2026-07-27 | 前端 ZYUI-V3.1/V3.2：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、9Z/品牌标）；无 OpenAPI 变更；见 README §2.6 / `OPTIMIZATION_STATUS.md` |
 | 2.1.5 | 2026-07-27 | 反馈率口径修正（按窗口内问答消息对齐，≤100%）；补充 `answerable_events` / `matched_feedback`；首页反馈 KPI；访客端流式中止与列表体验见 README / OPTIMIZATION_STATUS |
 | 2.1.4 | 2026-07-25 | 知识库多部门访问：`departments[]` + `kb_departments`；部门侧关联改为追加/局部解除；管理端访问范围多选与「除访客外全选」 |
 | 2.1.3 | 2026-07-25 | Ask/`QA_DEFAULT_TOP_K` 默认 5；访客端引用区按相关度展开 Top-3、其余折叠；命中测试 TopK 仍默认 3 |
