@@ -268,7 +268,7 @@ html[data-theme="light"] .mesh-atmosphere-canvas::before {
   pointer-events: none;
   background:
     radial-gradient(ellipse 72% 58% at 12% 18%, rgba(56, 135, 240, 0.34), transparent 62%),
-    radial-gradient(ellipse 58% 70% at 88% 12%, rgba(56, 135, 240, 0.3), transparent 58%),
+    radial-gradient(ellipse 58% 70% at 88% 12%, rgba(56, 135, 240, 0.18), transparent 58%),
     radial-gradient(ellipse 64% 50% at 78% 86%, rgba(201, 162, 39, 0.26), transparent 64%),
     radial-gradient(ellipse 50% 62% at 8% 78%, rgba(90, 160, 235, 0.22), transparent 60%),
     radial-gradient(ellipse 42% 38% at 48% 48%, rgba(201, 162, 39, 0.1), transparent 55%);
@@ -281,7 +281,7 @@ html[data-theme="light"] .mesh-atmosphere-canvas::after {
   z-index: 1;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 46% 54% at 64% 24%, rgba(56, 135, 240, 0.16), transparent 58%),
+    radial-gradient(ellipse 46% 54% at 64% 24%, rgba(56, 135, 240, 0.1), transparent 58%),
     radial-gradient(ellipse 52% 40% at 28% 64%, rgba(201, 162, 39, 0.14), transparent 56%);
   opacity: 0.9;
 }

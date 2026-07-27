@@ -245,9 +245,9 @@
   --mesh-canvas: #f7fafd;
   --mesh-blob-tr: radial-gradient(
     68% 78% at 42% 48%,
-    rgba(56, 135, 240, 0.58) 0%,
-    rgba(90, 160, 240, 0.36) 28%,
-    rgba(150, 200, 245, 0.16) 52%,
+    rgba(56, 135, 240, 0.42) 0%,
+    rgba(90, 160, 240, 0.28) 28%,
+    rgba(150, 200, 245, 0.12) 52%,
     transparent 74%
   );
   --mesh-blob-bl: radial-gradient(

@@ -276,8 +276,12 @@ export function mountEnvParticleField(host, { fixed = false } = {}) {
     const baseA = isLightTheme() ? 0.62 : 0.55;
     const a = baseA * farFade * clearFade * crest * pulse;
     const edgeBoost = ENABLE_CENTER_SPREAD ? 0.92 + 0.18 * smoothstep(0.2, 1.05, rad) : 1;
-    const s =
-      (1.05 + Math.min(1, Math.max(0, p.v)) * 1.85) * (0.9 + Math.max(0, elev) * 0.4) * edgeBoost;
+    // 深度越大点越大；左右上角抬到与左右下角同量级，避免顶角偏小
+    const vNorm = Math.min(1, Math.max(0, p.v));
+    const depthSize = 1.05 + vNorm * 1.85;
+    const topCornerLift = (1 - vNorm) * smoothstep(0.22, 0.5, Math.abs(nx) * 2);
+    const sizeBase = depthSize + (2.9 - depthSize) * topCornerLift;
+    const s = sizeBase * (0.9 + Math.max(0, elev) * 0.4) * edgeBoost;
     return { x, y, a, s, elev, amp };
   }
 
@@ -387,7 +391,7 @@ export function mountEnvParticleField(host, { fixed = false } = {}) {
         fall = Math.exp(-(dx * dx + dy * dy) / focusR2) * pointer.focus;
         if (fall > 0.02) {
           a *= 1 + fall * 1.15;
-          s *= 1 + fall * 0.5;
+          s *= 1 + fall * 0.28;
           // 径向模式下沿半径外推一点，强化「扩散」手感
           if (LAYOUT_MODE === "radial") {
             const cx = width * 0.5;
@@ -411,7 +415,7 @@ export function mountEnvParticleField(host, { fixed = false } = {}) {
         ctx.globalAlpha = Math.min(0.75, a * (1 - mix * 0.55));
         ctx.drawImage(sprite, x - s, y - s, s * 2, s * 2);
         ctx.globalAlpha = Math.min(0.88, a * mix * 0.95);
-        const sb = s * (1 + mix * 0.2);
+        const sb = s * (1 + mix * 0.12);
         ctx.drawImage(spriteTheme, x - sb, y - sb, sb * 2, sb * 2);
       } else {
         ctx.globalAlpha = Math.min(0.92, a);

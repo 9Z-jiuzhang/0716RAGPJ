@@ -31,7 +31,7 @@ import {
 import { escapeHtml, formatDateTime, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=gap-opt-0721i";
 import { initMotion, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721i";
-import { mountEnvParticleField } from "/assets/js/env-particle-field.js?v=landing-particle-0727f";
+import { mountEnvParticleField } from "/assets/js/env-particle-field.js?v=landing-particle-0727i";
 import { getBrandMarkSvg, resolveBrandMarkSvg } from "/assets/js/brand-mark.js?v=brand-mark-0727a";
 
 clearDemoFlags();
@@ -63,8 +63,13 @@ const LANDING_COPY = {
   statusLabel: "知识即服务",
   brandName: "RAG 智能知识平台",
   heroTagline: "让企业知识即问即答",
+  description:
+    "面向企业与团队的知识问答平台，支持文档入库、向量检索与 RAG 对话，让内部资料可检索、可引用、可审计。",
   footer: "Powered by 9Z · RAG",
 };
+/** 落地页副标题打字机轮换词 */
+const LANDING_TYPED_PHRASES = ["即问即答", "多部共享", "安全可控"];
+let landingTypedTimer = null;
 /** 会话消息分页（上拉加载更早历史） */
 const sessionHistory = {
   sessionId: null,
@@ -324,6 +329,10 @@ function dispatchRender() {
 }
 
 function destroyLandingParticles() {
+  if (landingTypedTimer) {
+    clearTimeout(landingTypedTimer);
+    landingTypedTimer = null;
+  }
   if (landingParticleApi) {
     landingParticleApi.destroy();
     landingParticleApi = null;
@@ -331,6 +340,50 @@ function destroyLandingParticles() {
   document.body.classList.remove("is-landing");
   const oldFx = document.querySelector(".bg-fx");
   if (oldFx) oldFx.style.display = "";
+}
+
+/** 落地页副标题打字机：打出 → 停顿 → 回删 → 下一词 */
+function startLandingTyped(el) {
+  if (landingTypedTimer) {
+    clearTimeout(landingTypedTimer);
+    landingTypedTimer = null;
+  }
+  if (!el || !LANDING_TYPED_PHRASES.length) return;
+
+  let phraseIdx = 0;
+  let charIdx = 0;
+  let deleting = false;
+
+  const schedule = (fn, ms) => {
+    landingTypedTimer = setTimeout(fn, ms);
+  };
+
+  const tick = () => {
+    const phrase = LANDING_TYPED_PHRASES[phraseIdx] || "";
+    if (!deleting) {
+      charIdx += 1;
+      el.textContent = phrase.slice(0, charIdx);
+      if (charIdx >= phrase.length) {
+        deleting = true;
+        schedule(tick, 1600);
+        return;
+      }
+      schedule(tick, 120);
+      return;
+    }
+    charIdx -= 1;
+    el.textContent = phrase.slice(0, Math.max(0, charIdx));
+    if (charIdx <= 0) {
+      deleting = false;
+      phraseIdx = (phraseIdx + 1) % LANDING_TYPED_PHRASES.length;
+      schedule(tick, 280);
+      return;
+    }
+    schedule(tick, 70);
+  };
+
+  el.textContent = "";
+  schedule(tick, 420);
 }
 
 /**
@@ -356,19 +409,87 @@ function pageLanding({ openAuth = false, mode = "login" } = {}) {
         <span class="icon-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></svg></span>
       </button>
       <header class="landing-nav">
+        <a class="landing-brand-logo" href="#/" aria-label="9Z">
+          <img class="landing-brand-logo-img" src="/assets/img/logo-9z.png?v=landing-logo-0727a" alt="9Z" width="120" height="120" />
+        </a>
         <button type="button" class="landing-signin" id="btnLandingSignIn">SIGN IN</button>
       </header>
       <main class="landing-hero">
-        <div class="landing-brand-mark" aria-hidden="true">${resolveBrandMarkSvg({ reshuffle: true })}</div>
-        <div class="landing-badge"><i></i><span>${escapeHtml(LANDING_COPY.statusLabel)}</span></div>
-        <h1>
-          <span class="landing-brand-title">${escapeHtml(LANDING_COPY.brandName)}</span>
-          <span class="landing-sub">${escapeHtml(LANDING_COPY.heroTagline)}</span>
-        </h1>
-        <div class="landing-cta-row">
-          <div class="landing-enter-wrap">
-            <button type="button" class="landing-enter" id="btnLandingEnter"><span>ENTER</span></button>
-          </div>
+        <div class="landing-hero-inner">
+          <section class="landing-copy" aria-label="产品宣言">
+            <div class="landing-kicker">
+              <span class="landing-brand-mark" aria-hidden="true">${resolveBrandMarkSvg({ reshuffle: true })}</span>
+              <div class="landing-badge"><i></i><span>${escapeHtml(LANDING_COPY.statusLabel)}</span></div>
+            </div>
+            <h1>
+              <span class="landing-brand-title">${escapeHtml(LANDING_COPY.brandName)}</span>
+              <span class="landing-sub">
+                让企业知识&nbsp;&nbsp;<span class="landing-sub-typed" id="landingTypedPhrase">即问即答</span><span class="landing-sub-cursor" aria-hidden="true"></span>
+              </span>
+            </h1>
+            <p class="landing-desc">${escapeHtml(LANDING_COPY.description)}</p>
+            <div class="landing-cta-row">
+              <div class="landing-enter-wrap">
+                <button type="button" class="landing-enter" id="btnLandingEnter"><span>立即登录</span></button>
+              </div>
+              <div class="landing-enter-wrap">
+                <button type="button" class="landing-guest" id="btnLandingGuest"><span>访客登录</span></button>
+              </div>
+            </div>
+          </section>
+          <aside class="landing-preview" aria-label="产品预览">
+            <div class="landing-preview-banner" aria-hidden="true">
+              <span class="landing-preview-banner-inner">
+                <svg class="landing-banner-bulb" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18h6"/>
+                  <path d="M10 21h4"/>
+                  <path d="M12 3a6 6 0 0 0-3.5 10.8c.6.45 1 1.1 1.1 1.8h4.8c.1-.7.5-1.35 1.1-1.8A6 6 0 0 0 12 3Z"/>
+                </svg>
+                <span>9Z团队匠心出品</span>
+              </span>
+            </div>
+            <div class="landing-preview-frame" aria-hidden="true">
+              <div class="landing-preview-chrome">
+                <span></span><span></span><span></span>
+                <em>AI 知识库 · 管理端</em>
+              </div>
+              <div class="landing-preview-body">
+                <div class="landing-preview-sidebar">
+                  <div class="lp-nav-brand"></div>
+                  <div class="lp-nav-item is-active"></div>
+                  <div class="lp-nav-item"></div>
+                  <div class="lp-nav-item"></div>
+                  <div class="lp-nav-item"></div>
+                  <div class="lp-nav-item"></div>
+                </div>
+                <div class="landing-preview-main">
+                  <div class="lp-head">
+                    <strong>核心指标</strong>
+                    <span>近 7 日</span>
+                  </div>
+                  <div class="landing-preview-stats">
+                    <div class="lp-stat"><b>128</b><span>知识库</span></div>
+                    <div class="lp-stat"><b>3.2万</b><span>文档</span></div>
+                    <div class="lp-stat"><b>860</b><span>用户</span></div>
+                    <div class="lp-stat accent"><b>94%</b><span>命中率</span></div>
+                  </div>
+                  <div class="lp-panel">
+                    <div class="lp-panel-head"><span>问答趋势</span><span>反馈覆盖</span></div>
+                    <svg class="lp-chart" viewBox="0 0 320 88" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="lpChartFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stop-color="currentColor" stop-opacity="0.28"/>
+                          <stop offset="100%" stop-color="currentColor" stop-opacity="0"/>
+                        </linearGradient>
+                      </defs>
+                      <path d="M0 68 C40 60 56 42 96 48 C136 54 152 22 192 28 C232 34 248 18 288 24 L320 20 L320 88 L0 88 Z" fill="url(#lpChartFill)"/>
+                      <path d="M0 68 C40 60 56 42 96 48 C136 54 152 22 192 28 C232 34 248 18 288 24 L320 20" fill="none" stroke="currentColor" stroke-width="2.5"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
         </div>
       </main>
       <p class="landing-foot">${escapeHtml(LANDING_COPY.footer)}</p>
@@ -423,6 +544,11 @@ function pageLanding({ openAuth = false, mode = "login" } = {}) {
     e.stopPropagation();
     openAuthModal("login");
   });
+  document.getElementById("btnLandingGuest")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    navigate("/chat");
+    dispatchRender();
+  });
   document.getElementById("btnLandingSignIn")?.addEventListener("click", (e) => {
     e.stopPropagation();
     openAuthModal("login");
@@ -449,6 +575,8 @@ function pageLanding({ openAuth = false, mode = "login" } = {}) {
     navigate("/chat");
     dispatchRender();
   });
+
+  startLandingTyped(document.getElementById("landingTypedPhrase"));
 
   if (openAuth) openAuthModal(mode);
   applyTheme(getTheme());
