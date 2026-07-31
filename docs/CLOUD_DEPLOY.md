@@ -8,7 +8,8 @@
 |------|------|
 | `docker-compose.yml` | 本机开发（热重载、业务栈端口 9xxx） |
 | `docker-compose.langfuse.yml` | 自建 Langfuse 独立栈（ClickHouse + 独立 PG/Redis/MinIO） |
-| `docker-compose.prod.yml` | 云端覆盖（关热重载、数据面不暴露、加固默认） |
+| `docker-compose.prod.yml` | 云端覆盖（关热重载、数据面不暴露、加固默认；web 打入镜像防白屏） |
+| `docker/web/` | 前端静态镜像 Dockerfile + 启动时补齐目录权限的 entrypoint |
 | `.env` / `.env.example` | 密钥、`DEPLOYMENT_MODE`、Langfuse 自建变量 |
 | `docs/API_INTEGRATION_GUIDE.md` | 第三方 / App 接入 |
 
@@ -106,9 +107,16 @@ docker compose -f docker-compose.yml -f docker-compose.langfuse.yml -f docker-co
 
 # 健康检查（经统一入口）
 curl -fsS http://127.0.0.1:9080/api/v1/monitor/health
+# 前端共享资源（失败=白屏：多为 frontend 目录缺 +x；prod 已打入 web 镜像）
+curl -fsSI http://127.0.0.1:9080/assets/js/router.js
 # Langfuse
 curl -fsS http://127.0.0.1:9310/api/public/health
 ```
+
+> **白屏排查**：若页面只有标题、无内容，先检查 `/assets/js/router.js` 是否 200。  
+> Windows 打 zip 解压到 Linux 时，目录可能变成 `644`（无执行位），Nginx 对 `/assets/` 会 **403**。  
+> 生产请带 `docker-compose.prod.yml` 并 `--build`（web 镜像内已 `chmod 755` 目录）；若仍用宿主机挂载，启动前执行：  
+> `find frontend -type d -exec chmod 755 {} \; && find frontend -type f -exec chmod 644 {} \;`
 
 本机开发：
 
@@ -144,6 +152,7 @@ Compose 默认把数据挂在项目下 `./data/*` 与 `./data/langfuse/*`。云�
 
 1. `DEPLOYMENT_MODE=cloud` 下 API 能启动（弱密钥会直接失败）  
 2. `http(s)://域名:9080/` 打开落地页；`/admin/` 打开管理端  
+2b. `curl -fsSI http://127.0.0.1:9080/assets/js/router.js` 返回 200（否则访客端白屏）  
 3. `http(s)://域名:9310/` 打开 Langfuse，可用 `LANGFUSE_INIT_USER_*` 登录  
 4. 登录业务 `super`，改掉演示习惯口令依赖  
 5. `POST /api/v1/auth/register` 返回 403（若已关闭注册）  

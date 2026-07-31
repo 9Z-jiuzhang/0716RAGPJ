@@ -15,7 +15,7 @@ docs/
 **/node_modules/
 *.md
 !requirements.txt
-frontend/
+# 前端由 docker/web/Dockerfile COPY；勿再排除整个 frontend/
 scripts/
 _recovery/
 _recover_*.py

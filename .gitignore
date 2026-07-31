@@ -60,3 +60,7 @@ node_modules/
 
 # Alembic 本地覆盖（如有）
 alembic.ini.local
+
+# 本机导出的部署镜像包（体积大，勿提交）
+ragpj-docker-images.tar
+*.docker-images.tar

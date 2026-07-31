@@ -155,7 +155,8 @@ nginx 反向代理 (reverse-proxy.conf, 容器 :9080)
 | grafana | `grafana/grafana:latest` | **9300→9300** | 面板（子路径 `/grafana`） |
 | langfuse-web | `langfuse/langfuse:3` | **9310→9310** | 自建追踪 UI / Public API（见 `docker-compose.langfuse.yml`） |
 
-> 云端请使用 `docker-compose.prod.yml`：仅暴露 **9080** 与 **9310**，数据面端口不对公网开放。详见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)。
+> 云端请使用 `docker-compose.prod.yml`：仅暴露 **9080** 与 **9310**，数据面端口不对公网开放。详见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)。  
+> 生产会构建 `docker/web` 镜像（前端打入镜像并保证目录可执行），避免解压丢权限导致 `/assets` 403 白屏。
 
 > LLM 追踪默认对接 **自建 Langfuse**（`docker-compose.langfuse.yml`）；配置见 `.env.example` Langfuse 段。
 
@@ -455,6 +456,7 @@ docker compose ps
 │   └── shared/              # 共享 api/auth/router/brand-mark/粒子场/css/img/docs（/assets）
 ├── docker/
 │   ├── nginx/               # nginx.conf（web）/ reverse-proxy.conf（统一入口）
+│   ├── web/                 # 前端静态镜像（防 /assets 403 白屏）
 │   ├── postgres/init.sql    # 扩展与全文检索约定
 │   ├── prometheus/          # prometheus.yml / alerts.yml
 │   └── grafana/             # 数据源与面板 provisioning
@@ -466,15 +468,13 @@ docker compose ps
 │   ├── CLOUD_DEPLOY.md           # 云端部署指南
 │   └── CONTRACT.md               # 契约说明
 ├── scripts/                      # 契约生成 / 种子与运维脚本
-├── testdoc/                      # 上传解析联调样例文档
+├── testdoc/                      # 隔离测试语料（两组互不相关，含 pdf/doc/docx/txt/md）
 ├── testdata/                     # 问答评测样例与用例说明
-├── frontend/                     # 管理端 / 访客端 / shared（含 vendor/swagger-ui）
 ├── docker-compose.yml            # 本机开发编排
 ├── docker-compose.prod.yml       # 云端覆盖
 ├── requirements.txt
 └── .env.example
 ```
-
 > `docker/nginx/reverse-proxy.conf`：统一入口（容器与宿主机均为 9080）。
 
 ---

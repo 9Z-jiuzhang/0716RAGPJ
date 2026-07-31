@@ -15,8 +15,8 @@ services:
     # 使用镜像 entrypoint 跑迁移，再以多 worker 启动（无热重载、无源码挂载）
     entrypoint: ["/app/docker-entrypoint.sh"]
     command: ["--workers", "2"]
-    volumes: []
-    ports: []
+    volumes: !reset []
+    ports: !reset []
     environment:
       DEPLOYMENT_MODE: cloud
       SEED_DEMO_USERS: "false"
@@ -26,16 +26,29 @@ services:
       CORS_ALLOW_CREDENTIALS: "false"
 
   web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
     restart: unless-stopped
-    ports: []
+    # 生产：清空宿主机挂载，仅用镜像内已 chmod 的静态文件（避免 zip 丢目录 +x → /assets 403 白屏）
+    volumes: !reset []
+    ports: !reset []
+    entrypoint: ["/bin/sh", "/docker-entrypoint-web.sh"]
+    command: ["nginx", "-g", "daemon off;"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9082/assets/js/router.js"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   postgres:
     restart: unless-stopped
-    ports: []
+    ports: !reset []
 
   redis:
     restart: unless-stopped
-    ports: []
+    ports: !reset []
     command:
       - redis-server
       - --port
@@ -54,19 +67,19 @@ services:
 
   chroma:
     restart: unless-stopped
-    ports: []
+    ports: !reset []
 
   minio:
     restart: unless-stopped
-    ports: []
+    ports: !reset []
 
   prometheus:
     restart: unless-stopped
-    ports: []
+    ports: !reset []
 
   grafana:
     restart: unless-stopped
-    ports: []
+    ports: !reset []
     environment:
       GF_SERVER_HTTP_PORT: "9300"
       GF_SERVER_ROOT_URL: ${PUBLIC_BASE_URL:?请在 .env 设置 PUBLIC_BASE_URL}/grafana/
@@ -92,16 +105,16 @@ services:
       - "9310:9310"
 
   langfuse-minio:
-    ports: []
+    ports: !reset []
 
   langfuse-postgres:
-    ports: []
+    ports: !reset []
 
   langfuse-redis:
-    ports: []
+    ports: !reset []
 
   langfuse-clickhouse:
-    ports: []
+    ports: !reset []
 
   langfuse-worker:
-    ports: []
+    ports: !reset []

@@ -1,0 +1,31 @@
+%PDF-1.4
+1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj
+2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj
+3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj
+4 0 obj<< /Length 1069 >>stream
+BT /F1 10 Tf
+40 740 Td (Title: Xinggang Deep-Dive Research Station SOP) Tj
+0 -14 Td (Document Code: SEA-XG-2024) Tj
+0 -14 Td (Organization: \\u661f\\u6e2f\\u4e00\\u53f7\\u6df1\\u6f5c\\u79d1\\u8003\\u7ad9\\uff08\\u5357\\u6d77\\u8bd5\\u9a8c\\u533a\\uff09) Tj
+0 -14 Td (Primary Asset: \\u661f\\u6e2f\\u8f7d\\u4eba\\u8231 XG-3) Tj
+0 -14 Td (Schedule: \\u4e0b\\u6f5c\\u7a97\\u53e3\\u6bcf\\u65e5 06:00\\u201318:00\\uff08\\u98ce\\u529b\\uff1e6 \\u7ea7\\u53d6\\u6d88\\uff09) Tj
+0 -14 Td (Contact: \\u6307\\u6325\\u5ba4\\u7535\\u53f0\\u9891\\u9053 XG-CTRL-7) Tj
+0 -14 Td (Rule: \\u5355\\u6b21\\u4e0b\\u6f5c\\u6700\\u5927\\u4f5c\\u4e1a\\u6df1\\u5ea6 3000 \\u7c73\\uff0c\\u8231\\u5185\\u6c27\\u6c14\\u4f59\\u91cf\\u4f4e\\u4e8e 35% \\u5fc5\\u987b\\u4e0a\\u6d6e\\u3002) Tj
+0 -14 Td (Boundary: \\u672c\\u89c4\\u7a0b\\u4ec5\\u63cf\\u8ff0\\u661f\\u6e2f\\u79d1\\u8003\\u7ad9\\u4e0b\\u6f5c\\u4f5c\\u4e1a\\uff0c\\u4e0d\\u6d89\\u53ca\\u8336\\u56ed\\u3001\\u8336\\u53f6\\u9500\\u552e\\u6216\\u9646\\u5730\\u6587\\u65c5\\u4e1a\\u52a1\\u3002) Tj
+0 -14 Td (Isolation Marker: SEA-XG-2024) Tj
+ET
+endstream
+endobj
+5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000056 00000 n 
+0000000111 00000 n 
+0000000235 00000 n 
+0000001354 00000 n 
+trailer<< /Size 6 /Root 1 0 R >>
+startxref
+1422
+%%EOF

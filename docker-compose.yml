@@ -37,14 +37,28 @@ services:
 
   # ---------- 前端静态文件（Nginx） ----------
   web:
-    image: nginx:1.25-alpine
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME:-kb}-web:local
     restart: unless-stopped
     # 仅供统一入口反代；默认不映射到宿主机
     expose:
       - "9082"
+    # 本地：挂载源码便于改前端；启动时 entrypoint 会补齐目录 +x（避免 Windows 解压丢权限白屏）
+    # 云端 prod 覆盖为仅用镜像内静态文件（见 docker-compose.prod.yml）
+    entrypoint: ["/bin/sh", "/docker-entrypoint-web.sh"]
+    command: ["nginx", "-g", "daemon off;"]
     volumes:
-      - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend:/usr/share/nginx/html
       - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/web/docker-entrypoint.sh:/docker-entrypoint-web.sh:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9082/assets/js/router.js"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       api:
         condition: service_started
