@@ -13,6 +13,9 @@ docs/
 **/*.pyc
 **/.pytest_cache/
 **/.mypy_cache/
+**/.ruff_cache/
+**/htmlcov/
+**/.coverage
 **/node_modules/
 *.md
 !requirements.txt
@@ -21,3 +24,7 @@ scripts/
 _recovery/
 _recover_*.py
 agent-transcripts/
+ragpj-docker-images.tar
+*.docker-images.tar
+*.tar
+*.zip

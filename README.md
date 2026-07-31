@@ -398,11 +398,10 @@ pytest backend/tests -q
 | 脚本 | 位置 | 用途 |
 |------|------|------|
 | `generate_openapi.py` | `scripts/` | 生成 `docs/openapi.json` |
-| `seed_qa_test_kb.py` | `scripts/` | 灌入测试知识库文档 |
 | `fix_unique_super_admin.py` | `scripts/` | 修正非固定账号上的超管角色 |
 | `reindex_chroma.py` | `backend/app/scripts/` | 将 `document_chunks` 回填 Chroma |
 
-单元/接口回归以 `backend/tests`（pytest）为准。本地上传/隔离联调样例可自备于 `testdoc/`、`testdata/`（已 gitignore，不入库）。
+单元/接口回归以 `backend/tests`（pytest）为准。本地联调语料（`testdoc/`、`testdata/`）及依赖它们的灌数脚本不入库。
 
 **Windows 端口速查**：
 

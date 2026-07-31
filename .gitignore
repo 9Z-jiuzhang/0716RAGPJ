@@ -35,6 +35,8 @@ data/local_seed/
 
 # 仅本地制造业公司灌数脚本（写入 Postgres，勿 push）
 scripts/seed_mfg_company_local.py
+# 依赖本地 testdata/ 的问答灌数脚本（勿 push）
+scripts/seed_qa_test_kb.py
 
 # 操作系统
 .DS_Store
