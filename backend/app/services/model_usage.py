@@ -1,4 +1,4 @@
-"""从 Langfuse Cloud 拉取模型用量指标，供模型管理页展示。
+"""从 Langfuse（自建或 SaaS）拉取模型用量指标，供模型管理页展示。
 
 使用 Langfuse 公共 API 的每日指标接口（/api/public/metrics/daily），
 按模型聚合 token / 调用次数 / 成本，并返回每日时间序列。
@@ -17,8 +17,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Langfuse Cloud 每日指标接口限流较严（免费档 10 次/日），
-# 因此对原始返回做进程内 TTL 缓存，避免前端每次切换模型/刷新都打到上游。
+# Langfuse 每日指标接口在 SaaS 免费档限流较严（约 10 次/日）；
+# 自建实例通常更宽松。对原始返回做进程内 TTL 缓存，避免前端频繁刷新打满上游。
 _CACHE_TTL_SECONDS = 600  # 正常缓存 10 分钟
 _CACHE: dict[int, dict[str, Any]] = {}  # days -> {"at": ts, "raw": [...], "fetched": iso}
 

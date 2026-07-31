@@ -20,7 +20,7 @@
 
 ## 契约要点
 
-- **Base URL（本机 Docker 默认）**：`http://localhost:18080/api/v1`（统一入口；容器内 Nginx `:8080`，宿主机常映射 `18080`）。云端见 `CLOUD_DEPLOY.md`。
+- **Base URL（本机 Docker 默认）**：`http://localhost:9080/api/v1`（统一入口；容器与宿主机均为 `:9080`）。云端见 `CLOUD_DEPLOY.md`。
 - **认证**：`Authorization: Bearer <access_token>`（JWT）。标注为 `public` 或含可选 `BearerAuth`（如 `/qa/ask`）的接口允许匿名/可选认证。
 - **统一响应**：除 SSE、CSV 导出、Prometheus `/metrics` 外，JSON 接口统一包装为 `{code, message, data, request_id}`。
 - **分页**：`data` 为 `{items, total, page, page_size}`；查询参数 `page`（默认 1）、`page_size`（默认 20，部门列表 50、会话消息 50、Guard 事件 50，上限 100）。
@@ -33,8 +33,8 @@
 
 ## 使用方式
 
-1. **Swagger UI（官方）**：服务启动后访问 http://localhost:18080/docs 。
-2. **Swagger UI（管理端嵌入）**：同源静态资源 http://localhost:18080/assets/vendor/swagger-ui/index.html （目录：`frontend/shared/vendor/swagger-ui/`）。
+1. **Swagger UI（官方）**：服务启动后访问 http://localhost:9080/docs 。
+2. **Swagger UI（管理端嵌入）**：同源静态资源 http://localhost:9080/assets/vendor/swagger-ui/index.html （目录：`frontend/shared/vendor/swagger-ui/`）。
 3. **Swagger Editor / Redoc**：导入 `openapi.json` 在线预览。
 4. **Postman / Insomnia**：Import → 选择 `openapi.json` 自动生成请求集合。
 5. **前后端联调**：路径、请求体、响应字段、权限标识一律以本目录契约 + `API.md` 为准。

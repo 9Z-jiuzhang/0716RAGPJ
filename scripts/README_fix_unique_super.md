@@ -12,7 +12,7 @@
 
 ## 手动脚本
 
-在**仓库根目录**执行（需 `.env` 中 Postgres 可达，本机已映射 `5432`）：
+在**仓库根目录**执行（需 `.env` 中 Postgres 可达，本机已映射 `9543`）：
 
 ```bash
 # Windows PowerShell

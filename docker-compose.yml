@@ -1,5 +1,5 @@
 # AI 知识库 RAG 平台 — Docker Compose 编排
-# 说明：包含智能问答模块（5.6）所需的基础设施：PostgreSQL、Redis、Chroma、MinIO
+# 端口约定：容器内与宿主机映射均落在 9000–9999（见 docs/CLOUD_DEPLOY.md）
 
 services:
   # ---------- FastAPI 后端 ----------
@@ -9,11 +9,10 @@ services:
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     # 本地开发：热重载 + 源码挂载（云端请用 docker-compose.prod.yml 覆盖）
-    entrypoint: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    entrypoint: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9081"]
     command: ["--reload"]
     ports:
-      # 8000 落在本机 Hyper-V 排除段(7940-8039)，改映射 18000；容器内仍为 8000
-      - "18000:8000"
+      - "9081:9081"
     env_file:
       - .env
     volumes:
@@ -28,7 +27,7 @@ services:
       minio:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:9081/api/v1/monitor/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -40,8 +39,9 @@ services:
   web:
     image: nginx:1.25-alpine
     restart: unless-stopped
-    ports:
-      - "80:80"
+    # 仅供统一入口反代；默认不映射到宿主机
+    expose:
+      - "9082"
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
       - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -54,17 +54,19 @@ services:
   # ---------- PostgreSQL ----------
   postgres:
     image: postgres:16-alpine
+    command: ["postgres", "-c", "port=9543"]
     ports:
-      - "5432:5432"
+      - "9543:9543"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-knowledge_base}
       POSTGRES_USER: ${POSTGRES_USER:-kb_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      PGPORT: "9543"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -p 9543"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -74,13 +76,13 @@ services:
   # ---------- Redis ----------
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--port", "9637"]
     ports:
-      # Windows 排除区含 6379（6367-6466）；宿主机映射 16379，容器内仍 6379
-      - "16379:6379"
+      - "9637:9637"
     volumes:
       - ./data/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-p", "9637", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -89,16 +91,14 @@ services:
 
   # ---------- Chroma 向量库 ----------
   chroma:
-    # 需与 API 内 chromadb>=1.0 匹配；0.6 客户端对接新服务端会报 KeyError: '_type'
+    # 需与 API 内 chromadb>=1.0 匹配；官方镜像容器内固定监听 8000，宿主机映射到 9800
     image: chromadb/chroma:latest
     ports:
-      # 8001 落在本机 Hyper-V 排除段(7940-8039)，改映射 18001；容器内仍为 8000
-      - "18001:8000"
+      - "9800:8000"
     environment:
       IS_PERSISTENT: "TRUE"
       PERSIST_DIRECTORY: /chroma/chroma
       CHROMA_SERVER_HOST: "0.0.0.0"
-      CHROMA_SERVER_HTTP_PORT: "8000"
     volumes:
       - ./data/chroma:/chroma/chroma
     healthcheck:
@@ -110,17 +110,16 @@ services:
   minio:
     image: minio/minio:latest
     ports:
-      # 主机 9000 常被 milvus-minio 占用，改映射避免无法启动
-      - "19000:9000"
-      - "19001:9001"
+      - "9900:9900"
+      - "9901:9901"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?请在 .env 中设置 MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?请在 .env 中设置 MINIO_SECRET_KEY}
     volumes:
       - ./data/minio:/data
-    command: server /data --console-address ":9001"
+    command: server /data --address ":9900" --console-address ":9901"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:9900/minio/health/live"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -130,8 +129,11 @@ services:
   # ---------- Prometheus ----------
   prometheus:
     image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.listen-address=:9909"
     ports:
-      - "9090:9090"
+      - "9909:9909"
     volumes:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -142,9 +144,10 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3001:3000"
+      - "9300:9300"
     environment:
-      GF_SERVER_ROOT_URL: ${PUBLIC_BASE_URL:-http://localhost:18080}/grafana/
+      GF_SERVER_HTTP_PORT: "9300"
+      GF_SERVER_ROOT_URL: ${PUBLIC_BASE_URL:-http://localhost:9080}/grafana/
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?请填写}
       GF_USERS_DEFAULT_THEME: light
@@ -166,8 +169,7 @@ services:
     image: nginx:1.25-alpine
     restart: unless-stopped
     ports:
-      # 8080 落在本机 Hyper-V 排除段(8040-8139)，改映射 18080
-      - "18080:8080"
+      - "9080:9080"
     volumes:
       - ./docker/nginx/reverse-proxy.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:

@@ -36,14 +36,14 @@
 
 | 部署方式 | 推荐 ORIGIN | 说明 |
 |----------|-------------|------|
-| Docker Compose + 反代（本仓库默认） | `http://<主机>:18080` | 经 Nginx 同源反代 `/api/` |
+| Docker Compose + 反代（本仓库默认） | `http://<主机>:9080` | 经 Nginx 同源反代 `/api/` |
 | 云端 HTTPS | `https://<域名>` | 见 `docs/CLOUD_DEPLOY.md`；前端仍用相对路径 `/api/v1` |
-| 直连 API 容器 | `http://<主机>:18000` | 仅调试；生产禁止对公网开放 |
+| 直连 API 容器 | `http://<主机>:9081` | 仅调试；生产禁止对公网开放 |
 
 示例：登录完整地址
 
 ```http
-POST http://192.168.1.10:18080/api/v1/auth/login
+POST http://192.168.1.10:9080/api/v1/auth/login
 Content-Type: application/json
 ```
 
@@ -119,7 +119,7 @@ Authorization: Bearer <access_token>
 
 ```text
 ┌─────────────┐     HTTPS/HTTP      ┌──────────────────┐
-│  Android App │ ─────────────────► │ Nginx :18080     │
+│  Android App │ ─────────────────► │ Nginx :9080     │
 │  (OkHttp)    │  Bearer + SSE      │  /api/ → FastAPI │
 └─────────────┘                     └──────────────────┘
         │
@@ -451,4 +451,4 @@ client.newCall(req).execute().use { resp ->
 | 仓库 `docs/CONTRACT.md` | 契约变更流程 |
 | 仓库 `docs/CLOUD_DEPLOY.md` | 云端生产部署与安全加固 |
 
-管理端「API 接入指南」页面展示本文内容，并内嵌同源 Swagger（`/assets/vendor/swagger-ui/index.html`）。机器调试也可打开官方 `/docs`（本机默认 `http://localhost:18080/docs`），或导入 `openapi.json`。
+管理端「API 接入指南」页面展示本文内容，并内嵌同源 Swagger（`/assets/vendor/swagger-ui/index.html`）。机器调试也可打开官方 `/docs`（本机默认 `http://localhost:9080/docs`），或导入 `openapi.json`。

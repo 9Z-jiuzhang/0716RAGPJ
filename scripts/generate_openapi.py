@@ -2119,8 +2119,8 @@ doc = {
     },
     "servers": [
         {
-            "url": "http://localhost:18080/api/v1",
-            "description": "本机 Docker 统一入口（宿主机 18080→容器 8080）",
+            "url": "http://localhost:9080/api/v1",
+            "description": "本机 Docker 统一入口（宿主机/容器 9080）",
         },
         {
             "url": "https://{host}/api/v1",

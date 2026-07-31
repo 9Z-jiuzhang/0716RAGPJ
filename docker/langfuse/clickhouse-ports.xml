@@ -1,0 +1,5 @@
+<!-- Langfuse ClickHouse: HTTP 落在 9000–9999，原生协议保持 9000 -->
+<clickhouse>
+  <http_port>9812</http_port>
+  <tcp_port>9000</tcp_port>
+</clickhouse>

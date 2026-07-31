@@ -1,0 +1,186 @@
+# Langfuse 自建独立栈（与业务 postgres/redis/minio 隔离）
+# 用法（与业务一并启动）：
+#   docker compose -f docker-compose.yml -f docker-compose.langfuse.yml up -d
+# 云端：
+#   docker compose -f docker-compose.yml -f docker-compose.langfuse.yml -f docker-compose.prod.yml --env-file .env up -d --build
+#
+# 浏览器访问 Langfuse UI：http://<host>:9310
+# 业务 API 容器内：LANGFUSE_HOST=http://langfuse-web:9310
+
+services:
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:3
+    restart: unless-stopped
+    depends_on: &langfuse-depends-on
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+    expose:
+      - "9330"
+    environment: &langfuse-worker-env
+      PORT: "9330"
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:9310}
+      DATABASE_URL: postgresql://${LANGFUSE_POSTGRES_USER:-langfuse}:${LANGFUSE_POSTGRES_PASSWORD:?请设置 LANGFUSE_POSTGRES_PASSWORD}@langfuse-postgres:9544/${LANGFUSE_POSTGRES_DB:-langfuse}
+      SALT: ${LANGFUSE_SALT:?请设置 LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?请设置 LANGFUSE_ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:9812
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?请设置 LANGFUSE_CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?请设置 LANGFUSE_MINIO_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9910
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET:-langfuse}
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-langfuse}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?请设置 LANGFUSE_MINIO_PASSWORD}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9910
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "9638"
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?请设置 LANGFUSE_REDIS_AUTH}
+    networks:
+      - kb-network
+
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:3
+    restart: unless-stopped
+    depends_on: *langfuse-depends-on
+    ports:
+      - "9310:9310"
+    environment:
+      <<: *langfuse-worker-env
+      PORT: "9310"
+      HOSTNAME: "0.0.0.0"
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?请设置 LANGFUSE_NEXTAUTH_SECRET}
+      # 浏览器侧媒体上传走宿主机映射（本机/云端均为 9310 旁路 MinIO 时用外部可达地址）
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_PUBLIC_ENDPOINT:-http://localhost:9910}
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-kb-org}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-KnowledgeBase}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-kb-project}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-RAG Platform}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?请设置 LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?请设置 LANGFUSE_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@localhost}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-admin}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?请设置 LANGFUSE_INIT_USER_PASSWORD}
+    networks:
+      - kb-network
+
+  langfuse-clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:24.3
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?请设置 LANGFUSE_CLICKHOUSE_PASSWORD}
+    volumes:
+      # 使用命名卷避免 Windows 绑定挂载下 clickhouse(uid=101) Permission denied
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+      - ./docker/langfuse/clickhouse-ports.xml:/etc/clickhouse-server/config.d/ports.xml:ro
+    expose:
+      - "9812"
+      - "9000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9812/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    networks:
+      - kb-network
+
+  langfuse-minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9910" --console-address ":9911" /data'
+    environment:
+      MINIO_ROOT_USER: ${LANGFUSE_MINIO_USER:-langfuse}
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:?请设置 LANGFUSE_MINIO_PASSWORD}
+    volumes:
+      - ./data/langfuse/minio:/data
+    expose:
+      - "9910"
+      - "9911"
+    # 本机调试媒体上传时可映射；云端 prod 覆盖为不暴露
+    ports:
+      - "9910:9910"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9910/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - kb-network
+
+  langfuse-redis:
+    image: docker.io/redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --port
+      - "9638"
+      - --requirepass
+      - ${LANGFUSE_REDIS_AUTH:?请设置 LANGFUSE_REDIS_AUTH}
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - ./data/langfuse/redis:/data
+    expose:
+      - "9638"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p 9638 -a \"$$REDIS_AUTH\" ping | grep -q PONG || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:?请设置 LANGFUSE_REDIS_AUTH}
+    networks:
+      - kb-network
+
+  langfuse-postgres:
+    image: docker.io/postgres:16-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "port=9544"]
+    environment:
+      POSTGRES_USER: ${LANGFUSE_POSTGRES_USER:-langfuse}
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:?请设置 LANGFUSE_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${LANGFUSE_POSTGRES_DB:-langfuse}
+      PGPORT: "9544"
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - ./data/langfuse/postgres:/var/lib/postgresql/data
+    expose:
+      - "9544"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -p 9544"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - kb-network
+
+networks:
+  kb-network:
+    driver: bridge
+
+volumes:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:

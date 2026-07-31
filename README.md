@@ -4,8 +4,8 @@
 
 - **应用版本**：`APP_VERSION=2.1.0`（与产品手册 V2.1 对齐）
 - **技术栈**：FastAPI（异步）· PostgreSQL（pg_trgm + tsvector）· Chroma（向量库）· Redis（会话热态）· MinIO（对象存储）· 原生 ES Module 前端 · Docker Compose 编排
-- **统一入口（本机 Docker 默认）**：`http://localhost:18080`（Nginx 反向代理；容器内监听 8080）
-- **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml`）
+- **统一入口（本机 Docker 默认）**：`http://localhost:9080`（Nginx 反向代理；容器与宿主机均为 9080）
+- **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml` + `docker-compose.langfuse.yml`）
 - **接入第三方 / App**：见 [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md)
 - **六维优化落地状态**：见 [`docs/OPTIMIZATION_STATUS.md`](docs/OPTIMIZATION_STATUS.md)
 
@@ -38,7 +38,7 @@
 
 ## 一、系统架构
 
-平台采用「统一反向代理 + 无状态 API + 多存储后端」的容器化架构。所有外部流量经由单一 Nginx 入口（本机宿主机 **`:18080`** → 容器 `:8080`）分流到静态前端、FastAPI 后端与 Grafana；后端通过异步驱动访问四类存储（关系库 / 向量库 / 缓存 / 对象存储），并调用外部 LLM 与 Embedding HTTP API。
+平台采用「统一反向代理 + 无状态 API + 多存储后端」的容器化架构。所有外部流量经由单一 Nginx 入口（本机宿主机 **`:9080`** → 容器 `:9080`）分流到静态前端、FastAPI 后端与 Grafana；后端通过异步驱动访问四类存储（关系库 / 向量库 / 缓存 / 对象存储），并调用外部 LLM 与 Embedding HTTP API。Langfuse 自建 UI 另开 **`:9310`**。
 
 ### 1.1 架构总览图
 
@@ -49,20 +49,20 @@ flowchart TB
         Admin["管理端 SPA<br/>frontend/admin"]
     end
 
-    subgraph Edge["统一入口 (nginx 宿主机:18080)"]
+    subgraph Edge["统一入口 (nginx 宿主机:9080)"]
         RP["reverse-proxy.conf<br/>限流 / SSE 直通 / 100MB 上传"]
     end
 
     subgraph App["应用层"]
-        WEB["web (nginx :80)<br/>静态资源"]
-        API["api (FastAPI :8000)<br/>REST + SSE"]
+        WEB["web (nginx :9082)<br/>静态资源"]
+        API["api (FastAPI :9081)<br/>REST + SSE"]
     end
 
     subgraph Storage["存储层"]
-        PG[("PostgreSQL :5432<br/>业务库 + 全文检索")]
-        CH[("Chroma :18001→8000<br/>向量库")]
-        RD[("Redis :16379→6379<br/>会话热态 / 任务队列")]
-        MO[("MinIO :19000/19001<br/>原始文档对象存储")]
+        PG[("PostgreSQL :9543<br/>业务库 + 全文检索")]
+        CH[("Chroma 宿主机:9800→8000<br/>向量库")]
+        RD[("Redis :9637<br/>会话热态 / 任务队列")]
+        MO[("MinIO :9900/9901<br/>原始文档对象存储")]
     end
 
     subgraph External["外部模型服务"]
@@ -71,9 +71,9 @@ flowchart TB
     end
 
     subgraph Observ["可观测性"]
-        PROM["Prometheus :9090"]
-        GRAF["Grafana :3001 (/grafana)"]
-        LF["Langfuse Cloud<br/>(外部 SaaS)"]
+        PROM["Prometheus :9909"]
+        GRAF["Grafana :9300 (/grafana)"]
+        LF["Langfuse 自建 :9310"]
     end
 
     Guest --> RP
@@ -98,14 +98,14 @@ flowchart TB
 
 ```text
 浏览器
-  │  http://localhost:18080   （云端一般为 https://你的域名）
+  │  http://localhost:9080   （云端一般为 https://你的域名）
   ▼
-nginx 反向代理 (reverse-proxy.conf, 容器 :8080)
+nginx 反向代理 (reverse-proxy.conf, 容器 :9080)
   ├── /                → web 静态容器 (:80)   → guest / admin / shared 静态资源
-  ├── /api/v1/*        → api (FastAPI :8000)  → 业务接口（proxy_buffering off, read_timeout 600s，SSE 安全）
+  ├── /api/v1/*        → api (FastAPI :9081)  → 业务接口（proxy_buffering off, read_timeout 600s，SSE 安全）
   ├── /api/v1/auth/*   → api                   → 更严格的 auth 限流（5r/s）
   ├── /docs /openapi.json → api                → Swagger UI / OpenAPI
-  └── /grafana/*       → grafana (:3000)       → 监控面板（允许 iframe 嵌入）
+  └── /grafana/*       → grafana (:9300)       → 监控面板（允许 iframe 嵌入）
 ```
 
 - **限流**：`api_limit` 30r/s（burst 60）、`auth_limit` 5r/s（burst 10）。
@@ -144,19 +144,20 @@ nginx 反向代理 (reverse-proxy.conf, 容器 :8080)
 
 | 服务 | 镜像 | 宿主机端口（本机 compose） | 说明 |
 |------|------|---------------------------|------|
-| **nginx**（统一入口） | `nginx:1.25-alpine` | **18080→8080** | **推荐入口**：静态 + `/api` + `/grafana` 反代 |
-| web（静态） | `nginx:1.25-alpine` | 80 | 仅静态资源，内部被反代引用 |
-| api | 由 `backend/Dockerfile` 构建 | **18000→8000** | FastAPI；生产请勿对公网暴露 |
-| postgres | `postgres:16-alpine` | 5432 | 业务主库（uuid-ossp + pg_trgm） |
-| redis | `redis:7-alpine` | **16379→6379** | Windows 常保留 6379；容器内仍 `redis:6379` |
-| chroma | `chromadb/chroma:latest` | **18001→8000** | 向量库（Client-Server 持久化） |
-| minio | `minio/minio:latest` | **19000/19001** | 对象存储 API / 控制台 |
-| prometheus | `prom/prometheus:latest` | 9090 | 指标采集 |
-| grafana | `grafana/grafana:latest` | 3001→3000 | 面板（子路径 `/grafana`） |
+| **nginx**（统一入口） | `nginx:1.25-alpine` | **9080→9080** | **推荐入口**：静态 + `/api` + `/grafana` 反代 |
+| web（静态） | `nginx:1.25-alpine` | （内网 9082） | 仅静态资源，内部被反代引用 |
+| api | 由 `backend/Dockerfile` 构建 | **9081→9081** | FastAPI；生产请勿对公网暴露 |
+| postgres | `postgres:16-alpine` | **9543→9543** | 业务主库（uuid-ossp + pg_trgm） |
+| redis | `redis:7-alpine` | **9637→9637** | 会话热态 / 任务队列 |
+| chroma | `chromadb/chroma:latest` | **9800→8000** | 向量库；镜像容器内固定 8000，宿主机映射 9800 |
+| minio | `minio/minio:latest` | **9900/9901** | 对象存储 API / 控制台 |
+| prometheus | `prom/prometheus:latest` | **9909→9909** | 指标采集 |
+| grafana | `grafana/grafana:latest` | **9300→9300** | 面板（子路径 `/grafana`） |
+| langfuse-web | `langfuse/langfuse:3` | **9310→9310** | 自建追踪 UI / Public API（见 `docker-compose.langfuse.yml`） |
 
-> 云端请使用 `docker-compose.prod.yml`：仅暴露统一入口，数据面端口不对公网开放。详见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)。
+> 云端请使用 `docker-compose.prod.yml`：仅暴露 **9080** 与 **9310**，数据面端口不对公网开放。详见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)。
 
-> LLM 追踪与用量监测对接 **Langfuse Cloud**（或任意兼容端点），通过 `.env` 的 `LANGFUSE_*` 配置；Compose **不再**内置 Langfuse 容器。
+> LLM 追踪默认对接 **自建 Langfuse**（`docker-compose.langfuse.yml`）；配置见 `.env.example` Langfuse 段。
 
 ---
 
@@ -282,36 +283,37 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 ### 2.7 可观测性
 
-- **Prometheus**（`docker/prometheus/`）：15s 抓取 `api:8000/metrics`；`alerts.yml` 定义 `HighHTTPErrorRate`（5xx 占比 >5% 持续 5 分钟告警）。
+- **Prometheus**（`docker/prometheus/`）：15s 抓取 `api:9081/metrics`；`alerts.yml` 定义 `HighHTTPErrorRate`（5xx 占比 >5% 持续 5 分钟告警）。
 - **Grafana**（`docker/grafana/`）：预置 Prometheus 数据源与多张面板（overview / api_performance / llm_monitor / document_processing / qa_analysis / alerts），经 `/grafana` 子路径嵌入管理端监控页。
-- **Langfuse（云端）**：后端在问答生成时上报 model / prompt / completion / token 用量；`services/model_usage.py` 按 `LANGFUSE_HOST`（默认云端）拉取 `metrics/daily` 用量（含 10 分钟 TTL 缓存与 429 限流降级），供管理端「模型用量监测」展示。本地 Compose 不部署 Langfuse 容器。
+- **Langfuse（自建）**：默认随 `docker-compose.langfuse.yml` 部署（UI `http://localhost:9310`）；后端上报用量并由 `model_usage.py` 拉取 `metrics/daily`（含缓存与 429 降级）。也可将 `LANGFUSE_HOST` 改指向 SaaS。
 
 ---
 
 ## 三、快速开始
 
 ```bash
-# 1. 准备环境变量：复制示例并填写标记为 <请填写> 的项
+# 1. 准备环境变量：复制示例并填写标记为 <请填写> 的项（含 Langfuse 自建密钥）
 cp .env.example .env
 
-# 2. 启动核心栈
-docker compose up -d --build postgres redis chroma minio api web nginx prometheus
+# 2. 启动业务栈 + 自建 Langfuse
+docker compose -f docker-compose.yml -f docker-compose.langfuse.yml up -d --build
 
-# 3.（可选）Grafana 监控面板
-docker compose up -d grafana
+# 3. 云端生产（额外叠加 prod）
+# docker compose -f docker-compose.yml -f docker-compose.langfuse.yml -f docker-compose.prod.yml --env-file .env up -d --build
 ```
 
 | 入口 | 地址 |
 |------|------|
-| 统一入口 / 访客端 | http://localhost:18080/ |
-| 管理端 | http://localhost:18080/admin/ |
-| API Swagger | http://localhost:18080/docs |
-| 健康检查 | http://localhost:18080/api/v1/monitor/health |
-| Grafana | http://localhost:18080/grafana/ |
-| API 直连（调试） | http://localhost:18000/docs |
+| 统一入口 / 访客端 | http://localhost:9080/ |
+| 管理端 | http://localhost:9080/admin/ |
+| API Swagger | http://localhost:9080/docs |
+| 健康检查 | http://localhost:9080/api/v1/monitor/health |
+| Grafana | http://localhost:9080/grafana/ |
+| Langfuse | http://localhost:9310/ |
+| API 直连（调试） | http://localhost:9081/docs |
 
-> Langfuse：在 `.env` 配置 `LANGFUSE_HOST` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`。  
-> **云端**：`docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d --build`，见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)。
+> Langfuse：自建栈见 `docker-compose.langfuse.yml`；密钥与 `INIT_*` 见 `.env.example`。  
+> **云端**：`docker compose -f docker-compose.yml -f docker-compose.langfuse.yml -f docker-compose.prod.yml --env-file .env up -d --build`，见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)。
 
 **内置账号**（`SEED_DEMO_USERS=true` 时播种；云端建议关闭演示账号）：
 
@@ -331,8 +333,9 @@ docker compose up -d grafana
 docker compose exec api pytest -q
 
 pip install -r requirements.txt
-# 宿主机调试时：POSTGRES/REDIS/CHROMA 指向 localhost；CHROMA_PORT=18001；REDIS_PORT=16379
-uvicorn app.main:app --reload --app-dir backend --port 8000
+# 宿主机调试时：POSTGRES/REDIS/CHROMA 指向 localhost；
+# POSTGRES_PORT=9543；REDIS_PORT=9637；CHROMA_PORT=9800（宿主机映射）；容器内互访仍用 CHROMA_PORT=8000
+uvicorn app.main:app --reload --app-dir backend --port 9081
 pytest backend/tests -q
 ```
 
@@ -346,14 +349,14 @@ pytest backend/tests -q
 |------|------------------|
 | 应用 | `APP_NAME`、`APP_VERSION=2.1.0`、`DEBUG=false`、`DEPLOYMENT_MODE=local\|cloud`、`PUBLIC_BASE_URL`、`SECRET_KEY` |
 | 超管 / 种子 | `SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_SYNC_PASSWORD`、`SEED_DEMO_USERS`、`AUTH_REGISTER_ENABLED`、`METRICS_PUBLIC` |
-| PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=5432`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
-| Redis | `REDIS_HOST=redis`、`REDIS_PORT=6379`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
-| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`、`CHROMA_TENANT`、`CHROMA_DATABASE` |
-| MinIO | `MINIO_ENDPOINT=minio:9000`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET` |
+| PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=9543`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
+| Redis | `REDIS_HOST=redis`、`REDIS_PORT=9637`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
+| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE` |
+| MinIO | `MINIO_ENDPOINT=minio:9900`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET` |
 | LLM | `LLM_PROVIDER=dashscope`、`LLM_API_KEY`、`LLM_MODEL=qwen3.7-plus`、`LLM_BASE_URL`、思考相关开关 |
 | Embedding | `EMBEDDING_PROVIDER=dashscope`、`EMBEDDING_API_KEY`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_BATCH_SIZE` |
 | Rerank | `RERANK_PROVIDER=dashscope`、`RERANK_API_KEY`、`RERANK_MODEL` |
-| Langfuse | `LANGFUSE_HOST`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` |
+| Langfuse | `LANGFUSE_HOST`（默认 `http://langfuse-web:9310`）、公钥/密钥、自建 `LANGFUSE_NEXTAUTH_*` / `LANGFUSE_*_PASSWORD` / `INIT_*`（见 `.env.example`） |
 | JWT / CORS | `JWT_SECRET_KEY`、`ACCESS_TOKEN_EXPIRE_MINUTES=30`、`CORS_ORIGINS`、`CORS_ALLOW_CREDENTIALS` |
 | 问答 / Guard | `QA_*`、`LLM_GUARD_*`、`ROLE_CACHE_*`、`RAGAS_*` |
 
@@ -403,7 +406,7 @@ pytest backend/tests -q
 **Windows 端口速查**：
 
 ```powershell
-$ports = 18000,18080,5432,16379,18001,19000,19001,9090,3001,80
+$ports = 9080,9081,9543,9637,9800,9900,9901,9909,9300,9310,9910
 foreach ($p in $ports) { netstat -ano | findstr ":$p " | findstr LISTENING }
 docker compose ps
 ```
@@ -422,8 +425,8 @@ docker compose ps
 | [`docs/OPTIMIZATION_STATUS.md`](docs/OPTIMIZATION_STATUS.md) | 六维优化与近期产品变更落地状态 |
 | [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | 契约使用与变更流程 |
-| 运行时 Swagger（官方） | http://localhost:18080/docs |
-| 管理端嵌入 Swagger | http://localhost:18080/assets/vendor/swagger-ui/index.html |
+| 运行时 Swagger（官方） | http://localhost:9080/docs |
+| 管理端嵌入 Swagger | http://localhost:9080/assets/vendor/swagger-ui/index.html |
 
 重新生成契约：`python scripts/generate_openapi.py`。管理端「API 接入指南」页渲染接入文档并嵌入同源 Swagger；完整字段以 `API.md` / `openapi.json` 为准。
 
@@ -472,7 +475,7 @@ docker compose ps
 └── .env.example
 ```
 
-> `docker/nginx/reverse-proxy.conf`：统一入口（容器 8080，本机常映射 18080）。
+> `docker/nginx/reverse-proxy.conf`：统一入口（容器与宿主机均为 9080）。
 
 ---
 

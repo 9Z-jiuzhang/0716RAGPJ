@@ -10,10 +10,10 @@ scrape_configs:
   # Prometheus 自身
   - job_name: "prometheus"
     static_configs:
-      - targets: ["localhost:9090"]
+      - targets: ["localhost:9909"]
 
   # FastAPI 应用指标（后端实现 /metrics 后生效）
   - job_name: "api"
     metrics_path: /metrics
     static_configs:
-      - targets: ["api:8000"]
+      - targets: ["api:9081"]

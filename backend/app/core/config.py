@@ -73,14 +73,14 @@ class Settings(BaseSettings):
 
     # ---------- PostgreSQL ----------
     POSTGRES_HOST: str = "postgres"
-    POSTGRES_PORT: int = 5432
+    POSTGRES_PORT: int = 9543
     POSTGRES_DB: str = "knowledge_base"
     POSTGRES_USER: str = "kb_user"
     POSTGRES_PASSWORD: str = "change-me"
 
     # ---------- Redis（会话热状态与并发隔离） ----------
     REDIS_HOST: str = "redis"
-    REDIS_PORT: int = 6379
+    REDIS_PORT: int = 9637
     REDIS_DB: int = 0
     REDIS_PASSWORD: str = ""
 
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     CHROMA_DATABASE: str = "default_database"
 
     # ---------- MinIO 对象存储 ----------
-    MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_ENDPOINT: str = "minio:9900"
     MINIO_ACCESS_KEY: str = "change-me"
     MINIO_SECRET_KEY: str = "change-me"
     MINIO_BUCKET: str = "knowledge-base-docs"
@@ -138,8 +138,8 @@ class Settings(BaseSettings):
     # 重排前扩大候选集，避免只对最终 Top-K 重排而失去纠正召回顺序的意义。
     RERANK_CANDIDATE_MULTIPLIER: int = 4
 
-    # ---------- Langfuse（云端或自建兼容端点；Compose 不含 Langfuse 容器） ----------
-    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+    # ---------- Langfuse（默认自建 compose 服务；也可指向 SaaS） ----------
+    LANGFUSE_HOST: str = "http://langfuse-web:9310"
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_REDACT_MAX_LEN: int = 500

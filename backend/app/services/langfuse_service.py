@@ -228,14 +228,14 @@ class LangfuseService:
             # 服务可跑，但追踪未启用
             try:
                 t0 = time.perf_counter()
-                async with httpx.AsyncClient(timeout=2.0) as client:
+                async with httpx.AsyncClient(timeout=8.0) as client:
                     await client.get(settings.LANGFUSE_HOST.rstrip("/") + "/")
                 return "degraded", round((time.perf_counter() - t0) * 1000, 2)
             except Exception:
                 return "degraded", None
         try:
             t0 = time.perf_counter()
-            async with httpx.AsyncClient(timeout=2.0) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 resp = await client.get(settings.LANGFUSE_HOST.rstrip("/") + "/api/public/health")
                 latency = round((time.perf_counter() - t0) * 1000, 2)
                 if resp.status_code < 500:

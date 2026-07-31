@@ -3,7 +3,7 @@
 > 本文描述**当前仓库已落地能力**；高风险能力默认开关关闭，开启后即可生效。  
 > 外部「六维核查修订版」计划文档包不在本仓库内；以本文与 `.env.example` / `config.py` 为准。
 
-最后核对日期：2026-07-27（含反馈率口径、ZYUI-V3.1/V3.2 落地页与管理端品牌标）。
+最后核对日期：2026-07-31（含端口 9xxx、自建 Langfuse、Chroma 9800→8000 映射说明）。
 
 ## 总览
 
@@ -125,4 +125,4 @@
 | V3.1 | `/` 改为营销落地页 + 环境粒子场；登录/注册以弹层打开（直链 `#/login` / `#/register` 仍可自动弹出） |
 | V3.2 | 左右分栏（左宣言 / 右预览）；副标题打字机轮播；CTA「立即登录」「访客登录」；9Z logo；`brand-mark.js` 落地页与管理端侧栏共用（localStorage 同步构图） |
 | 共享资源 | `frontend/shared/js/env-particle-field.js`、`brand-mark.js`、`img/logo-9z.png` |
-| 验证 | 本机入口 http://localhost:18080/ ；硬刷新以绕过 CSS/JS cache-bust |
+| 验证 | 本机入口 http://localhost:9080/ ；硬刷新以绕过 CSS/JS cache-bust |

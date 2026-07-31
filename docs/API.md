@@ -36,9 +36,9 @@
 
 | 环境 | Base URL |
 |------|----------|
-| 本地 Docker 统一入口（本仓库默认映射） | `http://localhost:18080/api/v1` |
+| 本地 Docker 统一入口（本仓库默认映射） | `http://localhost:9080/api/v1` |
 | 云端 HTTPS 域名 | `https://<你的域名>/api/v1` |
-| 直连 API（仅调试） | `http://localhost:18000/api/v1` |
+| 直连 API（仅调试） | `http://localhost:9081/api/v1` |
 
 下文路径均相对 Base URL。云端部署步骤见 [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md)。
 
@@ -653,6 +653,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.7 | 2026-07-31 | 云部署端口统一至 9000–9999（入口 9080）；Compose 自建 Langfuse（9310）；Chroma 宿主机 9800→容器 8000；见 CLOUD_DEPLOY.md |
 | 2.1.6 | 2026-07-27 | 前端 ZYUI-V3.1/V3.2：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、9Z/品牌标）；无 OpenAPI 变更；见 README §2.6 / `OPTIMIZATION_STATUS.md` |
 | 2.1.5 | 2026-07-27 | 反馈率口径修正（按窗口内问答消息对齐，≤100%）；补充 `answerable_events` / `matched_feedback`；首页反馈 KPI；访客端流式中止与列表体验见 README / OPTIMIZATION_STATUS |
 | 2.1.4 | 2026-07-25 | 知识库多部门访问：`departments[]` + `kb_departments`；部门侧关联改为追加/局部解除；管理端访问范围多选与「除访客外全选」 |
