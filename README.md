@@ -402,7 +402,7 @@ pytest backend/tests -q
 | `fix_unique_super_admin.py` | `scripts/` | 修正非固定账号上的超管角色 |
 | `reindex_chroma.py` | `backend/app/scripts/` | 将 `document_chunks` 回填 Chroma |
 
-单元/接口回归以 `backend/tests`（pytest）为准；上传解析样例见 `testdoc/`。
+单元/接口回归以 `backend/tests`（pytest）为准。本地上传/隔离联调样例可自备于 `testdoc/`、`testdata/`（已 gitignore，不入库）。
 
 **Windows 端口速查**：
 
@@ -468,8 +468,6 @@ docker compose ps
 │   ├── CLOUD_DEPLOY.md           # 云端部署指南
 │   └── CONTRACT.md               # 契约说明
 ├── scripts/                      # 契约生成 / 种子与运维脚本
-├── testdoc/                      # 隔离测试语料（两组互不相关，含 pdf/doc/docx/txt/md）
-├── testdata/                     # 问答评测样例与用例说明
 ├── docker-compose.yml            # 本机开发编排
 ├── docker-compose.prod.yml       # 云端覆盖
 ├── requirements.txt

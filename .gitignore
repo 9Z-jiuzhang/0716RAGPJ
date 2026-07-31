@@ -48,7 +48,10 @@ htmlcov/
 .tox/
 .mypy_cache/
 .ruff_cache/
-testdata/**/_smoke_result.txt
+
+# 本地测试语料 / 上传样例（不入库）
+testdata/
+testdoc/
 
 # Node（如前端引入构建工具）
 node_modules/
