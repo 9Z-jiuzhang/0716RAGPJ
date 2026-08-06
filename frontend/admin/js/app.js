@@ -3508,7 +3508,7 @@ async function pageDocuments(kbId, opts = {}) {
   /** @type {AbortController | null} */
   let uploadAbort = null;
 
-  const UPLOAD_EXTS = new Set([".pdf", ".doc", ".docx", ".txt", ".md"]);
+  const UPLOAD_EXTS = new Set([".pdf", ".doc", ".docx", ".txt", ".md", ".html", ".htm"]);
   const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
   const MAX_BATCH_FILES = 100;
 
@@ -4478,7 +4478,7 @@ async function pageDocuments(kbId, opts = {}) {
       const selectableCount = items.filter((d) => !DOC_BUSY_STATUSES.has(String(d.status || ""))).length;
 
       const docActions = canUpload
-        ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
+        ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,.html,.htm,text/markdown,text/html,application/pdf" />
                  <input type="file" id="adminFolder" class="hidden" webkitdirectory directory multiple />
                  <button class="btn btn-sm" id="btnAdminUpload">选择文件</button>
                  <button class="btn btn-secondary btn-sm" id="btnAdminUploadFolder">选择文件夹</button>`

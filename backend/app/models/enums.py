@@ -57,9 +57,19 @@ class DocumentFileType(str, Enum):
     DOC = "doc"
     TXT = "txt"
     MD = "md"
+    HTML = "html"
+    HTM = "htm"
     CSV = "csv"
     XLSX = "xlsx"
     PPTX = "pptx"
+
+
+class ContentBlockType(str, Enum):
+    """版面分析块类型（多模态检索）。"""
+
+    TEXT = "text"
+    TABLE = "table"
+    IMAGE = "image"
 
 
 class SplitMode(str, Enum):
@@ -72,7 +82,7 @@ class SplitMode(str, Enum):
     MARKDOWN = "markdown"
 
 
-# 上传首期允许
+# 上传首期允许（含 HTML，支撑图/表/HTML 检索改造）
 UPLOAD_ALLOWED_TYPES = frozenset(
     {
         DocumentFileType.PDF,
@@ -80,6 +90,8 @@ UPLOAD_ALLOWED_TYPES = frozenset(
         DocumentFileType.DOCX,
         DocumentFileType.TXT,
         DocumentFileType.MD,
+        DocumentFileType.HTML,
+        DocumentFileType.HTM,
     }
 )
 # 数据库枚举预留，上传直接拒绝

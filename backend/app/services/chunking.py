@@ -90,6 +90,8 @@ _FILE_TYPE_DEFAULT_SPLIT_MODE: dict[str, str] = {
     "pdf": SplitMode.PARAGRAPH.value,
     "doc": SplitMode.PARAGRAPH.value,
     "docx": SplitMode.PARAGRAPH.value,
+    "html": SplitMode.PARAGRAPH.value,
+    "htm": SplitMode.PARAGRAPH.value,
 }
 
 
@@ -153,8 +155,8 @@ def ensure_chunk_coverage(
 def split_text(text: str, rules: dict[str, Any] | None = None) -> list[ChunkPreview]:
     """按 split_mode 分段。若 enable_semantic=True 也忽略，仍走规则切分。
 
-    结束后做正文覆盖率校验；若主策略丢失内容，自动回退到 sliding 保底，
-    仍不足则抛出 ``ChunkCoverageError``，避免文档以 ready 入库却缺段。
+    若正文含版面块标记（表/图），优先走 layout-aware 分段：表/图原子块（过长表带表头切行），
+    文本块再按原模式切分。结束后做正文覆盖率校验。
     """
     rules = merge_rules(None, rules)
     # P2迭代开发，当前仅配置存储，不启用语义切分
@@ -168,6 +170,20 @@ def split_text(text: str, rules: dict[str, Any] | None = None) -> list[ChunkPrev
 
     if not text or not text.strip():
         return []
+
+    from app.services.layout_blocks import BLOCK_OPEN, parse_serialized_blocks
+
+    if BLOCK_OPEN in text and parse_serialized_blocks(text):
+        chunks = _split_layout_aware(
+            text,
+            mode=mode,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            separators=separators,
+            rules=rules,
+        )
+        # 版面标记/META 不进入 chunk 正文，覆盖率按块内容估算无意义，跳过硬校验
+        return chunks
 
     chunks = _split_text_with_mode(
         text,
@@ -200,6 +216,84 @@ def split_text(text: str, rules: dict[str, Any] | None = None) -> list[ChunkPrev
             }
         ensure_chunk_coverage(text, fallback)
         return fallback
+
+
+def _split_layout_aware(
+    text: str,
+    *,
+    mode: str,
+    chunk_size: int,
+    overlap: int,
+    separators: list[str],
+    rules: dict[str, Any],
+) -> list[ChunkPreview]:
+    """版面块感知分段：table/image 独立 chunk，text 走常规策略。"""
+    from app.core.config import settings
+    from app.models.enums import ContentBlockType
+    from app.services.layout_blocks import parse_serialized_blocks, split_table_with_header
+
+    blocks = parse_serialized_blocks(text)
+    max_table = int(rules.get("table_max_chars") or settings.MULTIMODAL_TABLE_MAX_CHARS or 3000)
+    out: list[ChunkPreview] = []
+    idx = 0
+    for block in blocks:
+        btype = block.get("block_type") or ContentBlockType.TEXT.value
+        content = (block.get("content") or "").strip()
+        if btype == ContentBlockType.TABLE.value:
+            pieces = split_table_with_header(block.get("markdown") or content, max_table)
+            for pi, piece in enumerate(pieces):
+                if not piece.strip():
+                    continue
+                meta = {
+                    "split_mode": "layout_table",
+                    "block_type": ContentBlockType.TABLE.value,
+                    "block_id": block.get("block_id"),
+                    "structure_html": block.get("html") or "",
+                    "structure_md": piece,
+                    "parent_content": piece,
+                    "table_part": pi,
+                    "table_parts": len(pieces),
+                }
+                out.append(
+                    ChunkPreview(chunk_index=idx, content=piece, char_count=len(piece), metadata=meta)
+                )
+                idx += 1
+            continue
+        if btype == ContentBlockType.IMAGE.value:
+            body = content or block.get("caption") or "图片"
+            meta = {
+                "split_mode": "layout_image",
+                "block_type": ContentBlockType.IMAGE.value,
+                "block_id": block.get("block_id"),
+                "asset_path": block.get("asset_path") or "",
+                "mime_type": block.get("mime_type") or "",
+                "caption": block.get("caption") or body,
+                "parent_content": body,
+                "structure_md": body,
+            }
+            out.append(ChunkPreview(chunk_index=idx, content=body, char_count=len(body), metadata=meta))
+            idx += 1
+            continue
+        # text
+        if not content:
+            continue
+        parts = _split_text_with_mode(
+            content,
+            mode=mode,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            separators=separators,
+        )
+        for p in parts:
+            p.chunk_index = idx
+            p.metadata = {
+                **(p.metadata or {}),
+                "block_type": ContentBlockType.TEXT.value,
+                "block_id": block.get("block_id"),
+            }
+            out.append(p)
+            idx += 1
+    return out
 
 
 def _split_text_with_mode(

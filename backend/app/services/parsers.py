@@ -20,6 +20,8 @@ def extract_text(filename: str, content: bytes, file_type: str) -> str:
     try:
         if ft == DocumentFileType.TXT.value or ft == DocumentFileType.MD.value:
             return _decode_bytes(content)
+        if ft in {DocumentFileType.HTML.value, DocumentFileType.HTM.value}:
+            return _extract_html_text(content)
         if ft == DocumentFileType.PDF.value:
             return _extract_pdf(content)
         if ft == DocumentFileType.DOCX.value:
@@ -32,6 +34,21 @@ def extract_text(filename: str, content: bytes, file_type: str) -> str:
         logger.exception("extract_text failed filename=%s type=%s", filename, ft)
         raise UnsupportedFileTypeError(f"{ft}(解析失败: {exc})") from exc
     raise UnsupportedFileTypeError(ft)
+
+
+def _extract_html_text(content: bytes) -> str:
+    """HTML 纯文本兜底（无版面拆块时使用）。"""
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(_decode_bytes(content), "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        return soup.get_text("\n", strip=True)
+    except Exception:
+        # 去标签粗抽
+        text = _decode_bytes(content)
+        return re.sub(r"<[^>]+>", " ", text)
 
 
 def _decode_bytes(content: bytes) -> str:

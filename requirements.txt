@@ -41,6 +41,8 @@ python-pptx>=0.6,<1.0
 openpyxl>=3.1,<4.0
 olefile>=0.46,<1.0
 chardet>=5.2,<6.0
+beautifulsoup4>=4.12,<5.0
+lxml>=5.0,<6.0
 
 # LLM 相关
 openai>=1.30,<2.0
