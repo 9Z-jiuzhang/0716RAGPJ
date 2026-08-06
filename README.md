@@ -149,7 +149,7 @@ nginx 反向代理 (reverse-proxy.conf, 容器 :9080)
 | api | 由 `backend/Dockerfile` 构建 | **9081→9081** | FastAPI；生产请勿对公网暴露 |
 | postgres | `postgres:16-alpine` | **9543→9543** | 业务主库（uuid-ossp + pg_trgm） |
 | redis | `redis:7-alpine` | **9637→9637** | 会话热态 / 任务队列 |
-| chroma | `chromadb/chroma:latest` | **9800→8000** | 向量库；镜像容器内固定 8000，宿主机映射 9800 |
+| chroma | `chromadb/chroma:0.6.3` | **9800→8000** | 向量库；**须与 API 内 `chromadb` 0.6.x 客户端对齐**，勿用 `latest`（新版仅 v2 API，写入会报 `_type`） |
 | minio | `minio/minio:latest` | **9900/9901** | 对象存储 API / 控制台 |
 | prometheus | `prom/prometheus:latest` | **9909→9909** | 指标采集 |
 | grafana | `grafana/grafana:latest` | **9300→9300** | 面板（子路径 `/grafana`） |
@@ -259,9 +259,10 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 | vectorizing | `chunking.split_text` 分段 → `embedding.embed_texts`（批大小 `EMBEDDING_BATCH_SIZE=10`，DashScope v3 上限）→ `vector_store.upsert_chunks` 写入 Chroma |
 | ready | 写入 `doc.index_version`；若 KB 无激活索引则设 `current_index_version` |
 
-- **上传格式**：首期支持 `pdf/doc/docx/txt/md`；`csv/xlsx/pptx` 明确拒绝（契约预留）。
+- **上传格式**：首期支持 `pdf/doc/docx/txt/md`；`csv/xlsx/pptx` 明确拒绝（契约预留）。txt/md 解码支持 UTF-8 / GBK / UTF-16（含 BOM）等常见编码。
 - **索引版本**：`IndexVersion` 记录每次构建；回退/重建通过 `IndexSwitchService` 行锁 + 原子切换 `current_index_version`，历史版本保留可回溯。
 - **禁用分段**：`chunk.is_enabled=false` 的分段不参与检索与引用。
+- **Chroma 兼容**：Compose 固定 `chromadb/chroma:0.6.3`，`requirements.txt` 为 `chromadb>=0.6.3,<0.7.0`。升级镜像时须同步升级 Python 客户端并重建向量数据，否则会出现 `KeyError: '_type'`。
 
 ### 2.5 检索层
 
@@ -278,9 +279,9 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **访客端** `frontend/guest/`（挂载 `/`）：**营销落地页**（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、**流式中止**、引用相关度 Top-3 展开/其余折叠、置信提示）、对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势、错误分桶、**近 14 日问答反馈 KPI/趋势**）与安全窗口；侧栏共用品牌矢量标；用户/角色/部门（全量拉取 + 本地分页，用户表可排序/按部门筛选）；大模型与用量；知识库/文档工作台/快照（「访问范围」**多选部门**，含「除访客外全选」）；命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
-- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、`brand-mark.js`（落地页/侧栏品牌标）、`env-particle-field.js`（落地页粒子场）、主题/动效（含统计数字格式化）、公共 CSS、`img/logo-9z.png`、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
+- **访客端** `frontend/guest/`（挂载 `/`）：**营销落地页**（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、**流式中止**、**知识库下拉**、**Query 改写开关**、输入上限 **2000 字**提示、引用相关度 Top-3 展开/其余折叠、置信提示）、对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（含**字节上传进度** + 管道状态轮询，员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势、错误分桶、**近 14 日问答反馈 KPI/趋势**）与安全窗口；侧栏共用品牌矢量标；用户/角色/部门（全量拉取 + 本地分页，用户表可排序/按部门筛选）；大模型与用量；知识库/文档工作台/快照（「访问范围」**多选部门**，含「除访客外全选」；上传列表展示**上传百分比**）；命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
+- **共享** `frontend/shared/`：`api.js`（含 `upload` 的 `onProgress` 字节进度）、`auth.js`、`router.js`、`brand-mark.js`（落地页/侧栏品牌标）、`env-particle-field.js`（落地页粒子场）、主题/动效（含统计数字格式化）、公共 CSS、`img/logo-9z.png`、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
 
 ### 2.7 可观测性
 
@@ -352,7 +353,7 @@ pytest backend/tests -q
 | 超管 / 种子 | `SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_SYNC_PASSWORD`、`SEED_DEMO_USERS`、`AUTH_REGISTER_ENABLED`、`METRICS_PUBLIC` |
 | PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=9543`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
 | Redis | `REDIS_HOST=redis`、`REDIS_PORT=9637`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
-| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE` |
+| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE`；镜像固定 `chromadb/chroma:0.6.3` |
 | MinIO | `MINIO_ENDPOINT=minio:9900`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET` |
 | LLM | `LLM_PROVIDER=dashscope`、`LLM_API_KEY`、`LLM_MODEL=qwen3.7-plus`、`LLM_BASE_URL`、思考相关开关 |
 | Embedding | `EMBEDDING_PROVIDER=dashscope`、`EMBEDDING_API_KEY`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_BATCH_SIZE` |

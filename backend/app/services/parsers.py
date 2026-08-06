@@ -35,30 +35,64 @@ def extract_text(filename: str, content: bytes, file_type: str) -> str:
 
 
 def _decode_bytes(content: bytes) -> str:
-    """统一字节解码：优先 chardet，再回退常见中文编码。"""
+    """统一字节解码：优先 BOM/chardet，再回退常见中文与 Unicode 编码。"""
     if not content:
         return ""
-    detected = _detect_encoding(content)
+
     candidates: list[str] = []
+    # BOM 优先，避免把 UTF-16/UTF-8-SIG 文件误判为乱码
+    if content.startswith(b"\xff\xfe"):
+        candidates.append("utf-16-le")
+    elif content.startswith(b"\xfe\xff"):
+        candidates.append("utf-16-be")
+    elif content.startswith(b"\xef\xbb\xbf"):
+        candidates.append("utf-8-sig")
+
+    detected = _detect_encoding(content)
     if detected:
         candidates.append(detected)
-    candidates.extend(["utf-8", "utf-8-sig", "gb18030", "gbk", "gb2312", "big5", "latin-1"])
+    candidates.extend(
+        [
+            "utf-8",
+            "utf-8-sig",
+            "utf-16",
+            "utf-16-le",
+            "utf-16-be",
+            "gb18030",
+            "gbk",
+            "gb2312",
+            "big5",
+            "latin-1",
+        ]
+    )
+
     seen: set[str] = set()
+    best_fallback: str | None = None
+    best_score = -1.0
     for enc in candidates:
-        key = enc.lower()
+        key = enc.lower().replace("_", "-")
         if key in seen:
             continue
         seen.add(key)
         try:
             text = content.decode(enc)
-            if _looks_garbled(text):
-                continue
-            return text
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, LookupError):
             continue
-    # 最后兜底：不把大量替换符当作成功结果
+        score = _text_quality_score(text)
+        if score > best_score:
+            best_score = score
+            best_fallback = text
+        if not _looks_garbled(text):
+            return text
+
+    # 兜底：选质量最高的一次解码；中文正文足够时放行
+    if best_fallback is not None and (
+        best_score >= 0.45 or _cjk_ratio(best_fallback) >= 0.08
+    ):
+        return best_fallback
+
     text = content.decode("utf-8", errors="replace")
-    if _looks_garbled(text):
+    if _looks_garbled(text) and _cjk_ratio(text) < 0.05:
         raise UnsupportedFileTypeError("txt(编码无法识别，请另存为 UTF-8 或 GBK)")
     return text
 
@@ -71,20 +105,41 @@ def _detect_encoding(content: bytes) -> str | None:
         result = chardet.detect(sample) or {}
         enc = result.get("encoding")
         conf = float(result.get("confidence") or 0)
-        if enc and conf >= 0.5:
+        if enc and conf >= 0.35:
             return str(enc)
     except Exception:
         logger.debug("chardet unavailable or failed", exc_info=True)
     return None
 
 
+def _cjk_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    return cjk / max(len(text), 1)
+
+
+def _text_quality_score(text: str) -> float:
+    """越高越像可读正文（兼顾中英文）。"""
+    if not text:
+        return 0.0
+    replacement = text.count("\ufffd")
+    printable = sum(1 for ch in text if ch.isprintable() or ch in "\n\t\r")
+    printable_ratio = printable / max(len(text), 1)
+    replacement_penalty = min(0.5, replacement / max(len(text), 1) * 4)
+    return printable_ratio + _cjk_ratio(text) * 0.35 - replacement_penalty
+
+
 def _looks_garbled(text: str) -> bool:
     if not text:
         return True
-    # 替换符过多、或几乎无可打印中英文字符时视为失败
     replacement = text.count("\ufffd")
     if replacement > max(8, len(text) // 20):
         return True
+    # 含较多汉字时放宽可打印比例，避免 UTF-16/混编码被误杀
+    if _cjk_ratio(text) >= 0.08:
+        printable = sum(1 for ch in text if ch.isprintable() or ch in "\n\t\r")
+        return printable / max(len(text), 1) < 0.45
     printable = sum(1 for ch in text if ch.isprintable() or ch in "\n\t\r")
     return printable / max(len(text), 1) < 0.6
 

@@ -2671,6 +2671,65 @@ html[data-theme="light"] .qa-scroll-bottom:hover {
   overflow: visible;
 }
 
+.qa-composer-options {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 2px 0 0;
+  padding: 0 2px;
+}
+
+.qa-opt-kb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-text-muted, #8a93a3);
+}
+
+.qa-opt-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.qa-kb-select {
+  width: auto;
+  min-width: 140px;
+  max-width: min(240px, 46vw);
+  height: 30px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+.qa-opt-rewrite {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted, #8a93a3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.qa-opt-rewrite input {
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
+.qa-composer-hint {
+  flex: 1 1 160px;
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-muted, #8a93a3);
+  text-align: right;
+}
+
 html[data-theme="light"] .qa-composer {
   background: rgba(255, 255, 255, 0.88);
   border-color: rgba(56, 135, 240, 0.22);

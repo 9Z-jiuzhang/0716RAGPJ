@@ -105,14 +105,14 @@ services:
 
   # ---------- Chroma 向量库 ----------
   chroma:
-    # 需与 API 内 chromadb>=1.0 匹配；官方镜像容器内固定监听 8000，宿主机映射到 9800
-    image: chromadb/chroma:latest
+    # 与 API 容器内 chromadb 0.6.x 客户端对齐；勿用 latest（新版仅 v2 API，会触发 KeyError: '_type'）
+    image: chromadb/chroma:0.6.3
     ports:
       - "9800:8000"
     environment:
       IS_PERSISTENT: "TRUE"
       PERSIST_DIRECTORY: /chroma/chroma
-      CHROMA_SERVER_HOST: "0.0.0.0"
+      ANONYMIZED_TELEMETRY: "FALSE"
     volumes:
       - ./data/chroma:/chroma/chroma
     healthcheck:

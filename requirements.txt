@@ -12,8 +12,8 @@ psycopg2-binary>=2.9,<3.0
 redis>=5.0,<6.0
 hiredis>=2.3,<3.0
 
-# 向量数据库
-chromadb>=1.5,<2.0
+# 向量数据库（须与 docker-compose 中 chromadb/chroma 镜像大版本一致）
+chromadb>=0.6.3,<0.7.0
 
 # 对象存储
 minio>=7.2,<8.0

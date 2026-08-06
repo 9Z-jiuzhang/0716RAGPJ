@@ -780,6 +780,11 @@ schemas["AskRequest"] = {
         "strategy": prop("string", enum=_STRATEGIES, default="hybrid"),
         "top_k": prop("integer", minimum=1, maximum=20, default=5),
         "temperature": prop("number", minimum=0, maximum=2, default=0.7),
+        "rewrite_enabled": prop(
+            "boolean",
+            nullable=True,
+            description="是否对本轮启用 Query 改写；不传则沿用管理员全局策略",
+        ),
     },
 }
 schemas["CitationResponse"] = {
@@ -1800,6 +1805,37 @@ paths[f"{KBD}/{{doc_id}}/chunks/{{chunk_id}}"] = {
 }
 
 # ---- 问答 ----
+paths["/qa/accessible-kbs"] = {
+    "get": op(
+        "可检索知识库列表",
+        "按当前身份（访客/登录用户）返回已建索引、可用于问答的知识库，供问答页下拉选择。",
+        ["智能问答"],
+        public=True,
+        security=[{"BearerAuth": []}, {}],
+        responses={
+            **resp(
+                "成功",
+                {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": uuid_prop(),
+                                    "name": prop("string"),
+                                },
+                            },
+                        },
+                        "total": prop("integer"),
+                    },
+                },
+            ),
+            **err_resps(500),
+        },
+    )
+}
 paths["/qa/ask"] = {
     "post": op(
         "发送问题（SSE）",

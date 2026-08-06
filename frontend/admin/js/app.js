@@ -6,7 +6,7 @@
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=gap-opt-0721s";
-import { api, clearDemoFlags } from "/assets/js/api.js?v=ask-auth-refresh-0725a";
+import { api, clearDemoFlags } from "/assets/js/api.js?v=upload-progress-0806a";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js?v=gap-opt-0721s";
 import { escapeHtml, formatDateTime, formatDateTimeHtml, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=bug-ui-palette-0721ea";
 import { initMotion, runCountUps, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
@@ -3532,7 +3532,10 @@ async function pageDocuments(kbId, opts = {}) {
 
   const statusLabel = (item) => {
     if (item.status === "pending") return "等待中";
-    if (item.status === "uploading") return "上传中…";
+    if (item.status === "uploading") {
+      const pct = Number(item.uploadPct);
+      return Number.isFinite(pct) && pct >= 0 ? `上传中 ${pct}%` : "上传中…";
+    }
     if (item.status === "processing") {
       const pipe = String(item.pipeStatus || "").toLowerCase();
       const meta = DOC_STATUS_META[pipe];
@@ -3902,12 +3905,13 @@ async function pageDocuments(kbId, opts = {}) {
     wireDropzone();
   };
 
-  const doUploadFile = async (file) => {
+  const doUploadFile = async (file, onProgress) => {
     if (!file) throw new Error("请选择文件");
     const fd = new FormData();
     fd.append("file", file);
     const doc = await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd, {
       signal: uploadAbort?.signal,
+      onProgress,
     });
     return doc;
   };
@@ -3961,11 +3965,21 @@ async function pageDocuments(kbId, opts = {}) {
           break;
         }
         item.status = "uploading";
+        item.uploadPct = 0;
         delete item.error;
         delete item.pipeStatus;
         paintDropzoneBatch();
         try {
-          const doc = await doUploadFile(item.file);
+          let lastPaint = 0;
+          const doc = await doUploadFile(item.file, (pct) => {
+            item.uploadPct = pct >= 0 ? pct : item.uploadPct ?? 0;
+            const now = Date.now();
+            if (now - lastPaint > 200 || pct >= 100 || pct < 0) {
+              lastPaint = now;
+              paintDropzoneBatch();
+            }
+          });
+          delete item.uploadPct;
           if (uploadCancelled) {
             item.status = "cancelled";
             item.error = "已取消";
@@ -3976,7 +3990,8 @@ async function pageDocuments(kbId, opts = {}) {
             delete item.error;
           }
         } catch (e) {
-          if (uploadCancelled || e.message === "已取消上传") {
+          delete item.uploadPct;
+          if (uploadCancelled || e.message === "已取消上传" || e.name === "AbortError") {
             item.status = "cancelled";
             item.error = "已取消";
             markRemainingCancelled();
