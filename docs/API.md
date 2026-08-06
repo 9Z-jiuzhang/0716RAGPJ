@@ -385,6 +385,7 @@ Authorization: Bearer <access_token>
 | POST | `.../documents/upload` | `kb:upload` | **multipart/form-data**，字段 `file`；`201` 并触发流水线 |
 | GET | `.../documents/{doc_id}` | `doc:read` | 详情与状态 |
 | GET | `.../documents/{doc_id}/content` | `doc:read` | 原文/规范化文本预览 |
+| GET | `.../documents/{doc_id}/markdown` | `doc:read` | **导出 Markdown**：纯文本返回 `.md`；PDF 含图表时返回 **zip**（`*.md` + `charts/page-XX.png`，MD 内相对链接打开图表，并保留图数据/多模态描述）。输出已剔除 `\\0` 控制符。 |
 | DELETE | `.../documents/{doc_id}` | `doc:write` | 删除文档 + 向量 + MinIO 对象 |
 | PUT | `.../documents/{doc_id}/segment-rules` | `doc:segment` | 仅保存**文档级**规则（不回写知识库默认、不重分段） |
 | POST | `.../documents/{doc_id}/segment-preview` | `doc:segment` | 对已存文档试分段（不落库） |
@@ -399,8 +400,9 @@ Authorization: Bearer <access_token>
 
 - **Content-Type**：`multipart/form-data`（字段名 `file`）。
 - **体积**：反向代理 `client_max_body_size 100m`；超限 → `413`。
-- **格式**：首期支持 `pdf/doc/docx/txt/md`；`csv/xlsx/pptx` 明确拒绝并返回错误。
-- **默认分段**：按扩展名自动选择（`md`→`markdown`，`txt/pdf/doc/docx`→`paragraph`，其它→`fixed`），不继承知识库默认规则；之后可在文档工作台改规则并重分段。
+- **格式**：支持 `pdf/doc/docx/pptx/txt/md`；`csv/xlsx` 明确拒绝并返回错误。
+- **默认分段**：按扩展名自动选择（`md`→`markdown`，`txt/pdf/doc/docx/pptx`→`paragraph`，其它→`fixed`），不继承知识库默认规则；之后可在文档工作台改规则并重分段。
+- **Markdown 导出看图**：`MARKITDOWN_LLM_ENABLED=true`（默认）时，导出调用多模态模型（`MARKITDOWN_LLM_MODEL`，默认 `qwen-vl-plus`）描述图表；需配置 `LLM_API_KEY` 或 `MARKITDOWN_LLM_API_KEY`。
 - **流水线状态**：`uploaded → parsing → processing → pending_segment → vectorizing → ready`，失败为 `error`（带 `error_message`）。
 
 ### 9.2 主要响应结构
@@ -450,7 +452,7 @@ Authorization: Bearer <access_token>
 
 > 多级缓存 L1–L4 由功能开关控制；命中多级缓存时走短路径（无独立 `cache_hit` 事件名，元数据写入 `retrieval_meta`）。角色缓存仍发 `cache_hit`。
 
-**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky` 会话延续）。向量相关度一般为 `1 - cosine_distance`。
+**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky` 会话延续）；可选 `images[]`（`page`、`url`），为 PDF 入库栅格化图表页，URL 形如 `/api/v1/qa/documents/{doc_id}/charts/page-XX.png`（权限与 `/qa/ask` 一致）。向量相关度一般为 `1 - cosine_distance`。
 
 **多轮粘性证据**（`QA_STICKY_EVIDENCE_ENABLED`，默认开）：路由为上下文跟进问且上轮助手消息含 citations 时，将上轮引用分段合并进本轮证据（并可补同文档邻段），避免 top_k 漏召回导致前后矛盾。会话历史仍**不得**替代检索证据；本轮无依据时说「本轮检索依据不足」，不得称上轮为幻觉。
 
@@ -468,6 +470,7 @@ Authorization: Bearer <access_token>
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
+| GET | `/qa/documents/{doc_id}/charts/{filename}` | 与 ask 可见库一致 | 返回 PNG（`page-01.png`）；旧 PDF 可按需栅格化 |
 | GET | `/qa/sessions` | 需登录 | 仅本人会话（分页） |
 | GET | `/qa/sessions/{session_id}` | 需登录 | 消息历史（含 citations，默认 `page_size=50`） |
 | PUT | `/qa/sessions/{session_id}` | 需登录 | Body：`title`(1–100) |

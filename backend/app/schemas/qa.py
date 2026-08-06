@@ -10,6 +10,13 @@ from app.schemas.common import PaginationResponse
 from pydantic import BaseModel, Field
 
 
+class CitationImageSchema(BaseModel):
+    """引用关联的文档图表页（PDF 栅格化 PNG）。"""
+
+    page: int = Field(description="页码，从 1 开始")
+    url: str = Field(description="相对 API 路径，需带登录态或访客可访问库权限拉取")
+
+
 class CitationSchema(BaseModel):
     """回答引用来源片段。"""
 
@@ -20,6 +27,10 @@ class CitationSchema(BaseModel):
     score: float = Field(description="相关性得分")
     chunk_id: UUID | None = Field(default=None, description="分段 ID（粘性证据回溯用）")
     source: str | None = Field(default=None, description="命中来源：vector/fulltext/hybrid/sticky")
+    images: list[CitationImageSchema] = Field(
+        default_factory=list,
+        description="该文档图表页（按 doc 去重后前端汇总展示）",
+    )
 
 
 class AskRequest(BaseModel):

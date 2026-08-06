@@ -3431,6 +3431,60 @@ html[data-theme="light"] .msg-pipeline-reasoning {
   margin-bottom: 6px;
 }
 
+.citation-charts {
+  margin: 8px 0 12px;
+}
+
+.citation-charts-heading {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-muted, var(--color-text));
+  margin-bottom: 8px;
+}
+
+.citation-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.citation-chart-item {
+  margin: 0;
+  padding: 6px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+html[data-theme="light"] .citation-chart-item {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.citation-chart-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  min-height: 72px;
+}
+
+.citation-chart-img--error {
+  outline: 1px dashed rgba(220, 80, 80, 0.5);
+  opacity: 0.7;
+}
+
+.citation-chart-caption {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.65));
+  word-break: break-word;
+}
+
 .citation-item {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);

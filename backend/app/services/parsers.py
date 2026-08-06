@@ -24,6 +24,8 @@ def extract_text(filename: str, content: bytes, file_type: str) -> str:
             return _extract_pdf(content)
         if ft == DocumentFileType.DOCX.value:
             return _extract_docx(content)
+        if ft == DocumentFileType.PPTX.value:
+            return _extract_pptx(content)
         if ft == DocumentFileType.DOC.value:
             return _extract_doc(content)
     except UnsupportedFileTypeError:
@@ -89,7 +91,79 @@ def _looks_garbled(text: str) -> bool:
     return printable / max(len(text), 1) < 0.6
 
 
+# PDF CID / 自定义编码乱码：/uni00000037 或 (cid:123)
+_PDF_CID_TOKEN_RE = re.compile(r"(?:/uni[0-9a-fA-F]{4,8}|\(cid:\d+\))", re.IGNORECASE)
+
+_RAG_PDF_VISION_PROMPT = (
+    "你是 PDF 页面文字抽取助手。请用中文完整转写截图中的全部可读文字与图表信息，要求："
+    "1) 保留标题、正文、图注、图例、坐标轴与关键数值；"
+    "2) 图表数据尽量整理成 Markdown 表格；"
+    "3) 提炼一句话结论；"
+    "4) 只输出可检索的纯文本/Markdown，不要代码块围栏，不要道歉或解释过程。"
+)
+
+
+def is_unusable_pdf_text(text: str | None) -> bool:
+    """判断 PDF 抽取结果是否为 CID/字形乱码或几乎不可检索。"""
+    if not text or not str(text).strip():
+        return True
+    s = str(text)
+    if _PDF_CID_TOKEN_RE.search(s):
+        tokens = _PDF_CID_TOKEN_RE.findall(s)
+        # 出现多个 uni/cid 标记，或标记占比过高 → 乱码
+        if len(tokens) >= 3:
+            return True
+        stripped = _PDF_CID_TOKEN_RE.sub("", s)
+        if len(stripped.strip()) < max(24, len(s) // 10):
+            return True
+    cjk = sum(1 for ch in s if "\u4e00" <= ch <= "\u9fff")
+    if cjk >= 8:
+        return False
+    ascii_keep = sum(1 for ch in s if ch.isascii() and (ch.isalnum() or ch in " \n\t.%-+/"))
+    non_ascii = sum(1 for ch in s if (not ch.isascii()) and ch not in "\n\t\r")
+    # 纯英文数字文档可用；夹杂异常非 ASCII 且无中文则视为不可用
+    if non_ascii == 0 and ascii_keep >= 20:
+        return False
+    return True
+
+
 def _extract_pdf(content: bytes) -> str:
+    """PDF 文本抽取：原生抽取 → 乱码则多模态看图转写。"""
+    candidates: list[str] = []
+    for name, extractor in (
+        ("pypdf", _extract_pdf_pypdf),
+        ("pymupdf", _extract_pdf_pymupdf),
+    ):
+        try:
+            text = (extractor(content) or "").strip()
+        except Exception as exc:
+            logger.warning("pdf extract via %s failed: %s", name, exc)
+            continue
+        if not text:
+            continue
+        candidates.append(text)
+        if not is_unusable_pdf_text(text):
+            return text
+
+    vision = ""
+    try:
+        vision = (_extract_pdf_via_vision(content) or "").strip()
+    except Exception as exc:
+        logger.warning("pdf vision fallback failed: %s", exc)
+    if vision and not is_unusable_pdf_text(vision):
+        return vision
+
+    # 绝不把 /uni CID 乱码写入知识库污染检索
+    if candidates and is_unusable_pdf_text(candidates[0]):
+        raise UnsupportedFileTypeError(
+            "pdf(页面文字无法抽取：字体缺少 ToUnicode/为 Type3 字形。"
+            "已尝试多模态转写但仍失败，请检查 MARKITDOWN_LLM_* / LLM_API_KEY，"
+            "或另存为可复制文本的 PDF 后重传)"
+        )
+    return vision or (candidates[0] if candidates else "")
+
+
+def _extract_pdf_pypdf(content: bytes) -> str:
     from PyPDF2 import PdfReader
 
     reader = PdfReader(io.BytesIO(content))
@@ -101,11 +175,84 @@ def _extract_pdf(content: bytes) -> str:
     return "\n\n".join(parts)
 
 
+def _extract_pdf_pymupdf(content: bytes) -> str:
+    import fitz
+
+    doc = fitz.open(stream=content, filetype="pdf")
+    try:
+        parts = [(page.get_text("text") or "").strip() for page in doc]
+        return "\n\n".join(p for p in parts if p)
+    finally:
+        doc.close()
+
+
+def _extract_pdf_via_vision(content: bytes) -> str:
+    """将每页栅格化后用多模态模型转写，供 CID 乱码 PDF 入库检索。"""
+    from app.core.config import settings
+
+    if not settings.MARKITDOWN_LLM_ENABLED:
+        logger.warning("MARKITDOWN_LLM_ENABLED=false，跳过 PDF 看图转写")
+        return ""
+
+    # 延迟导入，避免与 markitdown_export 循环依赖
+    from app.services.markitdown_export import (
+        _llm_describe_png,
+        _markitdown_llm_kwargs,
+        _rasterize_pdf_pages,
+    )
+
+    kwargs = _markitdown_llm_kwargs()
+    client = kwargs.get("llm_client")
+    model = kwargs.get("llm_model")
+    if client is None or not model:
+        return ""
+
+    pages = _rasterize_pdf_pages(content, zoom=2.0)
+    if not pages:
+        return ""
+
+    sections: list[str] = []
+    for idx, png in enumerate(pages, start=1):
+        try:
+            body = (_llm_describe_png(png, client=client, model=str(model), prompt=_RAG_PDF_VISION_PROMPT) or "").strip()
+        except Exception as exc:
+            logger.warning("pdf vision page %s failed: %s", idx, exc)
+            body = ""
+        if body:
+            sections.append(f"## 第 {idx} 页\n\n{body}")
+    return "\n\n".join(sections)
+
+
 def _extract_docx(content: bytes) -> str:
     from docx import Document as DocxDocument
 
     doc = DocxDocument(io.BytesIO(content))
     return "\n".join(p.text for p in doc.paragraphs if p.text and p.text.strip())
+
+
+def _extract_pptx(content: bytes) -> str:
+    """抽取 PPTX 幻灯片文本（图表本身由 MarkItDown+LLM 在导出时描述）。"""
+    from pptx import Presentation
+
+    prs = Presentation(io.BytesIO(content))
+    parts: list[str] = []
+    for idx, slide in enumerate(prs.slides, start=1):
+        texts: list[str] = []
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for para in shape.text_frame.paragraphs:
+                    line = "".join(run.text for run in para.runs).strip()
+                    if line:
+                        texts.append(line)
+            if getattr(shape, "has_table", False):
+                table = shape.table
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells if cell.text and cell.text.strip()]
+                    if cells:
+                        texts.append(" | ".join(cells))
+        if texts:
+            parts.append(f"## 幻灯片 {idx}\n" + "\n".join(texts))
+    return "\n\n".join(parts)
 
 
 def _extract_doc_via_external(content: bytes) -> str | None:

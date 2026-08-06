@@ -336,6 +336,31 @@ async def get_document_detail(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.U
     return doc
 
 
+async def export_document_markdown(
+    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID
+):
+    """从 MinIO 原文件导出 Markdown（PDF 可附带 charts PNG，返回 MarkdownExportResult）。"""
+    import asyncio
+
+    from app.services.markitdown_export import export_document_bundle
+
+    doc = await get_document_detail(db, kb_id, doc_id)
+    if not doc.file_path:
+        raise DocumentError("文档原文件路径缺失", http_status=404)
+    try:
+        content = await asyncio.to_thread(storage.download_bytes, doc.file_path)
+    except Exception as exc:
+        logger.exception("MinIO download failed for markdown export doc_id=%s", doc_id)
+        raise DocumentError(f"读取原文件失败: {exc}", http_status=502) from exc
+
+    return await asyncio.to_thread(
+        export_document_bundle,
+        filename=doc.filename,
+        content=content,
+        file_type=doc.file_type,
+    )
+
+
 _PREVIEW_MAX_CHARS = 80_000
 
 
@@ -399,11 +424,17 @@ async def delete_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID,
         resource_id=str(doc_id),
         detail={
             "filename": doc.filename,
-            "cleared": ["db", "chunks", "minio", "chroma"],
+            "cleared": ["db", "chunks", "minio", "chroma", "charts"],
         },
     )
     await db.commit()
     storage.delete_object(file_path)
+    try:
+        from app.services.document_charts import delete_document_charts
+
+        delete_document_charts(kb_id, doc_id)
+    except Exception:
+        pass
     record_metric("delete", "ok")
 
 
@@ -450,7 +481,10 @@ async def update_segment_rules(
     return doc
 
 
-async def normalize_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User) -> NormalizeResult:
+async def normalize_document(
+    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID, user: User
+) -> tuple[NormalizeResult, bool]:
+    """规范化文档；若 PDF 乱码被重抽则第二返回值为 True（调用方应触发重分段）。"""
     await assert_kb_mutable(db, kb_id)
     doc = await get_document_detail(db, kb_id, doc_id)
     await take_auto_snapshot(
@@ -460,13 +494,27 @@ async def normalize_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UU
         user.id,
         name=f"normalize:{doc.filename}",
     )
-    source = doc.raw_text or doc.normalized_text or ""
-    if not source and doc.file_path:
-        content = storage.download_bytes(doc.file_path)
-        from app.services import parsers
+    from app.services import parsers
 
+    source = doc.raw_text or doc.normalized_text or ""
+    ft = (doc.file_type or "").lower().lstrip(".")
+    reextracted = False
+    # PDF CID 乱码：强制从原文件重抽（多模态兜底），避免清洗按钮只整理乱码
+    if doc.file_path and (
+        not source
+        or (ft == "pdf" and parsers.is_unusable_pdf_text(source))
+    ):
+        content = storage.download_bytes(doc.file_path)
         source = parsers.extract_text(doc.filename, content, doc.file_type)
         doc.raw_text = source
+        reextracted = True
+        if ft == "pdf":
+            try:
+                from app.services.document_charts import persist_pdf_chart_pages
+
+                persist_pdf_chart_pages(kb_id=doc.kb_id, doc_id=doc.id, pdf_bytes=content)
+            except Exception as exc:
+                logger.warning("normalize chart persist failed doc=%s: %s", doc.id, exc)
     normalized, stats = normalize_text(source)
     doc.normalized_text = normalized
     await write_audit(
@@ -475,14 +523,21 @@ async def normalize_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UU
         action="doc.normalize",
         resource_type="document",
         resource_id=str(doc_id),
-        detail={"before": stats.char_count_before, "after": stats.char_count_after},
+        detail={
+            "before": stats.char_count_before,
+            "after": stats.char_count_after,
+            "reextracted": reextracted,
+        },
     )
     await db.commit()
-    return NormalizeResult(
-        removed_blank_lines=stats.removed_blank_lines,
-        removed_duplicate_blocks=stats.removed_duplicate_blocks,
-        char_count_before=stats.char_count_before,
-        char_count_after=stats.char_count_after,
+    return (
+        NormalizeResult(
+            removed_blank_lines=stats.removed_blank_lines,
+            removed_duplicate_blocks=stats.removed_duplicate_blocks,
+            char_count_before=stats.char_count_before,
+            char_count_after=stats.char_count_after,
+        ),
+        reextracted,
     )
 
 

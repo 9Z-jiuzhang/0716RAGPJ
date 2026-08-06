@@ -50,7 +50,7 @@ class DocumentStatus(str, Enum):
 
 
 class DocumentFileType(str, Enum):
-    """文档文件类型。csv/xlsx/pptx 为 P1 预留枚举，上传接口首期拒绝。"""
+    """文档文件类型。csv/xlsx 为预留枚举，上传接口拒绝；pptx 已开放。"""
 
     PDF = "pdf"
     DOCX = "docx"
@@ -80,10 +80,11 @@ UPLOAD_ALLOWED_TYPES = frozenset(
         DocumentFileType.DOCX,
         DocumentFileType.TXT,
         DocumentFileType.MD,
+        DocumentFileType.PPTX,
     }
 )
 # 数据库枚举预留，上传直接拒绝
-UPLOAD_REJECTED_TYPES = frozenset({DocumentFileType.CSV, DocumentFileType.XLSX, DocumentFileType.PPTX})
+UPLOAD_REJECTED_TYPES = frozenset({DocumentFileType.CSV, DocumentFileType.XLSX})
 
 DEFAULT_SEPARATORS = ["\n\n", "\n", "。", ".", " "]
 DEFAULT_CHUNK_SIZE = 500

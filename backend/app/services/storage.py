@@ -40,8 +40,17 @@ def upload_bytes(
     content_type: str = "application/octet-stream",
 ) -> str:
     """上传原文件，返回对象路径。"""
-    ensure_bucket()
     object_name = f"{kb_id}/{uuid.uuid4().hex}_{filename}"
+    return put_object_bytes(object_name, content, content_type=content_type)
+
+
+def put_object_bytes(
+    object_name: str,
+    content: bytes,
+    content_type: str = "application/octet-stream",
+) -> str:
+    """写入指定对象路径（可覆盖），返回 object_name。"""
+    ensure_bucket()
     client = get_minio_client()
     client.put_object(
         settings.MINIO_BUCKET,
@@ -51,6 +60,29 @@ def upload_bytes(
         content_type=content_type,
     )
     return object_name
+
+
+def list_object_names(prefix: str) -> list[str]:
+    """列出指定前缀下的对象名。"""
+    if not prefix:
+        return []
+    ensure_bucket()
+    client = get_minio_client()
+    try:
+        return [obj.object_name for obj in client.list_objects(settings.MINIO_BUCKET, prefix=prefix, recursive=True)]
+    except Exception as exc:
+        logger.warning("MinIO list failed prefix=%s: %s", prefix, exc)
+        return []
+
+
+def object_exists(object_name: str) -> bool:
+    if not object_name:
+        return False
+    try:
+        get_minio_client().stat_object(settings.MINIO_BUCKET, object_name)
+        return True
+    except Exception:
+        return False
 
 
 def delete_object(object_name: str) -> None:

@@ -29,7 +29,7 @@ class RetrievalHit:
 
     def to_citation(self) -> dict[str, Any]:
         """转换为 API CitationResponse 字段结构。"""
-        return {
+        citation: dict[str, Any] = {
             "chunk_id": self.chunk_id,
             "doc_id": self.doc_id,
             "doc_name": self.doc_name,
@@ -37,7 +37,22 @@ class RetrievalHit:
             "content": self.content,
             "score": round(self.score, 6),
             "source": self.source,
+            "images": [],
         }
+        # 入库时写入的 chart_page_count（标量）；无则由流水线懒加载补全
+        try:
+            n = int((self.metadata or {}).get("chart_page_count") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n > 0:
+            citation["images"] = [
+                {
+                    "page": i,
+                    "url": f"/api/v1/qa/documents/{self.doc_id}/charts/page-{i:02d}.png",
+                }
+                for i in range(1, n + 1)
+            ]
+        return citation
 
 
 @dataclass

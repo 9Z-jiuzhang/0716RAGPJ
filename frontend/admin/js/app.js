@@ -3508,7 +3508,7 @@ async function pageDocuments(kbId, opts = {}) {
   /** @type {AbortController | null} */
   let uploadAbort = null;
 
-  const UPLOAD_EXTS = new Set([".pdf", ".doc", ".docx", ".txt", ".md"]);
+  const UPLOAD_EXTS = new Set([".pdf", ".doc", ".docx", ".pptx", ".txt", ".md"]);
   const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
   const MAX_BATCH_FILES = 100;
 
@@ -3524,7 +3524,7 @@ async function pageDocuments(kbId, opts = {}) {
           <span class="kb-dropzone-copy-active">释放鼠标开始批量上传</span>
         </p>
         <ul class="kb-dropzone-meta">
-          <li>支持格式：PDF、DOC、DOCX、TXT、MD</li>
+          <li>支持格式：PDF、DOC、DOCX、PPTX、TXT、MD</li>
           <li>单文件最大：100MB · 支持文件夹递归扫描</li>
           <li>一次可批量上传多个文件（逐个上传）</li>
         </ul>
@@ -4478,7 +4478,7 @@ async function pageDocuments(kbId, opts = {}) {
       const selectableCount = items.filter((d) => !DOC_BUSY_STATUSES.has(String(d.status || ""))).length;
 
       const docActions = canUpload
-        ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
+        ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.pptx,.txt,.md,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
                  <input type="file" id="adminFolder" class="hidden" webkitdirectory directory multiple />
                  <button class="btn btn-sm" id="btnAdminUpload">选择文件</button>
                  <button class="btn btn-secondary btn-sm" id="btnAdminUploadFolder">选择文件夹</button>`
@@ -4487,7 +4487,7 @@ async function pageDocuments(kbId, opts = {}) {
       mountEl().innerHTML = `
       ${pageHead({
         title: "文档管理",
-        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown；可拖拽文件/文件夹。上传后仍会解析与向量化；处理失败会留在列表并可重试。",
+        desc: "支持 PDF、Word（DOC/DOCX）、PPTX、TXT、Markdown；可拖拽文件/文件夹。上传后仍会解析与向量化；「下载 MD」会对图表做多模态看图描述。",
         actions: docActions,
       })}
       ${
@@ -4550,6 +4550,7 @@ async function pageDocuments(kbId, opts = {}) {
                   <td class="col-actions">
                     <div class="table-actions">
                       <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">文档处理</button>
+                      <button type="button" class="btn btn-secondary btn-sm" data-dl-md="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">下载 MD</button>
                       ${canWrite && !isBusy ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
                       ${canWrite && isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
                     </div>
@@ -4663,6 +4664,63 @@ async function pageDocuments(kbId, opts = {}) {
 
       document.querySelectorAll("[data-preview]").forEach((btn) => {
         btn.onclick = () => openDocWorkbench(btn.getAttribute("data-preview"), btn.getAttribute("data-name"));
+      });
+      document.querySelectorAll("[data-dl-md]").forEach((btn) => {
+        btn.onclick = async () => {
+          const docId = btn.getAttribute("data-dl-md");
+          const rawName = btn.getAttribute("data-name") || "document";
+          btn.disabled = true;
+          toast("正在转换…", "info");
+          try {
+            const { getAccessToken } = await import("/assets/js/auth.js?v=gap-opt-0721s");
+            const res = await fetch(`/api/v1/knowledge-bases/${kbId}/documents/${docId}/markdown`, {
+              headers: { Authorization: `Bearer ${getAccessToken()}` },
+            });
+            if (!res.ok) {
+              let msg = `下载失败（${res.status}）`;
+              try {
+                const body = await res.json();
+                if (body?.detail) msg = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+                else if (body?.message) msg = String(body.message);
+              } catch {
+                try {
+                  const t = await res.text();
+                  if (t) msg = t.slice(0, 200);
+                } catch {
+                  /* ignore */
+                }
+              }
+              throw new Error(msg);
+            }
+            const blob = await res.blob();
+            const cd = res.headers.get("Content-Disposition") || "";
+            const ctype = (res.headers.get("Content-Type") || "").toLowerCase();
+            const isZip = ctype.includes("application/zip") || ctype.includes("application/x-zip");
+            let filename = rawName.replace(/\.[^.]+$/, "") + (isZip ? "_markdown.zip" : ".md");
+            const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd);
+            const plain = /filename\s*=\s*"([^"]+)"/i.exec(cd) || /filename\s*=\s*([^;]+)/i.exec(cd);
+            if (star?.[1]) {
+              try {
+                filename = decodeURIComponent(star[1].trim());
+              } catch {
+                /* keep fallback */
+              }
+            } else if (plain?.[1]) {
+              filename = plain[1].trim().replace(/^"|"$/g, "");
+            }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast(isZip ? "已下载 ZIP（含 MD + 图表 PNG 链接）" : "已开始下载", "success");
+          } catch (e) {
+            toast(e.message || "下载 MD 失败", "error");
+          } finally {
+            btn.disabled = false;
+          }
+        };
       });
       document.querySelectorAll("[data-retry]").forEach((btn) => {
         btn.onclick = async () => {
