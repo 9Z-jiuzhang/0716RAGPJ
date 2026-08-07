@@ -218,6 +218,9 @@ async def ensure_schema_patches() -> None:
         "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS matching_mode VARCHAR(32) NOT NULL DEFAULT 'exact'",
         "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS quality_score DOUBLE PRECISION NULL",
         "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS observe_only BOOLEAN NOT NULL DEFAULT FALSE",
+        # 外部数据源 / 开放接口：文档来源字段
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) NOT NULL DEFAULT 'upload'",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb",
         # Wave1：仅旧默认 rewrite=true 且未开启扩展/HyDE 的单例配置迁到关闭
         """
         UPDATE query_processing_configs

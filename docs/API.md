@@ -25,8 +25,9 @@
 15. [Query 预处理 `/query-processing`](#15-query-预处理-query-processing)
 16. [角色缓存 `/role-caches`](#16-角色缓存-role-caches)
 17. [RAGAS 评估 `/ragas`](#17-ragas-评估-ragas)
-18. [联调检查清单](#18-联调检查清单)
-19. [变更记录](#19-变更记录)
+18. [外部数据源与开放接口](#18-外部数据源与开放接口)
+19. [联调检查清单](#19-联调检查清单)
+20. [变更记录](#20-变更记录)
 
 ---
 
@@ -634,7 +635,46 @@ Authorization: Bearer <access_token>
 
 ---
 
-## 18. 联调检查清单
+## 18. 外部数据源与开放接口
+
+### 18.1 数据源管理 `/data-sources`
+
+权限：`data_source:read` / `data_source:write` / `data_source:import`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/data-sources/capabilities` | 当前环境真实可用的连接器与驱动 |
+| GET/POST | `/data-sources` | 列表 / 创建（连接 URL 加密存储，响应仅脱敏） |
+| GET/PUT/DELETE | `/data-sources/{source_id}` | 详情 / 更新 / 删除 |
+| POST | `/data-sources/{source_id}/test` | 测试连接 |
+| GET | `/data-sources/{source_id}/namespaces` | 列出 schema/catalog |
+| GET | `/data-sources/{source_id}/objects` | 列出表/视图 |
+| GET | `/data-sources/{source_id}/columns` | 列出字段 |
+| POST | `/data-sources/{source_id}/preview` | 结构化只读预览 |
+| POST | `/data-sources/{source_id}/import` | 转为 Markdown 并走现有文档上传流水线 |
+
+### 18.2 API 客户端 `/external-api-clients`
+
+权限：`external_api:manage`
+
+创建与轮换时返回一次明文 `api_key`；库内仅存 `key_prefix` + 哈希。
+
+### 18.3 外部开放接口 `/external`
+
+鉴权头：`X-API-Key`。上传可选 `Idempotency-Key`。
+
+| 方法 | 路径 | Scope |
+|------|------|-------|
+| GET | `/external/knowledge-bases` | `kb:read` |
+| GET | `/external/knowledge-bases/{kb_id}/documents*` | `document:read` |
+| POST | `/external/knowledge-bases/{kb_id}/documents/upload` | `document:upload` |
+| GET/POST | `/external/data-sources*` | `data_source:read` |
+
+禁止任意 SQL、禁止调用方提交连接 URL。
+
+---
+
+## 19. 联调检查清单
 
 1. 前端仅以 [`openapi.json`](./openapi.json) + 本文档字段名为准；扩展模块以本文 + 运行时为准。
 2. 需鉴权接口先测 `401`，再测无权限 `403`。
@@ -649,7 +689,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-## 19. 变更记录
+## 20. 变更记录
 
 | 版本 | 日期 | 说明 |
 |------|------|------|

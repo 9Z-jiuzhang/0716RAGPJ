@@ -2,6 +2,7 @@
 
 from .analytics import ModelConfigVersion, QAFeedbackEvent, QARequestEvent, QATopicCluster
 from .base import Base
+from .data_source import ExternalApiClient, ExternalApiIdempotencyRecord, ExternalDataSource
 from .department import Department
 from .document import Document, DocumentChunk, KbChunkRule
 from .guard import GuardBlockedEvent
@@ -51,4 +52,7 @@ __all__ = [
     "QAFeedbackEvent",
     "QATopicCluster",
     "ModelConfigVersion",
+    "ExternalDataSource",
+    "ExternalApiClient",
+    "ExternalApiIdempotencyRecord",
 ]

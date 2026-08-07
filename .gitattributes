@@ -1,0 +1,4 @@
+# Shell scripts must use LF so Docker/Alpine entrypoints don't break on Windows checkouts.
+*.sh text eol=lf
+docker/web/docker-entrypoint.sh text eol=lf
+backend/docker-entrypoint.sh text eol=lf

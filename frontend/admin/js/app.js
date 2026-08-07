@@ -3189,6 +3189,11 @@ async function pageKbList() {
         </div>
         <div class="kb-list-toolbar-create">
           ${
+            hasPermission("data_source:import") || hasPermission("kb:upload")
+              ? `<button type="button" class="btn btn-secondary" id="btnKbDbImport">从数据库导入</button>`
+              : ""
+          }
+          ${
             hasPermission("kb:write")
               ? `<button class="btn" id="btnCreateKb">+ 新建知识库</button>`
               : ""
@@ -3221,6 +3226,11 @@ async function pageKbList() {
     }
     if (deptSel) deptSel.onchange = applyFilters;
     if (typeSel) typeSel.onchange = applyFilters;
+
+    const btnKbDbImport = document.getElementById("btnKbDbImport");
+    if (btnKbDbImport) {
+      btnKbDbImport.onclick = () => openDbImportModal({ onDone: () => pageKbList() });
+    }
 
     const btnCreate = document.getElementById("btnCreateKb");
     if (btnCreate) {
@@ -8139,21 +8149,23 @@ function bindSwaggerThemeSync(iframe) {
 
 function getApiGuideTab() {
   const q = location.hash.split("?")[1] || "";
-  return new URLSearchParams(q).get("tab") === "guide" ? "guide" : "fastapi";
+  const tab = new URLSearchParams(q).get("tab") || "fastapi";
+  return ["fastapi", "guide", "datasources", "apiclients"].includes(tab) ? tab : "fastapi";
 }
 
 function apiGuidePath(tab) {
-  return tab === "guide" ? "/admin/fastapi?tab=guide" : "/admin/fastapi";
+  if (tab === "fastapi") return "/admin/fastapi";
+  return `/admin/fastapi?tab=${tab}`;
 }
 
-/** API 接入指南：FastAPI 页（Swagger）+ 第三方接入说明 */
+/** API 接入指南：FastAPI / 接入说明 / 数据源 / API 客户端 */
 async function pageFastApi() {
   if (!requirePerm("system:read", "API 接入指南")) return;
   const tab = getApiGuideTab();
   document.getElementById("pageRoot").innerHTML = `
     ${pageHead({
       title: "API 接入指南",
-      desc: "FastAPI 接口浏览与第三方业务系统联调说明。",
+      desc: "FastAPI 接口浏览、第三方接入说明、外部数据源与 API 客户端管理。",
       actions: `
         <a class="btn btn-secondary btn-sm" href="/assets/vendor/swagger-ui/index.html" target="_blank" rel="noopener">新窗口打开 Swagger</a>
         <a class="btn btn-text btn-sm" href="/openapi.json" target="_blank" rel="noopener">OpenAPI JSON</a>
@@ -8164,6 +8176,8 @@ async function pageFastApi() {
       <div class="kb-ws-tabs" role="tablist">
         <button type="button" class="kb-ws-tab ${tab === "fastapi" ? "is-active" : ""}" data-api-tab="fastapi">FastAPI</button>
         <button type="button" class="kb-ws-tab ${tab === "guide" ? "is-active" : ""}" data-api-tab="guide">接入说明</button>
+        <button type="button" class="kb-ws-tab ${tab === "datasources" ? "is-active" : ""}" data-api-tab="datasources">数据源</button>
+        <button type="button" class="kb-ws-tab ${tab === "apiclients" ? "is-active" : ""}" data-api-tab="apiclients">API 客户端</button>
       </div>
     </nav>
     <div id="apiGuidePanel"></div>`;
@@ -8204,6 +8218,15 @@ async function pageFastApi() {
     return;
   }
 
+  if (tab === "datasources") {
+    await renderDataSourcesPanel(panel);
+    return;
+  }
+  if (tab === "apiclients") {
+    await renderApiClientsPanel(panel);
+    return;
+  }
+
   panel.innerHTML = `
     <div class="card panel-fill fastapi-docs-card">
       <div class="card-header">
@@ -8224,6 +8247,434 @@ async function pageFastApi() {
   } catch (e) {
     bodyEl.innerHTML = `<p class="text-danger">${escapeHtml(e.message || "加载失败")}</p>
       <p class="text-muted">也可直接查看仓库文件 <code>docs/API_INTEGRATION_GUIDE.md</code>。</p>`;
+  }
+}
+
+async function renderDataSourcesPanel(panel) {
+  if (!hasPermission("data_source:read") && !hasPermission("data_source:write")) {
+    panel.innerHTML = `<div class="card"><p class="text-muted">没有数据源管理权限。</p></div>`;
+    return;
+  }
+  const canWrite = hasPermission("data_source:write");
+  const canImport = hasPermission("data_source:import") || hasPermission("kb:upload");
+  panel.innerHTML = `
+    <div class="card panel-fill">
+      <div class="card-header">
+        <div class="card-header-text">
+          <h3 class="card-title">外部数据源</h3>
+          <p class="card-sub">只读接入外部数据库；在此测试连接，并将表数据导入到指定知识库。</p>
+        </div>
+        <div class="card-header-actions">
+          ${canWrite ? `<button class="btn btn-sm" id="btnDsCreate">新增数据源</button>` : ""}
+        </div>
+      </div>
+      <div id="dsCaps" class="text-muted" style="padding:0 1rem 0.5rem"></div>
+      <div class="table-wrap"><table class="table"><thead><tr>
+        <th>名称</th><th>类型</th><th>驱动</th><th>连接（脱敏）</th><th>状态</th><th>最近测试</th><th></th>
+      </tr></thead><tbody id="dsBody"><tr><td colspan="7">加载中…</td></tr></tbody></table></div>
+    </div>`;
+  try {
+    const caps = await api.get("/data-sources/capabilities");
+    const list = (caps?.connectors || []).map((c) => `${c.dialect}${c.installed && c.enabled ? "✓" : ""}`).join(" · ");
+    document.getElementById("dsCaps").textContent = `当前连接器能力：${list || "无"}`;
+  } catch {
+    document.getElementById("dsCaps").textContent = "";
+  }
+  async function reload() {
+    const rows = await api.get("/data-sources");
+    const body = document.getElementById("dsBody");
+    if (!rows?.length) {
+      body.innerHTML = `<tr><td colspan="7" class="text-muted">暂无数据源</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows
+      .map((r) => `<tr>
+        <td>${escapeHtml(r.name)}</td>
+        <td>${escapeHtml(r.dialect || "-")}</td>
+        <td>${escapeHtml(r.driver || "-")}</td>
+        <td><code>${escapeHtml(r.connection_url_masked || "")}</code></td>
+        <td>${escapeHtml(r.status)}</td>
+        <td>${escapeHtml(r.last_test_status || "-")}${r.last_test_message ? ` · ${escapeHtml(r.last_test_message)}` : ""}</td>
+        <td class="table-actions">
+          ${canImport && r.status === "enabled" ? `<button class="btn btn-text btn-sm" data-ds-import="${r.id}">导入知识库</button>` : ""}
+          ${canWrite ? `<button class="btn btn-text btn-sm" data-ds-test="${r.id}">测试</button>
+          <button class="btn btn-text btn-sm" data-ds-toggle="${r.id}" data-status="${r.status}">${r.status === "enabled" ? "停用" : "启用"}</button>
+          <button class="btn btn-text btn-sm text-danger" data-ds-del="${r.id}">删除</button>` : ""}
+        </td></tr>`)
+      .join("");
+    body.querySelectorAll("[data-ds-import]").forEach((btn) => {
+      btn.onclick = () => openDbImportModal({ sourceId: btn.getAttribute("data-ds-import") });
+    });
+    body.querySelectorAll("[data-ds-test]").forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          await api.post(`/data-sources/${btn.getAttribute("data-ds-test")}/test`, {});
+          toast("连接成功", "success");
+          reload();
+        } catch (e) {
+          toast(e.message || "测试失败", "error");
+          reload();
+        }
+      };
+    });
+    body.querySelectorAll("[data-ds-toggle]").forEach((btn) => {
+      btn.onclick = async () => {
+        const next = btn.getAttribute("data-status") === "enabled" ? "disabled" : "enabled";
+        try {
+          await api.put(`/data-sources/${btn.getAttribute("data-ds-toggle")}`, { status: next });
+          toast("已更新", "success");
+          reload();
+        } catch (e) {
+          toast(e.message || "更新失败", "error");
+        }
+      };
+    });
+    body.querySelectorAll("[data-ds-del]").forEach((btn) => {
+      btn.onclick = async () => {
+        const okDel = await confirmDialog({ title: "删除数据源", message: "确定删除该数据源？", confirmText: "删除" });
+        if (!okDel) return;
+        try {
+          await api.delete(`/data-sources/${btn.getAttribute("data-ds-del")}`);
+          toast("已删除", "success");
+          reload();
+        } catch (e) {
+          toast(e.message || "删除失败", "error");
+        }
+      };
+    });
+  }
+  const btnCreate = document.getElementById("btnDsCreate");
+  if (btnCreate) btnCreate.onclick = () => openDataSourceCreateModal(reload);
+  try {
+    await reload();
+  } catch (e) {
+    document.getElementById("dsBody").innerHTML = `<tr><td colspan="7" class="text-danger">${escapeHtml(e.message || "加载失败")}</td></tr>`;
+  }
+}
+
+function openDataSourceCreateModal(onDone) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-backdrop";
+  overlay.innerHTML = `
+    <div class="modal" role="dialog">
+      <div class="modal-header"><h3>新增数据源</h3><button class="btn btn-text" data-close>×</button></div>
+      <div class="modal-body">
+        <label class="field"><span>名称</span><input id="dsName" class="form-control" /></label>
+        <label class="field"><span>连接 URL</span><input id="dsUrl" class="form-control" placeholder="例如 postgresql+asyncpg://user:pass@host:5432/db" /></label>
+        <label class="field"><span>连接器类型</span>
+          <select id="dsDialect" class="form-control">
+            <option value="auto">自动识别</option>
+            <option value="postgresql">postgresql</option>
+            <option value="mysql">mysql</option>
+            <option value="sqlite">sqlite</option>
+          </select>
+        </label>
+        <p class="text-muted">未安装对应驱动时不会伪造成功；生产环境需配置主机白名单。</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close>取消</button>
+        <button class="btn" id="dsSave">保存</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelectorAll("[data-close]").forEach((b) => (b.onclick = close));
+  document.getElementById("dsSave").onclick = async () => {
+    try {
+      await api.post("/data-sources", {
+        name: document.getElementById("dsName").value.trim(),
+        connection_url: document.getElementById("dsUrl").value.trim(),
+        dialect: document.getElementById("dsDialect").value,
+      });
+      toast("已创建", "success");
+      close();
+      onDone?.();
+    } catch (e) {
+      toast(e.message || "创建失败", "error");
+    }
+  };
+}
+
+async function renderApiClientsPanel(panel) {
+  if (!hasPermission("external_api:manage")) {
+    panel.innerHTML = `<div class="card"><p class="text-muted">没有 API 客户端管理权限。</p></div>`;
+    return;
+  }
+  panel.innerHTML = `
+    <div class="card panel-fill">
+      <div class="card-header">
+        <div class="card-header-text">
+          <h3 class="card-title">API 客户端</h3>
+          <p class="card-sub">API Key 关联服务账号并复用 RBAC；密钥仅创建/轮换时显示一次。</p>
+        </div>
+        <div class="card-header-actions">
+          <button class="btn btn-sm" id="btnApiClientCreate">创建客户端</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table class="table"><thead><tr>
+        <th>名称</th><th>Key 前缀</th><th>Scopes</th><th>限流</th><th>启用</th><th></th>
+      </tr></thead><tbody id="acBody"><tr><td colspan="6">加载中…</td></tr></tbody></table></div>
+    </div>`;
+  async function reload() {
+    const rows = await api.get("/external-api-clients");
+    const body = document.getElementById("acBody");
+    if (!rows?.length) {
+      body.innerHTML = `<tr><td colspan="6" class="text-muted">暂无客户端</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows
+      .map((r) => `<tr>
+        <td>${escapeHtml(r.name)}</td>
+        <td><code>${escapeHtml(r.key_prefix)}</code></td>
+        <td>${escapeHtml((r.scopes || []).join(", "))}</td>
+        <td>${r.rate_limit}/min</td>
+        <td>${r.is_enabled ? "是" : "否"}</td>
+        <td class="table-actions">
+          <button class="btn btn-text btn-sm" data-ac-rotate="${r.id}">轮换密钥</button>
+          <button class="btn btn-text btn-sm" data-ac-toggle="${r.id}" data-on="${r.is_enabled ? "1" : "0"}">${r.is_enabled ? "停用" : "启用"}</button>
+          <button class="btn btn-text btn-sm text-danger" data-ac-del="${r.id}">删除</button>
+        </td></tr>`)
+      .join("");
+    body.querySelectorAll("[data-ac-rotate]").forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          const data = await api.post(`/external-api-clients/${btn.getAttribute("data-ac-rotate")}/rotate-key`, {});
+          showOnceApiKey(data.api_key);
+          reload();
+        } catch (e) {
+          toast(e.message || "轮换失败", "error");
+        }
+      };
+    });
+    body.querySelectorAll("[data-ac-toggle]").forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          await api.put(`/external-api-clients/${btn.getAttribute("data-ac-toggle")}`, {
+            is_enabled: btn.getAttribute("data-on") !== "1",
+          });
+          toast("已更新", "success");
+          reload();
+        } catch (e) {
+          toast(e.message || "更新失败", "error");
+        }
+      };
+    });
+    body.querySelectorAll("[data-ac-del]").forEach((btn) => {
+      btn.onclick = async () => {
+        const okDel = await confirmDialog({ title: "删除客户端", message: "删除后密钥立即失效。", confirmText: "删除" });
+        if (!okDel) return;
+        try {
+          await api.delete(`/external-api-clients/${btn.getAttribute("data-ac-del")}`);
+          toast("已删除", "success");
+          reload();
+        } catch (e) {
+          toast(e.message || "删除失败", "error");
+        }
+      };
+    });
+  }
+  document.getElementById("btnApiClientCreate").onclick = () => openApiClientCreateModal(reload);
+  try {
+    await reload();
+  } catch (e) {
+    document.getElementById("acBody").innerHTML = `<tr><td colspan="6" class="text-danger">${escapeHtml(e.message || "加载失败")}</td></tr>`;
+  }
+}
+
+function showOnceApiKey(key) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-backdrop";
+  overlay.innerHTML = `
+    <div class="modal" role="dialog">
+      <div class="modal-header"><h3>请妥善保存 API Key</h3><button class="btn btn-text" data-close>×</button></div>
+      <div class="modal-body">
+        <p class="text-muted">关闭后无法再次查看完整密钥。</p>
+        <code style="word-break:break-all">${escapeHtml(key || "")}</code>
+      </div>
+      <div class="modal-footer"><button class="btn" data-close>我已保存</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => overlay.remove()));
+}
+
+function openApiClientCreateModal(onDone) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-backdrop";
+  overlay.innerHTML = `
+    <div class="modal" role="dialog">
+      <div class="modal-header"><h3>创建 API 客户端</h3><button class="btn btn-text" data-close>×</button></div>
+      <div class="modal-body">
+        <label class="field"><span>名称</span><input id="acName" class="form-control" /></label>
+        <label class="field"><span>关联服务账号用户 ID</span><input id="acUser" class="form-control" placeholder="UUID" /></label>
+        <label class="field"><span>Scopes（逗号分隔）</span>
+          <input id="acScopes" class="form-control" value="kb:read,document:read,document:upload,data_source:read" />
+        </label>
+        <label class="field"><span>允许的数据源 ID（逗号分隔，可选）</span><input id="acDs" class="form-control" /></label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close>取消</button>
+        <button class="btn" id="acSave">创建</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelectorAll("[data-close]").forEach((b) => (b.onclick = close));
+  document.getElementById("acSave").onclick = async () => {
+    try {
+      const scopes = document.getElementById("acScopes").value.split(",").map((s) => s.trim()).filter(Boolean);
+      const allowed = document.getElementById("acDs").value.split(",").map((s) => s.trim()).filter(Boolean);
+      const data = await api.post("/external-api-clients", {
+        name: document.getElementById("acName").value.trim(),
+        linked_user_id: document.getElementById("acUser").value.trim(),
+        scopes,
+        allowed_data_source_ids: allowed,
+      });
+      close();
+      showOnceApiKey(data.api_key);
+      onDone?.();
+    } catch (e) {
+      toast(e.message || "创建失败", "error");
+    }
+  };
+}
+
+async function openDbImportModal({ sourceId, onDone } = {}) {
+  if (!hasPermission("data_source:import") && !hasPermission("kb:upload")) {
+    toast("没有导入权限", "error");
+    return;
+  }
+  let sources = [];
+  let kbs = [];
+  try {
+    [sources, kbs] = await Promise.all([
+      api.get("/data-sources"),
+      fetchAllPagedItems("/knowledge-bases", { pageSize: 100, maxItems: 100 }),
+    ]);
+  } catch (e) {
+    toast(e.message || "无法加载数据源或知识库", "error");
+    return;
+  }
+  sources = (sources || []).filter((s) => s.status === "enabled");
+  if (!sources.length) {
+    toast("请先新增并启用外部数据源", "error");
+    return;
+  }
+  if (!kbs.length) {
+    toast("暂无可用知识库，请先创建知识库", "error");
+    return;
+  }
+  const preferredSource = sourceId && sources.some((s) => s.id === sourceId) ? sourceId : sources[0].id;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-backdrop";
+  overlay.innerHTML = `
+    <div class="modal" style="width:min(720px,calc(100vw - 24px))" role="dialog">
+      <div class="modal-header"><h3>导入到知识库</h3><button class="btn btn-text" data-close>×</button></div>
+      <div class="modal-body db-import-form">
+        <label class="field"><span>目标知识库</span>
+          <select id="impKb" class="form-control">${kbs.map((k) => `<option value="${escapeHtml(k.id)}">${escapeHtml(k.name || k.id)}</option>`).join("")}</select>
+        </label>
+        <label class="field"><span>数据源</span>
+          <select id="impSource" class="form-control">${sources.map((s) => `<option value="${s.id}" ${s.id === preferredSource ? "selected" : ""}>${escapeHtml(s.name)} (${escapeHtml(s.dialect || "")})</option>`).join("")}</select>
+        </label>
+        <label class="field"><span>Namespace / Schema</span><select id="impNs" class="form-control"></select></label>
+        <label class="field"><span>表 / 视图</span><select id="impObj" class="form-control"></select></label>
+        <label class="field"><span>字段（可多选）</span><select id="impCols" class="form-control" multiple size="6"></select></label>
+        <label class="field"><span>最大行数</span><input id="impRows" class="form-control" type="number" value="1000" min="1" /></label>
+        <label class="field"><span>文档名称</span><input id="impName" class="form-control" placeholder="可选" /></label>
+        <div id="impPreview" class="text-muted">选择字段后可预览。</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="impPreviewBtn">预览</button>
+        <button class="btn btn-secondary" data-close>取消</button>
+        <button class="btn" id="impGo">确认导入</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelectorAll("[data-close]").forEach((b) => (b.onclick = close));
+
+  async function loadNamespaces() {
+    const sid = document.getElementById("impSource").value;
+    const nss = await api.get(`/data-sources/${sid}/namespaces`);
+    const sel = document.getElementById("impNs");
+    sel.innerHTML = (nss || []).map((n) => {
+      const v = n.schema || "";
+      const label = n.schema || n.database || "(default)";
+      return `<option value="${escapeHtml(v)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    await loadObjects();
+  }
+  async function loadObjects() {
+    const sid = document.getElementById("impSource").value;
+    const schema = document.getElementById("impNs").value || null;
+    const objs = await api.get(`/data-sources/${sid}/objects${schema ? `?schema=${encodeURIComponent(schema)}` : ""}`);
+    const sel = document.getElementById("impObj");
+    sel.innerHTML = (objs || []).map((o) => `<option value="${escapeHtml(o.name)}">${escapeHtml(o.name)} (${escapeHtml(o.type)})</option>`).join("");
+    await loadColumns();
+  }
+  async function loadColumns() {
+    const sid = document.getElementById("impSource").value;
+    const schema = document.getElementById("impNs").value || null;
+    const objectName = document.getElementById("impObj").value;
+    if (!objectName) return;
+    const cols = await api.get(
+      `/data-sources/${sid}/columns?object_name=${encodeURIComponent(objectName)}${schema ? `&schema=${encodeURIComponent(schema)}` : ""}`
+    );
+    const sel = document.getElementById("impCols");
+    sel.innerHTML = (cols || [])
+      .filter((c) => c.importable !== false)
+      .map((c) => `<option value="${escapeHtml(c.name)}" selected>${escapeHtml(c.name)} · ${escapeHtml(c.type)}</option>`)
+      .join("");
+  }
+  document.getElementById("impSource").onchange = () => loadNamespaces().catch((e) => toast(e.message, "error"));
+  document.getElementById("impNs").onchange = () => loadObjects().catch((e) => toast(e.message, "error"));
+  document.getElementById("impObj").onchange = () => loadColumns().catch((e) => toast(e.message, "error"));
+  document.getElementById("impPreviewBtn").onclick = async () => {
+    try {
+      const sid = document.getElementById("impSource").value;
+      const schema = document.getElementById("impNs").value || null;
+      const columns = Array.from(document.getElementById("impCols").selectedOptions).map((o) => o.value);
+      const data = await api.post(`/data-sources/${sid}/preview`, {
+        namespace: schema ? { schema } : null,
+        object_name: document.getElementById("impObj").value,
+        columns,
+        page: 1,
+        page_size: 5,
+      });
+      document.getElementById("impPreview").innerHTML = `<pre class="db-preview">${escapeHtml(JSON.stringify(data.items || [], null, 2))}</pre>`;
+    } catch (e) {
+      toast(e.message || "预览失败", "error");
+    }
+  };
+  document.getElementById("impGo").onclick = async () => {
+    try {
+      const sid = document.getElementById("impSource").value;
+      const kbId = document.getElementById("impKb").value;
+      if (!kbId) {
+        toast("请选择目标知识库", "error");
+        return;
+      }
+      const schema = document.getElementById("impNs").value || null;
+      const columns = Array.from(document.getElementById("impCols").selectedOptions).map((o) => o.value);
+      const data = await api.post(`/data-sources/${sid}/import`, {
+        kb_id: kbId,
+        namespace: schema ? { schema } : null,
+        object_name: document.getElementById("impObj").value,
+        columns,
+        max_rows: Number(document.getElementById("impRows").value || 1000),
+        document_name: document.getElementById("impName").value.trim() || null,
+      });
+      toast(`已导入 ${data.document_count || 0} 个文档`, "success");
+      close();
+      onDone?.();
+    } catch (e) {
+      toast(e.message || "导入失败", "error");
+    }
+  };
+  try {
+    await loadNamespaces();
+  } catch (e) {
+    toast(e.message || "加载失败", "error");
   }
 }
 

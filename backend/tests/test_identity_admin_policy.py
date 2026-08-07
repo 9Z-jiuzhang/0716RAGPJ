@@ -4,6 +4,8 @@ import uuid
 
 import pytest
 
+from app.core.config import settings
+
 
 async def _admin_headers(client) -> dict[str, str]:
     login = await client.post("/api/v1/auth/login", json={"username": "admin", "password": "Admin123!"})
@@ -12,7 +14,10 @@ async def _admin_headers(client) -> dict[str, str]:
 
 
 async def _super_headers(client) -> dict[str, str]:
-    login = await client.post("/api/v1/auth/login", json={"username": "super", "password": "Super123!"})
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "super", "password": settings.SUPER_ADMIN_PASSWORD},
+    )
     assert login.status_code == 200
     return {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
 

@@ -76,6 +76,8 @@ def to_document_response(doc: Document) -> DocumentResponse:
         creator_id=str(doc.creator_id),
         created_at=doc.created_at,
         updated_at=doc.updated_at,
+        source_type=getattr(doc, "source_type", None) or "upload",
+        source_metadata=getattr(doc, "source_metadata", None) or {},
     )
 
 
@@ -115,6 +117,8 @@ async def upload_document(
     filename: str,
     content: bytes,
     user: User,
+    source_type: str = "upload",
+    source_metadata: dict[str, Any] | None = None,
 ) -> Document:
     kb = await doc_repo.get_knowledge_base(db, kb_id)
     if not kb:
@@ -135,6 +139,8 @@ async def upload_document(
         creator_id=user.id,
         segment_rules=rules,
         content_hash=hashlib.sha256(content).hexdigest(),
+        source_type=source_type or "upload",
+        source_metadata=source_metadata or {},
     )
     db.add(doc)
     await db.flush()

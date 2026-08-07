@@ -21,6 +21,8 @@ class DocumentResponse(BaseModel):
     creator_id: str
     created_at: datetime
     updated_at: datetime
+    source_type: str | None = "upload"
+    source_metadata: dict[str, Any] | None = None
 
 
 class DocumentContentPreviewResponse(BaseModel):

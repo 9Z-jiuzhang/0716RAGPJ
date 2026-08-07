@@ -25,6 +25,10 @@ BUILTIN_PERMISSIONS: dict[str, tuple[str, str]] = {
     "model:write": ("修改模型配置", "global"),
     "system:read": ("查看系统统计和监控", "global"),
     "audit:read": ("查看操作审计日志", "global"),
+    "data_source:read": ("查看外部数据源", "global"),
+    "data_source:write": ("创建/修改/删除外部数据源", "global"),
+    "data_source:import": ("从外部数据源导入文档到知识库", "kb_scoped"),
+    "external_api:manage": ("管理外部 API 客户端", "global"),
 }
 
 # 角色中文展示名（前端/API 展示用）
@@ -66,6 +70,10 @@ BUILTIN_ROLES: dict[str, tuple[str, list[str]]] = {
             "model:read",
             "system:read",
             "audit:read",
+            "data_source:read",
+            "data_source:write",
+            "data_source:import",
+            "external_api:manage",
         ],
     ),
     "staff": (
@@ -83,6 +91,7 @@ BUILTIN_ROLES: dict[str, tuple[str, list[str]]] = {
             "snapshot:read",
             "snapshot:write",
             "snapshot:restore",
+            "data_source:import",
         ],
     ),
     "guest": ("访客，仅可检索公开知识库并问答", ["qa:ask", "kb:read"]),
