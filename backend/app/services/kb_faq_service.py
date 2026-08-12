@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 _GENERATION_PROMPT = """你是企业知识库 FAQ 缓存生成器。
 根据输入的文档片段生成可直接缓存的问题与答案。
 
-格式：{"items":[{"question":"...","answer":"...","refs":[1,2]}]}
+格式：{{"items":[{{"question":"...","answer":"...","refs":[1,2]}}]}}
 
 规则：
 1. 生成{count}条高质量、互不重复的问题
@@ -291,6 +291,13 @@ class KBFaqService:
             try:
                 target_count = settings.FAQ_PER_DOCUMENT_COUNT
                 generated: list[_DraftFAQ] = []
+                logger.info(
+                    "开始生成FAQ doc=%s kb=%s target=%s chunks=%s",
+                    doc_id,
+                    resolved_kb,
+                    target_count,
+                    len(chunks),
+                )
                 for batch in self._chunk_batches(chunks, settings.FAQ_DOCUMENT_CHUNK_BATCH_SIZE):
                     if len(generated) >= target_count:
                         break
@@ -343,6 +350,14 @@ class KBFaqService:
                 )
                 elapsed = (datetime.now(timezone.utc) - started).total_seconds()
                 faq_generation_duration_seconds.observe(elapsed)
+                logger.info(
+                    "FAQ生成完成 doc=%s kb=%s generated=%s saved=%s elapsed=%.1fs",
+                    doc_id,
+                    resolved_kb,
+                    len(unique),
+                    saved,
+                    elapsed,
+                )
                 return {
                     "status": "success",
                     "generated": len(unique),

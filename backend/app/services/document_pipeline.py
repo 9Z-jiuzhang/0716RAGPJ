@@ -60,6 +60,7 @@ async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = 
                     kb_faq_service.generate_from_document(document_id),
                     name=f"kb-faq-gen-{document_id}",
                 )
+                logger.info("FAQ生成任务已入队 doc=%s", document_id)
         except Exception as exc:
             await db.rollback()
             async with SessionLocal() as err_db:
@@ -149,6 +150,7 @@ async def run_resegment_pipeline(
                     kb_faq_service.generate_from_document(document_id),
                     name=f"kb-faq-reseg-{document_id}",
                 )
+                logger.info("FAQ生成任务已入队 doc=%s", document_id)
         except Exception as exc:
             await db.rollback()
             async with SessionLocal() as err_db:
