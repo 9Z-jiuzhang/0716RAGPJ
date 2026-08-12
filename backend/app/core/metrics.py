@@ -79,6 +79,33 @@ llm_guard_blocked_total = Counter(
     ["intent", "reason_code", "detector"],
 )
 
+# 知识库 FAQ
+faq_cache_hit_total = Counter(
+    "faq_cache_hit_total",
+    "FAQ cache hit count",
+    ["source", "kb_id"],
+)
+faq_generation_total = Counter(
+    "faq_generation_total",
+    "FAQ generation outcomes",
+    ["status", "kb_id"],
+)
+faq_generation_duration_seconds = Histogram(
+    "faq_generation_duration_seconds",
+    "FAQ generation duration in seconds",
+    buckets=(1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0),
+)
+faq_queue_depth = Gauge(
+    "faq_queue_depth",
+    "FAQ generation queue depth",
+    ["kb_id"],
+)
+faq_active_count = Gauge(
+    "faq_active_count",
+    "Active FAQ count per knowledge base",
+    ["kb_id"],
+)
+
 
 def metrics_payload() -> tuple[bytes, str]:
     """返回 Prometheus 文本指标与 Content-Type。"""

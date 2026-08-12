@@ -7,6 +7,7 @@ from datetime import datetime as datetime_type
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -47,6 +48,13 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     chunk_size: Mapped[int] = mapped_column(Integer, default=500, nullable=False, comment="默认分段大小")
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=50, nullable=False, comment="分段重叠字符数")
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, comment="状态")
+    faq_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+        comment="是否启用该知识库 FAQ 命中与热门列表",
+    )
     current_index_version: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="当前生效索引版本号")
     creator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     deleted_at: Mapped[datetime_type | None] = mapped_column(DateTime, nullable=True)

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import SessionLocal
+from app.core.config import settings
 from app.models import DocumentChunk
 from app.models.enums import DocumentStatus, SnapshotTrigger
 from app.repositories import document as doc_repo
@@ -49,6 +50,16 @@ async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = 
                         skip_auto_snapshot=True,
                     )
             await db.commit()
+            # 就绪后异步生成 FAQ，不阻塞文档状态
+            if settings.FAQ_GENERATION_ENABLED:
+                import asyncio
+
+                from app.services.kb_faq_service import kb_faq_service
+
+                asyncio.create_task(
+                    kb_faq_service.generate_from_document(document_id),
+                    name=f"kb-faq-gen-{document_id}",
+                )
         except Exception as exc:
             await db.rollback()
             async with SessionLocal() as err_db:
@@ -129,6 +140,15 @@ async def run_resegment_pipeline(
                     preserve_other_versions=preserve_other_versions,
                 )
             await db.commit()
+            if settings.FAQ_GENERATION_ENABLED:
+                import asyncio
+
+                from app.services.kb_faq_service import kb_faq_service
+
+                asyncio.create_task(
+                    kb_faq_service.generate_from_document(document_id),
+                    name=f"kb-faq-reseg-{document_id}",
+                )
         except Exception as exc:
             await db.rollback()
             async with SessionLocal() as err_db:

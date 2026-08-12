@@ -38,3 +38,18 @@ def quota_model_key(*, provider: str, model_id: str) -> str:
 
 def scheduler_leader_key(*, task_name: str) -> str:
     return f"lock:scheduler:v1:{_part(task_name)}"
+
+
+def kb_faq_key(*, tenant: str, kb_id: str, question_hash: str) -> str:
+    """知识库 FAQ 精确命中短时缓存。"""
+    return f"kb:faq:v1:{_part(tenant)}:{_part(kb_id)}:{_part(question_hash)}"
+
+
+def kb_faq_lock_key(*, tenant: str, kb_id: str) -> str:
+    """知识库 FAQ 生成锁（同库同时仅一个任务）。"""
+    return f"lock:kb-faq:v1:{_part(tenant)}:{_part(kb_id)}"
+
+
+def kb_faq_queue_key(*, tenant: str) -> str:
+    """FAQ 生成任务队列观察键。"""
+    return f"queue:kb-faq:v1:{_part(tenant)}"

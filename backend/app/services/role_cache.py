@@ -164,6 +164,8 @@ class RoleCacheService:
         commit: bool = True,
     ) -> CacheAnalysisResult:
         """分析角色可访问的文档片段，并重新生成最多 20 个有来源的缓存问答。"""
+        if not settings.ROLE_CACHE_WRITE_ENABLED:
+            return CacheAnalysisResult(role_id, "document_generated", 0, 0, "角色缓存写入已关闭（过渡期）")
         config, role = await self._load_config_and_role(db, role_id)
         kb_ids = await self._role_document_kb_ids(db, role)
         if not kb_ids:
@@ -290,6 +292,8 @@ class RoleCacheService:
         commit: bool = True,
     ) -> CacheAnalysisResult:
         """统计该角色用户的历史问题，补充缓存中不存在的最高频 5 个问题。"""
+        if not settings.ROLE_CACHE_WRITE_ENABLED:
+            return CacheAnalysisResult(role_id, "history_frequent", 0, 0, "角色缓存写入已关闭（过渡期）")
         config, _role = await self._load_config_and_role(db, role_id)
         cutoff = utcnow() - timedelta(days=max(1, config.interval_days))
         user_messages = list(
@@ -492,6 +496,8 @@ role_cache_service = RoleCacheService()
 
 async def run_role_cache_scheduler_once() -> dict[str, int]:
     """执行一轮角色缓存到期任务，并为每个分析作业隔离数据库会话。"""
+    if not settings.ROLE_CACHE_WRITE_ENABLED:
+        return {"scheduled": 0, "completed": 0, "failed": 0, "skipped_write_disabled": 1}
     now = utcnow()
     async with SessionLocal() as db:
         await ensure_role_cache_configs(db, commit=True)

@@ -261,7 +261,7 @@ const MENU_GROUPS = [
     id: "ops-security",
     title: "系统运维与安全",
     items: [
-      { path: "/admin/role-caches", label: "角色缓存", perm: "system:read" },
+      { path: "/admin/kb-faqs", label: "知识库 FAQ", perm: "system:read" },
       { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
       { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
       { path: "/admin/guard", label: "LLM Guard 拦截", perm: "system:read" },
@@ -552,7 +552,7 @@ async function dispatchRender() {
   if (path === "/admin/knowledge-bases") return pageKbList();
   if (path === "/admin/ragas") return pageRagas();
   if (path === "/admin/qa-sessions") return pageQaSessions();
-  if (path === "/admin/role-caches") return pageRoleCaches();
+  if (path === "/admin/kb-faqs") return pageKbFaqs();
   if (path === "/admin/hit-test") return pageHitTest();
   if (path === "/admin/qa-analytics") return pageQaAnalytics();
   if (path === "/admin/audit") return pageAudit();
@@ -6633,200 +6633,209 @@ async function pageQaSessions() {
   await paint();
 }
 
-/* ========== 角色缓存 /admin/role-caches ========== */
-async function pageRoleCaches() {
-  if (!requirePerm("system:read", "角色缓存知识库")) return;
+/* ========== 知识库 FAQ /admin/kb-faqs ========== */
+async function pageKbFaqs() {
+  if (!requirePerm("system:read", "知识库 FAQ")) return;
   const root = document.getElementById("pageRoot");
-  root.innerHTML = `<div class="loading">加载角色缓存配置…</div>`;
+  root.innerHTML = `<div class="loading">加载知识库 FAQ…</div>`;
   const canWrite = hasPermission("kb:write");
-
   try {
-    const caches = await api.get("/role-caches");
-    root.innerHTML = `
-      ${pageHead({
-        title: "角色缓存",
-        desc: "按角色隔离的缓存知识库；默认定时分析文档与历史高频问题。",
-      })}
-      <div class="card panel-fill">
-        <div class="card-header">
-          <div class="card-header-text">
-            <h3 class="card-title">缓存配置</h3>
-            <p class="card-sub">完全相同且来源库仍有权限的问题才会命中</p>
+    const kbs = await api.get("/admin/faq/kbs");
+    let selectedKb = kbs[0]?.id || "";
+    const paint = async () => {
+      if (!selectedKb) {
+        root.innerHTML = `
+          ${pageHead({ title: "知识库 FAQ", desc: "按知识库缓存常见问答；文档就绪后自动生成，命中可秒答。" })}
+          <div class="card empty-state">暂无知识库</div>`;
+        return;
+      }
+      const status = root.querySelector("[data-faq-status]")?.value || "";
+      const keyword = root.querySelector("[data-faq-keyword]")?.value || "";
+      const qs = new URLSearchParams({ kb_id: selectedKb, page: "1", size: "50" });
+      if (status) qs.set("status", status);
+      if (keyword.trim()) qs.set("keyword", keyword.trim());
+      const data = await api.get(`/admin/faq/list?${qs.toString()}`);
+      const items = data.items || [];
+      root.innerHTML = `
+        ${pageHead({
+          title: "知识库 FAQ",
+          desc: "文档向量化完成后异步生成；访客热门点选可直达答案。角色缓存已进入只读过渡期。",
+        })}
+        <div class="card panel-fill">
+          <div class="card-header" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+            <div class="card-header-text">
+              <h3 class="card-title">FAQ 列表</h3>
+              <p class="card-sub">当前库：${escapeHtml(data.kb_name || "")} · 命中开关 ${data.faq_enabled ? "开启" : "关闭"}</p>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+              <select class="form-control" data-faq-kb style="min-width:180px">
+                ${kbs
+                  .map(
+                    (kb) =>
+                      `<option value="${escapeHtml(kb.id)}" ${kb.id === selectedKb ? "selected" : ""}>${escapeHtml(kb.name)} (${fmtCount(kb.active_faq_count || 0)})</option>`
+                  )
+                  .join("")}
+              </select>
+              <select class="form-control" data-faq-status>
+                <option value="">全部状态</option>
+                <option value="active" ${status === "active" ? "selected" : ""}>active</option>
+                <option value="pending_review" ${status === "pending_review" ? "selected" : ""}>pending_review</option>
+                <option value="disabled" ${status === "disabled" ? "selected" : ""}>disabled</option>
+              </select>
+              <input class="form-control" data-faq-keyword placeholder="搜索问题/答案" value="${escapeHtml(keyword)}" />
+              <button type="button" class="btn btn-secondary btn-sm" data-faq-refresh>刷新</button>
+              ${
+                canWrite
+                  ? `<button type="button" class="btn btn-sm" data-faq-toggle>${data.faq_enabled ? "关闭命中" : "开启命中"}</button>
+                     <button type="button" class="btn btn-sm" data-faq-regen>重新生成</button>
+                     <button type="button" class="btn btn-sm" data-faq-batch-approve>批量通过</button>
+                     <button type="button" class="btn btn-danger btn-sm" data-faq-batch-disable>批量停用</button>`
+                  : ""
+              }
+            </div>
           </div>
-        </div>
-        <div class="table-wrap"><table class="table table-role-caches">
-          <colgroup>
-            <col class="rc-col-kb" />
-            <col class="rc-col-role" />
-            <col class="rc-col-count" />
-            <col class="rc-col-cycle" />
-            <col class="rc-col-time" />
-            <col class="rc-col-time" />
-            <col class="rc-col-status" />
-            <col class="rc-col-actions" />
-          </colgroup>
-          <thead><tr>
-            <th class="col-name">缓存知识库</th>
-            <th class="col-role">角色</th>
-            <th class="col-num">缓存数</th>
-            <th class="col-cycle">检测周期</th>
-            <th class="col-time">文档分析</th>
-            <th class="col-time">历史分析</th>
-            <th class="col-status">状态</th>
-            <th class="col-actions">操作</th>
-          </tr></thead>
-          <tbody>
-            ${
-              caches.length
-                ? caches
-                    .map(
-                      (cache) => `<tr data-role-cache-row="${escapeHtml(cache.role_id)}">
-                        <td class="col-name" title="${escapeHtml(cache.name)}"><strong class="cell-primary">${escapeHtml(cache.name)}</strong></td>
-                        <td class="col-role" title="${escapeHtml(cache.role_description || cache.role_name || "")}">${escapeHtml(cache.role_description || cache.role_name)}</td>
-                        <td class="col-num">${escapeHtml(fmtCount(cache.question_count ?? 0))}</td>
-                        <td class="col-cycle">
-                          <label class="cell-inline-control">
-                            <input class="form-control" style="width:64px" type="number" min="1" max="365" value="${escapeHtml(cache.interval_days)}" data-cache-interval ${canWrite ? "" : "disabled"} /> 天
-                          </label>
-                        </td>
-                        <td class="col-time">${cache.last_document_analysis_at ? formatDateTimeHtml(cache.last_document_analysis_at) : `<span class="cell-time">尚未执行</span>`}</td>
-                        <td class="col-time">${cache.last_history_analysis_at ? formatDateTimeHtml(cache.last_history_analysis_at) : `<span class="cell-time">尚未执行</span>`}</td>
-                        <td class="col-status"><span class="badge ${cache.enabled ? "badge-success" : "badge-danger"}">${cache.enabled ? "已启用" : "已停用"}</span></td>
-                        <td class="col-actions">
-                          <div class="table-actions table-actions-wrap">
-                            <button type="button" class="btn btn-text btn-sm" data-cache-detail>查看问题</button>
-                            ${
-                              canWrite
-                                ? `<button type="button" class="btn btn-text btn-sm" data-cache-save>保存设置</button>
-                                   <button type="button" class="btn btn-text btn-sm" data-cache-doc>分析文档</button>
-                                   <button type="button" class="btn ${cache.enabled ? "btn-danger" : "btn-success"} btn-sm" data-cache-toggle>${cache.enabled ? "停用" : "启用"}</button>`
-                                : ""
-                            }
-                          </div>
-                        </td>
-                      </tr>`
-                    )
-                    .join("")
-                : `<tr><td colspan="8" class="text-muted">暂无角色缓存配置</td></tr>`
-            }
-          </tbody>
-        </table></div>
-      </div>`;
-
-    root.querySelectorAll("[data-role-cache-row]").forEach((row) => {
-      const roleId = row.getAttribute("data-role-cache-row");
-      const current = caches.find((item) => item.role_id === roleId) || {};
-      row.querySelector("[data-cache-detail]").onclick = () =>
-        openRoleCacheQuestions(roleId, current.name, { canWrite });
-      if (!canWrite) return;
-
-      const save = async (patch) => {
-        await api.patch(`/role-caches/${roleId}`, patch);
-        toast("缓存配置已保存");
-        await pageRoleCaches();
-      };
-      row.querySelector("[data-cache-save]").onclick = async () => {
-        const intervalDays = Number(row.querySelector("[data-cache-interval]").value);
-        if (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 365) {
-          toast("检测周期必须是 1-365 天的整数", "error");
-          return;
-        }
-        try {
-          await save({ interval_days: intervalDays });
-        } catch (error) {
-          toast(error.message, "error");
-        }
-      };
-      row.querySelector("[data-cache-toggle]").onclick = async () => {
-        try {
-          await save({ enabled: !current.enabled });
-        } catch (error) {
-          toast(error.message, "error");
-        }
-      };
-      row.querySelector("[data-cache-doc]").onclick = () => runRoleCacheAnalysis(roleId, "documents");
-    });
-  } catch (error) {
-    root.innerHTML = `<div class="card empty-state">加载角色缓存失败：${escapeHtml(error.message)}</div>`;
-  }
-}
-
-/** 管理员手动触发文档或历史分析；请求完成后自动刷新统计。 */
-async function runRoleCacheAnalysis(roleId, type) {
-  const label = type === "documents" ? "文档分析" : "检测文档";
-  toast(`${label}已开始，请等待模型处理完成`);
-  try {
-    const result = await api.post(`/role-caches/${roleId}/analyze-${type}`, {});
-    toast(result.message || `${label}已完成`);
-    await pageRoleCaches();
-  } catch (error) {
-    toast(`${label}失败：${error.message}`, "error");
-  }
-}
-
-/** 弹窗查看角色缓存中的问题、来源及实际命中次数。 */
-async function openRoleCacheQuestions(roleId, cacheName, options = {}) {
-  const canWrite = Boolean(options.canWrite);
-  try {
-    const data = await api.get(`/role-caches/${roleId}/questions?page=1&page_size=100`);
-    const items = data.items || [];
-    const mask = document.createElement("div");
-    mask.className = "modal-mask";
-    mask.innerHTML = `
-      <div class="modal" role="dialog" aria-modal="true" style="width:min(1000px,calc(100vw - 24px));max-height:90vh;overflow:auto">
-        <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-          <h3 style="margin:0;min-width:0">${escapeHtml(cacheName || "缓存问题明细")}</h3>
-          ${
-            canWrite
-              ? `<button type="button" class="btn btn-secondary btn-sm" data-cache-detect-doc style="flex-shrink:0;white-space:nowrap">检测文档</button>`
-              : ""
-          }
-        </div>
-        <div class="modal-body">
-          <p class="text-muted" style="margin-top:0">共 ${escapeHtml(fmtCount(data.total ?? items.length))} 个缓存问题。文档生成与历史高频问题都必须携带知识库来源范围才能被问答链路命中。</p>
           <div class="table-wrap"><table class="table">
-            <thead><tr><th>问题</th><th>答案摘要</th><th>来源</th><th>历史频次</th><th>缓存命中</th><th class="col-time">更新时间</th></tr></thead>
+            <thead><tr>
+              <th style="width:36px"><input type="checkbox" data-faq-check-all /></th>
+              <th>问题</th><th>答案摘要</th><th>状态</th><th>质量</th><th>命中</th><th>来源</th><th class="col-actions">操作</th>
+            </tr></thead>
             <tbody>
               ${
                 items.length
                   ? items
                       .map(
-                        (item) => `<tr>
-                          <td>${escapeHtml(item.question)}</td>
-                          <td style="max-width:320px">${escapeHtml((item.answer || "").slice(0, 160))}${(item.answer || "").length > 160 ? "…" : ""}</td>
-                          <td>${item.source === "history_frequent" ? "历史高频" : "文档生成"}</td>
-                          <td>${escapeHtml(fmtCount(item.occurrence_count ?? 1))}</td>
+                        (item) => `<tr data-faq-id="${escapeHtml(item.id)}">
+                          <td><input type="checkbox" data-faq-check value="${escapeHtml(item.id)}" /></td>
+                          <td title="${escapeHtml(item.question)}">${escapeHtml(item.question)}</td>
+                          <td style="max-width:280px">${escapeHtml((item.answer || "").slice(0, 120))}${(item.answer || "").length > 120 ? "…" : ""}</td>
+                          <td><span class="badge ${item.status === "active" ? "badge-success" : item.status === "pending_review" ? "badge-warning" : "badge-danger"}">${escapeHtml(item.status)}</span></td>
+                          <td>${escapeHtml(String(item.quality_score ?? "-"))}</td>
                           <td>${escapeHtml(fmtCount(item.hit_count ?? 0))}</td>
-                          <td class="col-time">${formatDateTimeHtml(item.updated_at)}</td>
+                          <td>${escapeHtml(item.source || "")}</td>
+                          <td class="col-actions">
+                            <button type="button" class="btn btn-text btn-sm" data-faq-view>查看</button>
+                            ${canWrite ? `<button type="button" class="btn btn-text btn-sm" data-faq-edit>编辑</button>` : ""}
+                          </td>
                         </tr>`
                       )
                       .join("")
-                  : `<tr><td colspan="6" class="text-muted">尚未生成缓存问题</td></tr>`
+                  : `<tr><td colspan="8" class="text-muted">该知识库暂无 FAQ</td></tr>`
               }
             </tbody>
           </table></div>
-        </div>
-        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-close>关闭</button></div>
-      </div>`;
-    document.body.appendChild(mask);
-    mask.querySelector("[data-close]").onclick = () => mask.remove();
-    const detectBtn = mask.querySelector("[data-cache-detect-doc]");
-    if (detectBtn) {
-      detectBtn.onclick = async () => {
-        detectBtn.disabled = true;
-        try {
-          // 「检测文档」应对齐文档分析接口，而非历史分析
-          await runRoleCacheAnalysis(roleId, "documents");
-        } finally {
-          detectBtn.disabled = false;
-        }
+        </div>`;
+
+      root.querySelector("[data-faq-kb]").onchange = (e) => {
+        selectedKb = e.target.value;
+        paint().catch((err) => toast(err.message, "error"));
       };
-    }
-    mask.addEventListener("click", (event) => {
-      if (event.target === mask) mask.remove();
-    });
+      root.querySelector("[data-faq-refresh]").onclick = () => paint().catch((err) => toast(err.message, "error"));
+      root.querySelector("[data-faq-status]").onchange = () => paint().catch((err) => toast(err.message, "error"));
+      root.querySelector("[data-faq-keyword]").onkeydown = (e) => {
+        if (e.key === "Enter") paint().catch((err) => toast(err.message, "error"));
+      };
+      root.querySelector("[data-faq-check-all]")?.addEventListener("change", (e) => {
+        root.querySelectorAll("[data-faq-check]").forEach((el) => {
+          el.checked = e.target.checked;
+        });
+      });
+      const selectedIds = () => Array.from(root.querySelectorAll("[data-faq-check]:checked")).map((el) => el.value);
+      if (canWrite) {
+        root.querySelector("[data-faq-toggle]").onclick = async () => {
+          try {
+            await api.post(`/knowledge-bases/${selectedKb}/faq/toggle`, { enabled: !data.faq_enabled });
+            toast("已更新知识库 FAQ 开关");
+            await paint();
+          } catch (err) {
+            toast(err.message, "error");
+          }
+        };
+        root.querySelector("[data-faq-regen]").onclick = async () => {
+          try {
+            const res = await api.post(`/admin/knowledge-bases/${selectedKb}/regenerate-faq`, {});
+            toast(res.task_id ? `已排队：${res.task_id}` : "已排队重新生成");
+          } catch (err) {
+            toast(err.message, "error");
+          }
+        };
+        root.querySelector("[data-faq-batch-approve]").onclick = async () => {
+          const ids = selectedIds();
+          if (!ids.length) return toast("请先勾选 FAQ", "error");
+          try {
+            await api.post("/admin/faq/batch", { action: "approve", faq_ids: ids });
+            toast("已批量通过");
+            await paint();
+          } catch (err) {
+            toast(err.message, "error");
+          }
+        };
+        root.querySelector("[data-faq-batch-disable]").onclick = async () => {
+          const ids = selectedIds();
+          if (!ids.length) return toast("请先勾选 FAQ", "error");
+          try {
+            await api.post("/admin/faq/batch", { action: "disable", faq_ids: ids });
+            toast("已批量停用");
+            await paint();
+          } catch (err) {
+            toast(err.message, "error");
+          }
+        };
+      }
+      root.querySelectorAll("[data-faq-id]").forEach((row) => {
+        const id = row.getAttribute("data-faq-id");
+        const item = items.find((x) => x.id === id);
+        row.querySelector("[data-faq-view]").onclick = () => openKbFaqDetail(item, { canWrite, onSaved: paint });
+        const editBtn = row.querySelector("[data-faq-edit]");
+        if (editBtn) editBtn.onclick = () => openKbFaqDetail(item, { canWrite, edit: true, onSaved: paint });
+      });
+    };
+    await paint();
   } catch (error) {
-    toast(`加载缓存问题失败：${error.message}`, "error");
+    root.innerHTML = `<div class="card empty-state">加载知识库 FAQ 失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function openKbFaqDetail(item, options = {}) {
+  if (!item) return;
+  const canWrite = Boolean(options.canWrite);
+  const edit = Boolean(options.edit);
+  const mask = document.createElement("div");
+  mask.className = "modal-mask";
+  mask.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" style="width:min(720px,calc(100vw - 24px));max-height:90vh;overflow:auto">
+      <div class="modal-header"><h3 style="margin:0">FAQ 详情</h3></div>
+      <div class="modal-body">
+        <label class="form-label">问题</label>
+        <textarea class="form-control" data-faq-q rows="2" ${canWrite && edit ? "" : "readonly"}>${escapeHtml(item.question || "")}</textarea>
+        <label class="form-label" style="margin-top:12px">答案</label>
+        <textarea class="form-control" data-faq-a rows="8" ${canWrite && edit ? "" : "readonly"}>${escapeHtml(item.answer || "")}</textarea>
+        <p class="text-muted" style="margin-top:12px">状态 ${escapeHtml(item.status || "")} · 来源 ${escapeHtml(item.source || "")} · 命中 ${escapeHtml(fmtCount(item.hit_count || 0))}</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>关闭</button>
+        ${canWrite && edit ? `<button type="button" class="btn" data-save>保存</button>` : ""}
+      </div>
+    </div>`;
+  document.body.appendChild(mask);
+  mask.querySelector("[data-close]").onclick = () => mask.remove();
+  mask.addEventListener("click", (event) => {
+    if (event.target === mask) mask.remove();
+  });
+  const saveBtn = mask.querySelector("[data-save]");
+  if (saveBtn) {
+    saveBtn.onclick = async () => {
+      try {
+        await api.put(`/admin/faq/${item.id}`, {
+          question: mask.querySelector("[data-faq-q]").value,
+          answer: mask.querySelector("[data-faq-a]").value,
+        });
+        toast("已保存");
+        mask.remove();
+        if (options.onSaved) await options.onSaved();
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    };
   }
 }
 
@@ -7497,6 +7506,7 @@ async function pageQaAnalytics() {
       l1: "L1 缓存",
       l2: "L2 缓存",
       role: "角色缓存",
+      kb_faq: "知识库 FAQ",
       semantic: "语义缓存",
     };
     return map[key] || label || "—";
@@ -8241,7 +8251,7 @@ async function pageFastApi() {
   "/admin/knowledge-bases/:id/snapshots",
   "/admin/ragas",
   "/admin/qa-sessions",
-  "/admin/role-caches",
+  "/admin/kb-faqs",
   "/admin/hit-test",
   "/admin/qa-analytics",
   "/admin/audit",

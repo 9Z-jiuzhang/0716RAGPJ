@@ -60,6 +60,7 @@ from app.services.query_processing import (
     _sanitize_rewrite_output as _sanitize_rewrite_output,
 )
 from app.services.role_cache import role_cache_service
+from app.services.kb_faq_service import kb_faq_service
 from app.services.sticky_evidence import (
     augment_followup_query,
     expand_neighbor_hits,
@@ -347,6 +348,62 @@ class QAPipeline:
                     )
 
             scope_fp = ",".join(sorted(str(t.kb_id) for t in targets)) or "empty"
+
+            # [2.5] 知识库 FAQ 主缓存：首问或显式点选热门题可秒答；越权库一律拦截。
+            with tracker.track("kb_faq_lookup"):
+                faq_match = await kb_faq_service.check_faq_hit(
+                    db,
+                    question=question,
+                    tenant_id=settings.FAQ_TENANT_ID,
+                    authorized_kb_ids=[target.kb_id for target in targets],
+                    is_explicit_click=bool(getattr(request, "explicit_faq_click", False)),
+                    message_count_in_session=int(session.message_count or 0),
+                    has_unfinished_context=bool(last_assistant),
+                )
+            if faq_match is not None:
+                citations = list(faq_match.citations or [])
+                retrieval_meta = {
+                    "original_query": question,
+                    "authorized_kb_count": len(targets),
+                    "authorized_kb_ids": [str(target.kb_id) for target in targets],
+                    "cache_hit": True,
+                    "source": "kb_faq",
+                    "intent": {
+                        "name": guard_decision.intent,
+                        "confidence": guard_decision.confidence,
+                        "detector": guard_decision.detector,
+                    },
+                    "cache": {
+                        "faq_id": str(faq_match.faq_id),
+                        "kb_id": str(faq_match.kb_id),
+                        "source": faq_match.source,
+                        "level": "kb_faq",
+                    },
+                }
+                yield self._event(
+                    "cache_hit",
+                    faq_id=str(faq_match.faq_id),
+                    kb_id=str(faq_match.kb_id),
+                    source=faq_match.source,
+                )
+                async for ev in self._emit_direct_answer(
+                    db,
+                    session=session,
+                    user=user,
+                    guest_id=guest_id,
+                    is_guest=is_guest,
+                    question=question,
+                    answer_text=faq_match.answer,
+                    tracker=tracker,
+                    lf_trace=lf_trace,
+                    route=route,
+                    request=request,
+                    citations=citations,
+                    retrieval_meta=retrieval_meta,
+                ):
+                    yield ev
+                return
+
             cache_req = CacheLookupRequest(
                 request_id=tracker.request_id,
                 user_id=str(user.id) if user else None,
@@ -396,14 +453,16 @@ class QAPipeline:
                     cache_hit.miss_reason,
                 )
 
-            # [3] 角色缓存精确命中：权限复核通过后直接返回，跳过预处理、检索、Rerank 与 LLM。
-            with tracker.track("role_cache_lookup"):
-                cache_match = await role_cache_service.lookup(
-                    db,
-                    question=question,
-                    user=user,
-                    authorized_kb_ids=[target.kb_id for target in targets],
-                )
+            # [3] 角色缓存精确命中（过渡期只读回退）：权限复核通过后直接返回。
+            cache_match = None
+            if settings.ROLE_CACHE_READONLY_FALLBACK:
+                with tracker.track("role_cache_lookup"):
+                    cache_match = await role_cache_service.lookup(
+                        db,
+                        question=question,
+                        user=user,
+                        authorized_kb_ids=[target.kb_id for target in targets],
+                    )
             if cache_match is not None:
                 citations = list(cache_match.citations)
                 answer_text = cache_match.answer

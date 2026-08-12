@@ -334,6 +334,19 @@ async def submit_feedback(
             ),
             commit=False,
         )
+        # FAQ 命中答案被踩：累计拒绝次数，超过阈值自动禁用
+        if body.rating == "useless":
+            cache_meta = meta.get("cache") if isinstance(meta.get("cache"), dict) else {}
+            faq_id_raw = cache_meta.get("faq_id")
+            if faq_id_raw and meta.get("source") == "kb_faq":
+                from uuid import UUID as _UUID
+
+                from app.services.kb_faq_service import kb_faq_service
+
+                try:
+                    await kb_faq_service.record_reject(db, faq_id=_UUID(str(faq_id_raw)))
+                except Exception:  # noqa: BLE001
+                    logger.warning("faq reject_count update failed faq_id=%s", faq_id_raw, exc_info=True)
         await db.commit()
     except Exception as exc:  # noqa: BLE001
         await db.rollback()

@@ -90,13 +90,22 @@ services:
   # ---------- Redis ----------
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--port", "9637"]
+    command:
+      [
+        "redis-server",
+        "--port",
+        "9637",
+        "--requirepass",
+        "${REDIS_PASSWORD:-}",
+      ]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     ports:
       - "9637:9637"
     volumes:
       - ./data/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "9637", "ping"]
+      test: ["CMD-SHELL", "redis-cli -p 9637 -a \"$$REDIS_PASSWORD\" ping | grep -q PONG || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

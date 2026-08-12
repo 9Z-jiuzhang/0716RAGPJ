@@ -8,6 +8,7 @@
 - **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml` + `docker-compose.langfuse.yml`）
 - **接入第三方 / App**：见 [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md)
 - **六维优化落地状态**：见 [`docs/OPTIMIZATION_STATUS.md`](docs/OPTIMIZATION_STATUS.md)
+- **知识库 FAQ 缓存**：见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md)
 
 ---
 
@@ -206,7 +207,8 @@ app/
 | 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例、执行、多策略对比；默认 TopK=3；得分=命中片段相关度均值 |
 | 快照管理 | `/api/v1/knowledge-bases/{kb_id}/snapshots` | `snapshot.py` | 快照创建、回退预览与回退 |
 | RAGAS 评估 | `/api/v1/ragas` | `ragas_evaluation.py` | 样本预览/生成、评估运行与详情 |
-| 角色缓存 | `/api/v1/role-caches` | `role_cache.py` | 按角色缓存高频问题 |
+| 角色缓存（过渡期只读） | `/api/v1/role-caches` | `role_cache.py` | 写入已关闭，命中仍可只读回退 |
+| 知识库 FAQ | `/api/v1/faq/*`、`/api/v1/admin/faq/*` | `kb_faq_service.py` | 库级 FAQ 生成/命中/热门；见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md) |
 | Query 预处理 | `/api/v1/query-processing` | — | 改写/扩展/HyDE 策略配置（默认改写关闭） |
 | 审计日志 | `/api/v1/audit` | `audit.py` | 操作审计查询、详情与批量删除 |
 | 系统监控 | `/api/v1/monitor` | `monitor.py` | 健康检查、统计、Guard 事件、**问答分析**（反馈/主题）；`/metrics` |
@@ -279,7 +281,8 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
 - **访客端** `frontend/guest/`（挂载 `/`）：**营销落地页**（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、**流式中止**、引用相关度 Top-3 展开/其余折叠、置信提示）、对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势、错误分桶、**近 14 日问答反馈 KPI/趋势**）与安全窗口；侧栏共用品牌矢量标；用户/角色/部门（全量拉取 + 本地分页，用户表可排序/按部门筛选）；大模型与用量；知识库/文档工作台/快照（「访问范围」**多选部门**，含「除访客外全选」）；命中率测试、RAGAS、**问答统计**、会话分析、角色缓存、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页指标（7/30 天趋势、错误分桶、**近 14 日问答反馈 KPI/趋势**）与安全窗口；侧栏共用品牌矢量标；用户/角色/部门（全量拉取 + 本地分页，用户表可排序/按部门筛选）；大模型与用量；知识库/文档工作台/快照（「访问范围」**多选部门**，含「除访客外全选」）；命中率测试、RAGAS、**问答统计**、会话分析、**知识库 FAQ**、审计、**LLM Guard 拦截**、系统监控（健康/Grafana）、**API 接入指南**。
+- **访客端** `frontend/guest/`：落地页 + 智能问答；欢迎区展示热门 FAQ，点选可秒答（无思考态）。
 - **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、`brand-mark.js`（落地页/侧栏品牌标）、`env-particle-field.js`（落地页粒子场）、主题/动效（含统计数字格式化）、公共 CSS、`img/logo-9z.png`、接入指南 Markdown（`/assets/docs/`）、Swagger UI 静态资源（`/assets/vendor/swagger-ui/`）。
 
 ### 2.7 可观测性

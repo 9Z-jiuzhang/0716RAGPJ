@@ -390,6 +390,9 @@ async def delete_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID,
     await take_auto_snapshot(db, kb_id, SnapshotTrigger.AUTO_DELETE, user.id, name=f"delete:{doc.filename}")
     file_path = doc.file_path
     vector_store.delete_document_vectors(kb_id, doc_id)
+    from app.services.kb_faq_service import kb_faq_service
+
+    await kb_faq_service.prune_by_document(db, doc_id=doc_id, kb_id=kb_id)
     await db.delete(doc)
     await write_audit(
         db,

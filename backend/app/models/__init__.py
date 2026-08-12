@@ -13,6 +13,7 @@ from .model_config import ModelConfig
 from .qa import QAMessage, QASession
 from .query_processing import QueryProcessingConfig
 from .ragas_evaluation import RagasEvaluationItem, RagasEvaluationRun
+from .kb_faq import FAQAuditLog, KBCachedFAQ
 from .role_cache import RoleCacheConfig, RoleCachedQuestion
 from .snapshot import Snapshot, SnapshotDocument
 from .vectorize_task import VectorizeTask
@@ -44,6 +45,8 @@ __all__ = [
     "ModelConfig",
     "RoleCacheConfig",
     "RoleCachedQuestion",
+    "KBCachedFAQ",
+    "FAQAuditLog",
     "GuardBlockedEvent",
     "RagasEvaluationRun",
     "RagasEvaluationItem",

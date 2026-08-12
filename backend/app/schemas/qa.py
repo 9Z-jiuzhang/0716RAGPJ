@@ -31,6 +31,10 @@ class AskRequest(BaseModel):
     strategy: Literal["vector", "fulltext", "hybrid"] = Field(default="hybrid", description="检索策略")
     top_k: int = Field(default=5, ge=1, le=20, description="返回片段数量")
     temperature: float = Field(default=0.7, ge=0, le=2, description="生成温度")
+    explicit_faq_click: bool = Field(
+        default=False,
+        description="访客点选热门 FAQ 时为 True，强制允许 FAQ 命中（含多轮会话）",
+    )
 
 
 class RenameSessionRequest(BaseModel):

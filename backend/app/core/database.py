@@ -218,6 +218,57 @@ async def ensure_schema_patches() -> None:
         "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS matching_mode VARCHAR(32) NOT NULL DEFAULT 'exact'",
         "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS quality_score DOUBLE PRECISION NULL",
         "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS observe_only BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS faq_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+        """
+        CREATE TABLE IF NOT EXISTS kb_cached_faqs (
+          id UUID PRIMARY KEY,
+          tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+          kb_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+          question TEXT NOT NULL,
+          normalized_question VARCHAR(1000) NOT NULL,
+          answer TEXT NOT NULL,
+          source_document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+          chunk_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+          citations JSONB NOT NULL DEFAULT '[]'::jsonb,
+          quality_score DOUBLE PRECISION NOT NULL DEFAULT 0.7,
+          hit_count INTEGER NOT NULL DEFAULT 0,
+          status VARCHAR(20) NOT NULL DEFAULT 'active',
+          source VARCHAR(30) NOT NULL DEFAULT 'document_auto',
+          stale_reason VARCHAR(50) NULL,
+          model_version VARCHAR(50) NULL,
+          reject_count INTEGER NOT NULL DEFAULT 0,
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          version INTEGER NOT NULL DEFAULT 1,
+          embedding JSONB NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT uk_kb_faq_unique UNIQUE (kb_id, normalized_question)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_kb_faqs_tenant ON kb_cached_faqs(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_kb_faqs_kb ON kb_cached_faqs(kb_id)",
+        "CREATE INDEX IF NOT EXISTS idx_kb_faqs_status ON kb_cached_faqs(status)",
+        "CREATE INDEX IF NOT EXISTS idx_kb_faqs_normalized ON kb_cached_faqs(normalized_question)",
+        "CREATE INDEX IF NOT EXISTS idx_kb_faqs_active ON kb_cached_faqs(is_active, status)",
+        "CREATE INDEX IF NOT EXISTS idx_kb_faqs_daily ON kb_cached_faqs(kb_id, created_at)",
+        """
+        CREATE TABLE IF NOT EXISTS faq_audit_log (
+          id UUID PRIMARY KEY,
+          tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+          action VARCHAR(50) NOT NULL,
+          operator_id UUID NULL,
+          target_id UUID NULL,
+          target_ids JSONB NULL,
+          old_value JSONB NULL,
+          new_value JSONB NULL,
+          ip_address VARCHAR(50) NULL,
+          user_agent TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_faq_audit_tenant ON faq_audit_log(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_faq_audit_target ON faq_audit_log(target_id)",
+        "CREATE INDEX IF NOT EXISTS idx_faq_audit_time ON faq_audit_log(created_at)",
         # Wave1：仅旧默认 rewrite=true 且未开启扩展/HyDE 的单例配置迁到关闭
         """
         UPDATE query_processing_configs

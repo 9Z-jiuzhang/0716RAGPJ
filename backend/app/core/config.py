@@ -232,6 +232,31 @@ class Settings(BaseSettings):
     ROLE_CACHE_DOCUMENT_CHARS_PER_CHUNK: int = 800
     ROLE_CACHE_LLM_MAX_TOKENS: int = 4096
     ROLE_CACHE_SCHEDULER_POLL_SECONDS: int = 3600
+    # 过渡期：停止角色缓存写入，命中仅只读回退
+    ROLE_CACHE_WRITE_ENABLED: bool = False
+    ROLE_CACHE_READONLY_FALLBACK: bool = True
+    # ---------- 知识库 FAQ 主缓存 ----------
+    FAQ_MASTER_SWITCH: bool = True
+    FAQ_GENERATION_ENABLED: bool = True
+    FAQ_DEBUG_SKIP_WRITE: bool = False
+    FAQ_DEBUG_SKIP_READ: bool = False
+    FAQ_PER_DOCUMENT_COUNT: int = 25
+    FAQ_PER_KB_LIMIT: int = 500
+    FAQ_KB_DAILY_LIMIT: int = 500
+    FAQ_TENANT_CONCURRENT_LIMIT: int = 3
+    FAQ_QUALITY_THRESHOLD: float = 0.7
+    FAQ_SIMILARITY_THRESHOLD: float = 0.85
+    FAQ_REJECT_DISABLE_THRESHOLD: int = 3
+    FAQ_REDIS_CACHE_TTL_SECONDS: int = 900
+    FAQ_DOCUMENT_CHUNK_BATCH_SIZE: int = 12
+    FAQ_DOCUMENT_CHARS_PER_CHUNK: int = 800
+    FAQ_LLM_MAX_TOKENS: int = 4096
+    FAQ_TENANT_ID: str = "default"
+    FAQ_SENSITIVE_PATTERNS: list[str] = [
+        r"\d{15,18}",
+        r"1[3-9]\d{9}",
+        r"[\u4e00-\u9fa5]{2,4}薪[资酬]",
+    ]
     # ---------- LLM Guard 与意图识别 ----------
     LLM_GUARD_ENABLED: bool = True
     # 本地规则无法明确归类时才调用 LLM 分类器，兼顾安全性与缓存节省效果。

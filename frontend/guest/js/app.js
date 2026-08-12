@@ -656,12 +656,17 @@ function pageChat() {
               <h1>有什么我能帮你检索？</h1>
             <p>${tip}</p>
             <div class="qa-welcome-note">回答将展示引用来源；无法命中时不会编造来源。未登录点赞不计监测；收藏仅存本浏览器。</div>
-            <div class="qa-suggestions">
-              <button type="button" data-question="请介绍当前可访问的知识库内容">了解知识库内容</button>
-              <button type="button" data-question="如何上传并管理文档？">如何管理文档</button>
-              <button type="button" data-question="请说明平台的权限访问规则">查看权限规则</button>
+            <div class="qa-suggestions" id="faqPanel">
+              <div class="faq-header">
+                <h4 class="faq-title">热门问题</h4>
+                <button type="button" class="faq-action" id="faqRefreshBtn">换一批</button>
+              </div>
+              <div class="faq-list" id="faqList"><div class="faq-loading">正在加载热门问题…</div></div>
+              <div class="faq-more" id="faqMore" hidden>
+                <button type="button" id="faqExpandBtn">展开更多</button>
+              </div>
+            </div>
           </div>
-        </div>
         </div>
           <button type="button" class="qa-scroll-bottom" id="btnScrollBottom" title="回到底部" aria-label="回到底部" hidden>↓</button>
           <div class="qa-composer" id="qaComposer">
@@ -690,6 +695,7 @@ function pageChat() {
       input.focus();
     });
   });
+  // 旧硬编码建议已由 loadHotFAQ 接管；保留空绑定兼容
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -709,6 +715,7 @@ function pageChat() {
   bindHistoryScrollLoad();
   bindScrollToBottom();
   loadChatSidebar();
+  loadHotFAQ();
 
   // 从历史打开会话：渲染完成后加载该会话消息（避免路由二次渲染清空）
   if (pendingOpenSessionId) {
@@ -1386,22 +1393,90 @@ function startNewChat() {
       <h1>有什么我能帮你检索？</h1>
       <p>${tip}</p>
       <div class="qa-welcome-note">回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。</div>
-      <div class="qa-suggestions">
-        <button type="button" data-question="请介绍当前可访问的知识库内容">了解知识库内容</button>
-        <button type="button" data-question="如何上传并管理文档？">如何管理文档</button>
-        <button type="button" data-question="请说明平台的权限访问规则">查看权限规则</button>
+      <div class="qa-suggestions" id="faqPanel">
+        <div class="faq-header">
+          <h4 class="faq-title">热门问题</h4>
+          <button type="button" class="faq-action" id="faqRefreshBtn">换一批</button>
+        </div>
+        <div class="faq-list" id="faqList"><div class="faq-loading">正在加载热门问题…</div></div>
+        <div class="faq-more" id="faqMore" hidden>
+          <button type="button" id="faqExpandBtn">展开更多</button>
+        </div>
       </div>
     </div>`;
   const input = document.getElementById("questionInput");
-  list.querySelectorAll("[data-question]").forEach((item) => {
-    item.addEventListener("click", () => {
-      if (!input) return;
-      input.value = item.getAttribute("data-question") || "";
-      input.focus();
-    });
-  });
   resetComposerHeight();
   input?.focus();
+  loadHotFAQ();
+}
+
+let currentFAQPage = 1;
+let currentFAQSeed = Date.now();
+
+/** 加载访客热门 FAQ；点选时带 explicit_faq_click 走秒答 */
+async function loadHotFAQ(page = 1, expand = false) {
+  const faqPanel = document.getElementById("faqPanel");
+  const faqList = document.getElementById("faqList");
+  const faqMore = document.getElementById("faqMore");
+  if (!faqPanel || !faqList) return;
+
+  faqPanel.style.display = "";
+  faqList.innerHTML = `<div class="faq-loading">正在加载热门问题…</div>`;
+  try {
+    const limit = expand ? 20 : 8;
+    const qs = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+      sort: "random",
+      seed: String(currentFAQSeed),
+    });
+    const data = await api.get(`/faq/list?${qs.toString()}`);
+    if (data?.faq_enabled === false) {
+      faqPanel.style.display = "none";
+      return;
+    }
+    const items = data?.items || [];
+    if (!items.length) {
+      faqList.innerHTML = `<div class="faq-empty">暂无常见问题，直接提问吧</div>`;
+      if (faqMore) faqMore.hidden = true;
+      return;
+    }
+    faqList.innerHTML = items
+      .map(
+        (item) => `<button type="button" class="faq-item" data-faq-q="${escapeHtml(item.question)}">
+          <span class="faq-question">${escapeHtml(item.question)}</span>
+          <span class="faq-source">${escapeHtml(item.kb_name || "")}</span>
+        </button>`
+      )
+      .join("");
+    if (faqMore) faqMore.hidden = !data.has_more;
+    currentFAQPage = page;
+    faqList.querySelectorAll(".faq-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const q = btn.getAttribute("data-faq-q") || "";
+        if (q) sendQuestion(q, { explicit_faq_click: true });
+      });
+    });
+    document.getElementById("faqRefreshBtn")?.addEventListener(
+      "click",
+      () => {
+        currentFAQSeed = Date.now();
+        loadHotFAQ(1, false);
+      },
+      { once: true }
+    );
+    document.getElementById("faqExpandBtn")?.addEventListener(
+      "click",
+      () => {
+        loadHotFAQ(1, true);
+      },
+      { once: true }
+    );
+  } catch (err) {
+    console.error("FAQ加载失败", err);
+    faqList.innerHTML = `<div class="faq-empty">热门问题加载失败</div>`;
+    if (faqMore) faqMore.hidden = true;
+  }
 }
 
 /** 对话发送后：输入框高度恢复默认 */
@@ -1787,13 +1862,14 @@ function finalizeAbortedAsk(bubble, partialText) {
 }
 
 /** 发送问题并 SSE 流式展示（手册交互流程） */
-async function sendQuestion(presetQuestion) {
+async function sendQuestion(presetQuestion, options = {}) {
   if (isAskStreaming) {
     toast("请先中止当前回答", "info");
     return;
   }
   const input = document.getElementById("questionInput");
   const question = String(presetQuestion ?? input?.value ?? "").trim();
+  const explicitFaqClick = options.explicit_faq_click === true;
   // 空问题拦截
   if (!question) {
     toast("请输入问题", "error");
@@ -1807,24 +1883,32 @@ async function sendQuestion(presetQuestion) {
   // 创建助手气泡（思考中占位，再流式写入）
   const bubble = appendMessage("assistant", "");
   initAssistantBubbleShell(bubble);
-  showThinkingPlaceholder(bubble);
+  // 显式 FAQ 点选：不展示思考态，等待 cache_hit / chunk
+  if (!explicitFaqClick) {
+    showThinkingPlaceholder(bubble);
+  }
   askAbort = new AbortController();
   setAskStreaming(true);
 
   let citationsHtml = "";
   let confidenceTip = "";
   let rawAssistantText = "";
+  let cacheHit = false;
 
   const runAsk = async (sessionId) => {
     citationsHtml = "";
     confidenceTip = "";
     rawAssistantText = "";
+    cacheHit = false;
     initAssistantBubbleShell(bubble);
-    showThinkingPlaceholder(bubble);
+    if (!explicitFaqClick) {
+      showThinkingPlaceholder(bubble);
+    }
     await askStream(
       {
         question,
         session_id: sessionId || undefined,
+        explicit_faq_click: explicitFaqClick,
         // 不传 kb_ids：由后端按访客/登录身份过滤范围
       },
       {
@@ -1836,6 +1920,17 @@ async function sendQuestion(presetQuestion) {
             bubble.classList.remove("streaming-cursor");
             rawAssistantText = data.message || "该请求未通过安全检查，系统已拒绝处理。";
             setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(rawAssistantText)}</span>`);
+            return;
+          }
+          // 缓存命中：立即取消思考态，正文仍走 citations/chunk/done
+          if (event === "cache_hit") {
+            cacheHit = true;
+            clearThinkingState(bubble);
+            const tipHost = bubble.closest(".msg-row")?.querySelector(".msg-meta") || null;
+            if (tipHost) {
+              tipHost.dataset.routeTip = "FAQ 秒答";
+              tipHost.setAttribute("title", "FAQ 秒答");
+            }
             return;
           }
           // 流水线事件：路由意图用轻提示；其余不写入回答气泡
@@ -1858,7 +1953,6 @@ async function sendQuestion(presetQuestion) {
             event === "trace" ||
             event === "traces" ||
             event === "intent" ||
-            event === "cache_hit" ||
             event === "query_processing"
           ) {
             return;
@@ -1876,7 +1970,9 @@ async function sendQuestion(presetQuestion) {
             const items = data.items || data.citations || data || [];
             const list = Array.isArray(items) ? items : [];
             if (!list.length) {
-              citationsHtml = `<div class="citations text-muted">未命中可引用分段，不会编造来源。</div>`;
+              citationsHtml = cacheHit
+                ? ""
+                : `<div class="citations text-muted">未命中可引用分段，不会编造来源。</div>`;
             } else {
               citationsHtml = buildCitationsHtml(list);
             }
