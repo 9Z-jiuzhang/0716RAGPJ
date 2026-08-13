@@ -219,6 +219,68 @@ async def ensure_schema_patches() -> None:
         "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS quality_score DOUBLE PRECISION NULL",
         "ALTER TABLE role_cached_questions ADD COLUMN IF NOT EXISTS observe_only BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS faq_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+        "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ NULL",
+        "CREATE INDEX IF NOT EXISTS idx_kb_pinned ON knowledge_bases (is_pinned, pinned_at DESC NULLS LAST)",
+        "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS default_sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal'",
+        """
+        DO $$ BEGIN
+          ALTER TABLE knowledge_bases
+            ADD CONSTRAINT ck_kb_default_sensitivity_level
+            CHECK (default_sensitivity_level IN ('normal', 'confidential', 'restricted'));
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$
+        """,
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal'",
+        "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal'",
+        "ALTER TABLE kb_cached_faqs ADD COLUMN IF NOT EXISTS sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal'",
+        "ALTER TABLE kb_cached_faqs ADD COLUMN IF NOT EXISTS is_compound BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE kb_cached_faqs ADD COLUMN IF NOT EXISTS split_from_id UUID NULL",
+        "ALTER TABLE sensitivity_audit_log ALTER COLUMN action TYPE VARCHAR(64)",
+        "ALTER TABLE sensitivity_audit_log ADD COLUMN IF NOT EXISTS detail JSONB NULL",
+        """
+        CREATE TABLE IF NOT EXISTS role_sensitivity_permissions (
+          id UUID PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+          role VARCHAR(50) NOT NULL,
+          max_sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT uk_role_sensitivity_tenant_role UNIQUE (tenant_id, role)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_role_sensitivity_tenant ON role_sensitivity_permissions(tenant_id)",
+        """
+        CREATE TABLE IF NOT EXISTS user_sensitivity_overrides (
+          id UUID PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          max_sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal',
+          reason VARCHAR(200) NULL,
+          expires_at TIMESTAMPTZ NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT uk_user_sensitivity_tenant_user UNIQUE (tenant_id, user_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_user_sensitivity_tenant ON user_sensitivity_overrides(tenant_id)",
+        """
+        CREATE TABLE IF NOT EXISTS sensitivity_audit_log (
+          id UUID PRIMARY KEY,
+          tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+          user_id UUID NULL,
+          conversation_id UUID NULL,
+          question TEXT NOT NULL DEFAULT '',
+          sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'confidential',
+          action VARCHAR(64) NOT NULL DEFAULT 'denied',
+          source VARCHAR(20) NOT NULL DEFAULT 'faq',
+          reason VARCHAR(100) NULL,
+          detail JSONB NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_sensitivity_audit_tenant ON sensitivity_audit_log(tenant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sensitivity_audit_time ON sensitivity_audit_log(created_at)",
         """
         CREATE TABLE IF NOT EXISTS kb_cached_faqs (
           id UUID PRIMARY KEY,
@@ -239,6 +301,9 @@ async def ensure_schema_patches() -> None:
           reject_count INTEGER NOT NULL DEFAULT 0,
           is_active BOOLEAN NOT NULL DEFAULT TRUE,
           version INTEGER NOT NULL DEFAULT 1,
+          sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal',
+          is_compound BOOLEAN NOT NULL DEFAULT FALSE,
+          split_from_id UUID NULL,
           embedding JSONB NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -269,6 +334,39 @@ async def ensure_schema_patches() -> None:
         "CREATE INDEX IF NOT EXISTS idx_faq_audit_tenant ON faq_audit_log(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_faq_audit_target ON faq_audit_log(target_id)",
         "CREATE INDEX IF NOT EXISTS idx_faq_audit_time ON faq_audit_log(created_at)",
+        # 快照 FAQ：回退时可还原
+        """
+        CREATE TABLE IF NOT EXISTS snapshot_faqs (
+          id UUID PRIMARY KEY,
+          snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+          faq_id UUID NOT NULL,
+          tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+          question TEXT NOT NULL,
+          normalized_question VARCHAR(1000) NOT NULL,
+          answer TEXT NOT NULL,
+          source_document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+          chunk_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+          citations JSONB NOT NULL DEFAULT '[]'::jsonb,
+          quality_score DOUBLE PRECISION NOT NULL DEFAULT 0.7,
+          hit_count INTEGER NOT NULL DEFAULT 0,
+          status VARCHAR(20) NOT NULL DEFAULT 'active',
+          source VARCHAR(30) NOT NULL DEFAULT 'document_auto',
+          stale_reason VARCHAR(50) NULL,
+          model_version VARCHAR(50) NULL,
+          reject_count INTEGER NOT NULL DEFAULT 0,
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          version INTEGER NOT NULL DEFAULT 1,
+          sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal',
+          is_compound BOOLEAN NOT NULL DEFAULT FALSE,
+          split_from_id UUID NULL,
+          source_created_at VARCHAR(40) NULL,
+          source_updated_at VARCHAR(40) NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_snapshot_faqs_snapshot ON snapshot_faqs(snapshot_id)",
+        "CREATE INDEX IF NOT EXISTS idx_snapshot_faqs_faq ON snapshot_faqs(faq_id)",
         # Wave1：仅旧默认 rewrite=true 且未开启扩展/HyDE 的单例配置迁到关闭
         """
         UPDATE query_processing_configs

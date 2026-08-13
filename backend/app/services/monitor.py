@@ -136,6 +136,12 @@ class MonitorService:
         except Exception:
             document_count = 0
         try:
+            from app.models.kb_faq import KBCachedFAQ
+
+            faq_count = int(await self.db.scalar(select(func.count()).select_from(KBCachedFAQ)) or 0)
+        except Exception:
+            faq_count = 0
+        try:
             queue_size = int(
                 await self.db.scalar(
                     select(func.count())
@@ -179,6 +185,7 @@ class MonitorService:
             user_count=user_count,
             kb_count=kb_count,
             doc_count=document_count,
+            faq_count=faq_count,
             active_sessions=sessions,
             task_queue_size=queue_size,
             qa_trend_7d=qa_30[-7:] if len(qa_30) >= 7 else qa_30,

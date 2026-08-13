@@ -91,6 +91,26 @@ class KBCachedFAQ(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     reject_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sensitivity_level: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="normal",
+        server_default="normal",
+        comment="敏感等级 normal/confidential/restricted",
+    )
+    is_compound: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="是否疑似一题多问（复合题）",
+    )
+    split_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+        comment="拆分来源父 FAQ id；子条指向父条",
+    )
     # 二期语义命中预留：存 JSON 数组或省略；不依赖 VECTOR 类型
     embedding: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
 

@@ -17,6 +17,8 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseFilter,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
+    KbSensitivitySyncRequest,
+    KbSensitivitySyncResponse,
     ReVectorizeRequest,
     VectorizeStatusResponse,
 )
@@ -39,7 +41,7 @@ async def create_knowledge_base(
 ):
     service = KnowledgeBaseService(db)
     try:
-        result = await service.create_kb(data, current_user.id)
+        result = await service.create_kb(data, current_user)
     except APIException as exc:
         _raise_api(exc)
     return APIResponse(data=result)
@@ -84,7 +86,27 @@ async def update_knowledge_base(
 ):
     service = KnowledgeBaseService(db)
     try:
-        result = await service.update_kb(str(kb_id), data, current_user.id)
+        result = await service.update_kb(str(kb_id), data, current_user)
+    except APIException as exc:
+        _raise_api(exc)
+    return APIResponse(data=result)
+
+
+@router.post(
+    "/{kb_id}/sensitivity/sync",
+    response_model=APIResponse[KbSensitivitySyncResponse],
+    summary="同步库内内容密级到库默认",
+)
+async def sync_knowledge_base_sensitivity(
+    kb_id: UUID = Path(..., description="知识库ID"),
+    data: KbSensitivitySyncRequest = Body(...),
+    current_user: User = Depends(require_permissions("kb:write")),
+    db: AsyncSession = Depends(get_db),
+):
+    """将 documents/chunks/faqs 密级同步为当前库默认。勿传 target_level。不快照。"""
+    service = KnowledgeBaseService(db)
+    try:
+        result = await service.sync_kb_sensitivity(str(kb_id), mode=data.mode, user=current_user)
     except APIException as exc:
         _raise_api(exc)
     return APIResponse(data=result)

@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Literal
 
 from app.schemas.enums import KnowledgeBaseStatus, KnowledgeBaseType, Visibility
-from pydantic import UUID4, BaseModel, Field
+from pydantic import UUID4, BaseModel, ConfigDict, Field
 
 
 class KnowledgeBaseCreate(BaseModel):
@@ -22,6 +23,10 @@ class KnowledgeBaseCreate(BaseModel):
     embedding_model: str = Field(..., description="使用的 Embedding 模型名称")
     chunk_size: int = Field(500, description="默认分段大小（字符数）")
     chunk_overlap: int = Field(50, description="默认分段重叠（字符数）")
+    default_sensitivity_level: Literal["normal", "confidential", "restricted"] = Field(
+        "normal",
+        description="库默认敏感等级；仅影响之后新建内容，存量需显式同步",
+    )
 
 
 class KnowledgeBaseUpdate(BaseModel):
@@ -35,6 +40,12 @@ class KnowledgeBaseUpdate(BaseModel):
     embedding_model: str | None = Field(None, description="使用的 Embedding 模型名称")
     chunk_size: int | None = Field(None, description="默认分段大小（字符数）")
     chunk_overlap: int | None = Field(None, description="默认分段重叠（字符数）")
+    default_sensitivity_level: Literal["normal", "confidential", "restricted"] | None = Field(
+        None,
+        description="库默认敏感等级；保存不自动改存量",
+    )
+    faq_enabled: bool | None = Field(None, description="是否启用该库 FAQ 命中（秒答/热门）")
+    is_pinned: bool | None = Field(None, description="是否置顶")
 
 
 class KnowledgeBaseResponse(BaseModel):
@@ -50,9 +61,19 @@ class KnowledgeBaseResponse(BaseModel):
     chunk_size: int = Field(..., description="默认分段大小（字符数）")
     chunk_overlap: int = Field(..., description="默认分段重叠（字符数）")
     status: KnowledgeBaseStatus = Field(..., description="状态")
+    default_sensitivity_level: str = Field("normal", description="库默认敏感等级")
+    faq_enabled: bool = Field(True, description="是否启用该库 FAQ 命中")
+    is_pinned: bool = Field(False, description="是否置顶")
+    pinned_at: datetime | None = Field(None, description="最近置顶时间")
+    can_manage: bool = Field(
+        False,
+        description="当前用户是否可管理该库（平台管理员/创建者/kb:admin）",
+    )
     current_index_version: str | None = Field(None, description="当前索引版本号")
     document_count: int = Field(0, description="文档数量")
     chunk_count: int = Field(0, description="分段数量")
+    faq_count: int = Field(0, description="FAQ 数量")
+    snapshot_count: int = Field(0, description="快照数量")
     creator_id: UUID4 = Field(..., description="创建者")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="最后更新时间")
@@ -60,6 +81,20 @@ class KnowledgeBaseResponse(BaseModel):
         default_factory=list,
         description="知识库级 ACL（仅详情接口填充；列表接口为空）",
     )
+
+
+class KbSensitivitySyncRequest(BaseModel):
+    """同步库内内容密级到当前库默认。勿传 target_level（extra forbid）。"""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["only_normal", "force"] = "only_normal"
+
+
+class KbSensitivitySyncResponse(BaseModel):
+    kb_id: str
+    mode: Literal["only_normal", "force"]
+    target_level: str
+    affected: dict[str, int]
 
 
 class KBPermissionItem(BaseModel):

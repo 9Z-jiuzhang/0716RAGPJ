@@ -79,16 +79,16 @@ llm_guard_blocked_total = Counter(
     ["intent", "reason_code", "detector"],
 )
 
-# 知识库 FAQ
+# 知识库 FAQ（禁止高基数 kb_id label；按库统计走管理端 DB）
 faq_cache_hit_total = Counter(
     "faq_cache_hit_total",
     "FAQ cache hit count",
-    ["source", "kb_id"],
+    ["source"],
 )
 faq_generation_total = Counter(
     "faq_generation_total",
     "FAQ generation outcomes",
-    ["status", "kb_id"],
+    ["status"],
 )
 faq_generation_duration_seconds = Histogram(
     "faq_generation_duration_seconds",
@@ -98,13 +98,17 @@ faq_generation_duration_seconds = Histogram(
 faq_queue_depth = Gauge(
     "faq_queue_depth",
     "FAQ generation queue depth",
-    ["kb_id"],
 )
 faq_active_count = Gauge(
     "faq_active_count",
-    "Active FAQ count per knowledge base",
-    ["kb_id"],
+    "Active FAQ count (process-local last set)",
 )
+
+# 预创建常用 label，避免从未命中时 /metrics 搜不到 faq_cache_hit_total
+faq_cache_hit_total.labels(source="kb_faq")
+faq_cache_hit_total.labels(source="redis")
+faq_generation_total.labels(status="success")
+faq_generation_total.labels(status="error")
 
 
 def metrics_payload() -> tuple[bytes, str]:

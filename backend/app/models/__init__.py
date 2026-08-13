@@ -15,7 +15,8 @@ from .query_processing import QueryProcessingConfig
 from .ragas_evaluation import RagasEvaluationItem, RagasEvaluationRun
 from .kb_faq import FAQAuditLog, KBCachedFAQ
 from .role_cache import RoleCacheConfig, RoleCachedQuestion
-from .snapshot import Snapshot, SnapshotDocument
+from .sensitivity import RoleSensitivityPermission, SensitivityAuditLog, UserSensitivityOverride
+from .snapshot import Snapshot, SnapshotDocument, SnapshotFAQ
 from .vectorize_task import VectorizeTask
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "IndexVersion",
     "Snapshot",
     "SnapshotDocument",
+    "SnapshotFAQ",
     "VectorizeTask",
     "QASession",
     "QAMessage",
@@ -47,6 +49,9 @@ __all__ = [
     "RoleCachedQuestion",
     "KBCachedFAQ",
     "FAQAuditLog",
+    "RoleSensitivityPermission",
+    "UserSensitivityOverride",
+    "SensitivityAuditLog",
     "GuardBlockedEvent",
     "RagasEvaluationRun",
     "RagasEvaluationItem",

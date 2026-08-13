@@ -20,6 +20,7 @@
 10. [智能问答 `/qa`](#10-智能问答-qa)
 11. [命中率测试 `/hit-tests`](#11-命中率测试-hit-tests)
 12. [快照管理 `/knowledge-bases/{kb_id}/snapshots`](#12-快照管理-knowledge-baseskb_idsnapshots)
+    - [12.1 知识库 FAQ（摘要）](#121-知识库-faq摘要)
 13. [审计日志 `/audit`](#13-审计日志-audit)
 14. [系统监控 `/monitor`](#14-系统监控-monitor)
 15. [Query 预处理 `/query-processing`](#15-query-预处理-query-processing)
@@ -448,7 +449,7 @@ Authorization: Bearer <access_token>
 
 典型顺序：`intent` →（可选 `route`）→（可选 `query_processing` / `cache_hit`）→ `chunk*` → `citations` → `done`；被拦截时为 `guard_blocked`。
 
-> 多级缓存 L1–L4 由功能开关控制；命中多级缓存时走短路径（无独立 `cache_hit` 事件名，元数据写入 `retrieval_meta`）。角色缓存仍发 `cache_hit`。
+> **知识库 FAQ** 精确命中时走短路径秒答（`retrieval_meta` / 元数据含 `source=kb_faq`）；多级缓存 L1–L4 由功能开关控制；角色缓存过渡期仍可发 `cache_hit`。详见 `docs/KB_FAQ.md`。
 
 **引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky` 会话延续）。向量相关度一般为 `1 - cosine_distance`。
 
@@ -534,10 +535,28 @@ Authorization: Bearer <access_token>
 
 **说明**：
 
-- 快照含元数据、文档版本、分段规则、权限配置引用；**向量不落快照**，回退后重建索引。
+- 快照含元数据、文档版本、分段规则、权限配置与 **FAQ 全量副本**（`snapshot_faqs`）；**向量不落快照**，回退后重建索引；回退时还原 FAQ 并跳过 FAQ 重新生成以免覆盖。
+- 列表项可含 `faq_count`；`config_snapshot.faqs_captured=true` 表示该快照已收录 FAQ（旧快照无此标记时回退不误清空现网 FAQ）。
 - 自动触发类型：上传/删除/规范化/重分段/重向量化/权限/分段规则变更（`trigger` 前缀 `auto_*`）。
-- 回退流程：先创建 `rollback_protection` 保护快照 → 恢复文档/配置/权限（含 name/tags/description）→ 创建 `building` 索引版本，KB 转 `vectorizing`；写入 `rollback_rebuild` 任务后异步重建。**选择性回退**也会把未选中但仍有效的文档迁入新版本集合，避免 activate 后检索丢失。重建只写目标版本集合。任一文档失败则不激活，并用保护快照补偿库表。
+- 回退流程：先创建 `rollback_protection` 保护快照 → 恢复文档/配置/权限/FAQ → 创建 `building` 索引版本，KB 转 `vectorizing`；写入 `rollback_rebuild` 任务后异步重建。**选择性回退**也会把未选中但仍有效的文档迁入新版本集合，并按文档范围还原相关 FAQ。重建只写目标版本集合。任一文档失败则不激活，并用保护快照补偿库表（含 FAQ）。
 - **回退结果**（`RollbackResultResponse`）：`protection_snapshot_id`、`new_index_version`、`index_status`、`before_version?`、`after_version`、`restored_document_count`、`restored_document_ids`（实际为待重建文档 ID 列表）、`selective`、`rebuild_required`、`message`。
+
+---
+
+## 12.1 知识库 FAQ（摘要）
+
+完整说明见 [`KB_FAQ.md`](KB_FAQ.md)。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/faq/list` | 访客热门（可选登录；密级过滤） |
+| GET | `/admin/faq/list` | 管理列表（`kb_id` 等） |
+| PUT | `/admin/faq/{id}` | 编辑 |
+| POST | `/admin/faq/batch` | 批量（含密级） |
+| POST | `/knowledge-bases/{kb_id}/faq/toggle` | 库级开关 |
+| POST | `/admin/knowledge-bases/{kb_id}/regenerate-faq` | 重生 |
+
+知识库更新可含 `is_pinned` / `faq_enabled`；列表响应含 `can_manage`、`faq_count` 等。
 
 ---
 
@@ -653,6 +672,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.8 | 2026-08-13 | FAQ Cache V2.0 一期：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 KB_FAQ / FAQ_PHASE2_ACCEPTANCE |
 | 2.1.7 | 2026-07-31 | 云部署端口统一至 9000–9999（入口 9080）；Compose 自建 Langfuse（9310）；Chroma 宿主机 9800→容器 8000；见 CLOUD_DEPLOY.md |
 | 2.1.6 | 2026-07-27 | 前端 ZYUI-V3.1/V3.2：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、9Z/品牌标）；无 OpenAPI 变更；见 README §2.6 / `OPTIMIZATION_STATUS.md` |
 | 2.1.5 | 2026-07-27 | 反馈率口径修正（按窗口内问答消息对齐，≤100%）；补充 `answerable_events` / `matched_feedback`；首页反馈 KPI；访客端流式中止与列表体验见 README / OPTIMIZATION_STATUS |

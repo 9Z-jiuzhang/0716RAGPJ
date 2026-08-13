@@ -7,6 +7,7 @@ import logging
 import uuid
 from typing import Any
 
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -18,6 +19,7 @@ from app.models.enums import (
     DocumentStatus,
     SnapshotTrigger,
 )
+from app.models.kb_faq import KBCachedFAQ
 from app.repositories import document as doc_repo
 from app.schemas.document import (
     ChunkListResponse,
@@ -45,12 +47,14 @@ from app.services.observability import record_metric, write_audit
 from app.services.parsers import detect_file_type
 from app.services.security_scan import validate_encoding_safe, virus_scan_placeholder
 from app.services.snapshot_hooks import take_auto_snapshot
+from app.models.sensitivity import normalize_sensitivity_level
 from app.utils.exceptions import (
     DocumentError,
     DocumentNotFoundError,
     FileTooLargeError,
     UnsupportedFileTypeError,
 )
+from app.utils.identity_helpers import is_platform_admin_user
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +67,8 @@ async def assert_kb_mutable(db: AsyncSession, kb_id: uuid.UUID) -> None:
 
 
 def to_document_response(doc: Document) -> DocumentResponse:
+    from app.services.kb_faq_service import kb_faq_service
+
     return DocumentResponse(
         id=str(doc.id),
         kb_id=str(doc.kb_id),
@@ -76,7 +82,17 @@ def to_document_response(doc: Document) -> DocumentResponse:
         creator_id=str(doc.creator_id),
         created_at=doc.created_at,
         updated_at=doc.updated_at,
+        sensitivity_level=getattr(doc, "sensitivity_level", None) or "normal",
+        faq_job_status=kb_faq_service.get_doc_faq_job_status(doc.id),
     )
+
+
+async def to_document_response_with_faq(db: AsyncSession, doc: Document) -> DocumentResponse:
+    """详情接口：附带 FAQ 条数与生成任务状态。"""
+    resp = to_document_response(doc)
+    counts = await _faq_counts_for_documents(db, doc.kb_id, [doc.id])
+    resp.faq_count = counts.get(str(doc.id), 0)
+    return resp
 
 
 def to_chunk_response(chunk: DocumentChunk) -> DocumentChunkResponse:
@@ -135,6 +151,9 @@ async def upload_document(
         creator_id=user.id,
         segment_rules=rules,
         content_hash=hashlib.sha256(content).hexdigest(),
+        sensitivity_level=normalize_sensitivity_level(
+            getattr(kb, "default_sensitivity_level", None)
+        ),
     )
     db.add(doc)
     await db.flush()
@@ -156,6 +175,34 @@ async def upload_document(
     return doc
 
 
+async def _faq_counts_for_documents(
+    db: AsyncSession,
+    kb_id: uuid.UUID,
+    doc_ids: list[uuid.UUID],
+) -> dict[str, int]:
+    """按文档统计关联 FAQ 数量（source_document_ids 包含该文档）。"""
+    counts = {str(did): 0 for did in doc_ids}
+    if not doc_ids:
+        return counts
+    id_strs = [str(did) for did in doc_ids]
+    conds = [KBCachedFAQ.source_document_ids.contains([sid]) for sid in id_strs]
+    rows = (
+        await db.execute(
+            select(KBCachedFAQ.source_document_ids).where(
+                KBCachedFAQ.kb_id == kb_id,
+                or_(*conds),
+            )
+        )
+    ).all()
+    id_set = set(id_strs)
+    for (source_ids,) in rows:
+        for sid in source_ids or []:
+            key = str(sid)
+            if key in id_set:
+                counts[key] += 1
+    return counts
+
+
 async def list_documents_page(
     db: AsyncSession,
     kb_id: uuid.UUID,
@@ -165,6 +212,9 @@ async def list_documents_page(
     keyword: str | None,
 ) -> DocumentListResponse:
     items, total = await doc_repo.list_documents(db, kb_id, page=page, page_size=page_size, keyword=keyword)
+    faq_counts = await _faq_counts_for_documents(db, kb_id, [d.id for d in items])
+    from app.services.kb_faq_service import kb_faq_service
+
     return DocumentListResponse(
         items=[
             DocumentListItem(
@@ -173,8 +223,11 @@ async def list_documents_page(
                 file_type=d.file_type,
                 file_size=d.file_size,
                 chunk_count=d.chunk_count,
+                faq_count=faq_counts.get(str(d.id), 0),
                 status=d.status,
                 created_at=d.created_at,
+                sensitivity_level=getattr(d, "sensitivity_level", None) or "normal",
+                faq_job_status=kb_faq_service.get_doc_faq_job_status(d.id),
             )
             for d in items
         ],
@@ -393,6 +446,13 @@ async def delete_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID,
     from app.services.kb_faq_service import kb_faq_service
 
     await kb_faq_service.prune_by_document(db, doc_id=doc_id, kb_id=kb_id)
+    try:
+        from app.core.config import settings
+        from app.services.qa_cache import qa_cache_service
+
+        await qa_cache_service.invalidate_by_kb(tenant_id=settings.FAQ_TENANT_ID, kb_ids=[kb_id])
+    except Exception:  # noqa: BLE001
+        pass
     await db.delete(doc)
     await write_audit(
         db,
@@ -408,6 +468,94 @@ async def delete_document(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID,
     await db.commit()
     storage.delete_object(file_path)
     record_metric("delete", "ok")
+
+
+async def update_document_sensitivity(
+    db: AsyncSession,
+    kb_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    level: str,
+    user: User,
+) -> Document:
+    """更新文档密级并同步到全部分段，并重算关联 FAQ 密级（取全部来源文档最高档）。"""
+    from sqlalchemy import update as sa_update
+
+    from app.models.sensitivity import LEVEL_ORDER, normalize_sensitivity_level
+    from app.services.kb_faq_service import kb_faq_service
+    from app.services.qa_cache import qa_cache_service
+
+    await assert_kb_mutable(db, kb_id)
+    doc = await get_document_detail(db, kb_id, doc_id)
+    sens = normalize_sensitivity_level(level)
+    if sens == "restricted" and not is_platform_admin_user(user):
+        raise DocumentError("仅管理员可将文档密级设为极高密", http_status=403)
+    doc.sensitivity_level = sens
+    await db.execute(
+        sa_update(DocumentChunk)
+        .where(DocumentChunk.document_id == doc_id)
+        .values(sensitivity_level=sens)
+    )
+
+    # 联动：凡引用该文档的 FAQ，按全部来源文档重算最高密级
+    related_faqs = list(
+        (
+            await db.scalars(
+                select(KBCachedFAQ).where(
+                    KBCachedFAQ.kb_id == kb_id,
+                    KBCachedFAQ.source_document_ids.contains([str(doc_id)]),
+                )
+            )
+        ).all()
+    )
+    faq_updated = 0
+    if related_faqs:
+        all_source_ids: set[uuid.UUID] = set()
+        for faq in related_faqs:
+            for sid in faq.source_document_ids or []:
+                try:
+                    all_source_ids.add(uuid.UUID(str(sid)))
+                except ValueError:
+                    continue
+        level_by_doc: dict[str, str] = {str(doc_id): sens}
+        if all_source_ids:
+            other_docs = list(
+                (await db.scalars(select(Document).where(Document.id.in_(list(all_source_ids))))).all()
+            )
+            for d in other_docs:
+                level_by_doc[str(d.id)] = normalize_sensitivity_level(
+                    getattr(d, "sensitivity_level", None)
+                )
+        for faq in related_faqs:
+            levels = [
+                level_by_doc.get(str(sid), "normal")
+                for sid in (faq.source_document_ids or [])
+            ]
+            if not levels:
+                continue
+            resolved = max(
+                (normalize_sensitivity_level(lv) for lv in levels),
+                key=lambda lv: LEVEL_ORDER.get(lv, 0),
+            )
+            if normalize_sensitivity_level(getattr(faq, "sensitivity_level", None)) != resolved:
+                faq.sensitivity_level = resolved
+                faq_updated += 1
+
+    await write_audit(
+        db,
+        user_id=user.id,
+        action="doc.sensitivity",
+        resource_type="document",
+        resource_id=str(doc_id),
+        detail={"sensitivity_level": sens, "faq_updated": faq_updated},
+    )
+    await db.commit()
+    await db.refresh(doc)
+    await kb_faq_service.invalidate_kb_faq_redis(tenant_id=settings.FAQ_TENANT_ID, kb_id=kb_id)
+    try:
+        await qa_cache_service.invalidate_by_kb(tenant_id=settings.FAQ_TENANT_ID, kb_ids=[kb_id])
+    except Exception:  # noqa: BLE001
+        pass
+    return doc
 
 
 async def update_segment_rules(

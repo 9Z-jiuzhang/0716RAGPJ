@@ -225,6 +225,139 @@ function guardReasonLabel(code) {
   return GUARD_REASON_LABELS[key] || code;
 }
 
+/** 密级：后端 code → 中文（禁止直接展示 normal 等英文） */
+const SENSITIVITY_LEVEL_FALLBACK = [
+  { code: "normal", label: "普通", order: 0 },
+  { code: "confidential", label: "机密", order: 1 },
+  { code: "restricted", label: "极高密", order: 2 },
+];
+const SYNC_MODE_LABEL = {
+  only_normal: "只动普通",
+  force: "全部覆盖",
+};
+let _sensitivityLevelsCache = null;
+
+async function ensureSensitivityLevels() {
+  if (_sensitivityLevelsCache) return _sensitivityLevelsCache;
+  try {
+    const data = await api.get("/admin/sensitivity/levels");
+    const levels = Array.isArray(data?.levels) ? data.levels : [];
+    if (levels.length) {
+      _sensitivityLevelsCache = [...levels].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      return _sensitivityLevelsCache;
+    }
+  } catch (_) {
+    /* fallback */
+  }
+  _sensitivityLevelsCache = SENSITIVITY_LEVEL_FALLBACK;
+  return _sensitivityLevelsCache;
+}
+
+function sensitivityLabel(code) {
+  const key = String(code || "normal").trim().toLowerCase();
+  const list = _sensitivityLevelsCache || SENSITIVITY_LEVEL_FALLBACK;
+  const hit = list.find((x) => x.code === key);
+  return hit ? hit.label : key === "normal" ? "普通" : key;
+}
+
+/** 密级徽章：普通默认灰；机密琥珀橙；极高密同超管鎏金 */
+function sensitivityBadgeHtml(level) {
+  const key = String(level || "normal").trim().toLowerCase();
+  const label = sensitivityLabel(key);
+  let cls = "badge";
+  if (key === "restricted") cls = "badge badge-gold";
+  else if (key === "confidential") cls = "badge badge-sens-confidential";
+  return `<span class="${cls}">${escapeHtml(label)}</span>`;
+}
+
+function syncModeLabel(mode) {
+  return SYNC_MODE_LABEL[mode] || mode || "-";
+}
+
+/** FAQ 状态：后端 code → 中文 */
+const FAQ_STATUS_LABEL = {
+  active: "已启用",
+  pending_review: "待审核",
+  disabled: "已停用",
+};
+
+function faqStatusLabel(code) {
+  const key = String(code || "").trim().toLowerCase();
+  if (!key) return "-";
+  return FAQ_STATUS_LABEL[key] || key;
+}
+
+function faqStatusBadgeHtml(status) {
+  const key = String(status || "").trim().toLowerCase();
+  const cls =
+    key === "active" ? "badge badge-success" : key === "pending_review" ? "badge badge-warning" : "badge badge-danger";
+  return `<span class="${cls}">${escapeHtml(faqStatusLabel(key))}</span>`;
+}
+
+/** FAQ 来源：后端 code → 中文 */
+const FAQ_SOURCE_LABEL = {
+  document_auto: "文档自动",
+  migrated: "迁移导入",
+  manual: "手工录入",
+  refined: "人工精炼",
+  faq: "FAQ 缓存",
+};
+
+function faqSourceLabel(code) {
+  const key = String(code || "").trim().toLowerCase();
+  if (!key) return "-";
+  return FAQ_SOURCE_LABEL[key] || key;
+}
+
+/** 敏感审计「来源」字段中文 */
+const SENS_AUDIT_SOURCE_LABEL = {
+  kb: "知识库配置",
+  guest: "访客问答",
+  admin: "管理端",
+  qa: "问答",
+  chat: "会话",
+  pipeline: "问答流水线",
+};
+
+function sensAuditSourceLabel(code) {
+  const key = String(code || "").trim().toLowerCase();
+  if (!key) return "-";
+  return SENS_AUDIT_SOURCE_LABEL[key] || key;
+}
+
+/** 敏感审计详情摘要（避免直接展示英文 JSON） */
+function sensAuditDetailText(row) {
+  const detail = row?.detail;
+  if (detail && typeof detail === "object") {
+    const parts = [];
+    if (detail.mode) parts.push(`模式 ${syncModeLabel(detail.mode)}`);
+    if (detail.target) parts.push(`目标 ${sensitivityLabel(detail.target)}`);
+    if (detail.from != null || detail.to != null) {
+      parts.push(`${sensitivityLabel(detail.from)} → ${sensitivityLabel(detail.to)}`);
+    }
+    if (detail.affected && typeof detail.affected === "object") {
+      const a = detail.affected;
+      parts.push(`文档 ${a.documents ?? 0} / 分段 ${a.chunks ?? 0} / FAQ ${a.faqs ?? 0}`);
+    }
+    if (detail.context === "create") parts.push("创建时");
+    else if (detail.context === "update") parts.push("编辑时");
+    else if (detail.context === "sync") parts.push("同步时");
+    if (parts.length) return parts.join(" · ");
+  }
+  return row?.question || row?.reason || "—";
+}
+
+function sensitivityOptionsHtml(selected) {
+  const list = _sensitivityLevelsCache || SENSITIVITY_LEVEL_FALLBACK;
+  const cur = String(selected || "normal").toLowerCase();
+  return list
+    .map(
+      (lv) =>
+        `<option value="${escapeHtml(lv.code)}" ${lv.code === cur ? "selected" : ""}>${escapeHtml(lv.label)}</option>`
+    )
+    .join("");
+}
+
 /** 管理端置顶菜单（无分组标题） */
 const MENU_TOP = [{ path: "/admin", label: "首页", perm: "system:read" }];
 
@@ -261,7 +394,6 @@ const MENU_GROUPS = [
     id: "ops-security",
     title: "系统运维与安全",
     items: [
-      { path: "/admin/kb-faqs", label: "知识库 FAQ", perm: "system:read" },
       { path: "/admin/audit", label: "审计日志", perm: "audit:read" },
       { path: "/admin/monitor", label: "系统监控", perm: "system:read" },
       { path: "/admin/guard", label: "LLM Guard 拦截", perm: "system:read" },
@@ -282,6 +414,47 @@ const SIDEBAR_COLLAPSE_KEY = "admin-sidebar-collapsed";
 const SIDEBAR_DEFAULT_EXPANDED = new Set(["org", "knowledge", "quality"]);
 /** 侧栏导航滚动位置：整壳重绘后恢复，避免点底部菜单时跳回顶部 */
 let sidebarNavScrollTop = 0;
+
+/** 展开分组后，将分组滚入 .sidebar-nav 可视区（等 max-height 动画后再量高度）。 */
+function ensureSidebarGroupInView(groupEl) {
+  const nav = groupEl?.closest?.(".sidebar-nav");
+  if (!nav || !groupEl) return;
+
+  const apply = () => {
+    const pad = 10;
+    const top = groupEl.offsetTop;
+    const bottom = top + groupEl.offsetHeight;
+    const viewTop = nav.scrollTop;
+    const viewBottom = viewTop + nav.clientHeight;
+    let next = nav.scrollTop;
+    if (bottom > viewBottom) {
+      next = bottom - nav.clientHeight + pad;
+    } else if (top < viewTop) {
+      next = Math.max(0, top - pad);
+    }
+    if (Math.abs(next - nav.scrollTop) > 1) {
+      nav.scrollTo({ top: next, behavior: "smooth" });
+    }
+    sidebarNavScrollTop = nav.scrollTop;
+  };
+
+  requestAnimationFrame(() => requestAnimationFrame(apply));
+  const links = groupEl.querySelector(".sidebar-links");
+  if (links) {
+    const onEnd = (e) => {
+      if (e.target !== links || e.propertyName !== "max-height") return;
+      links.removeEventListener("transitionend", onEnd);
+      apply();
+    };
+    links.addEventListener("transitionend", onEnd);
+    window.setTimeout(() => {
+      links.removeEventListener("transitionend", onEnd);
+      apply();
+    }, 280);
+  } else {
+    window.setTimeout(apply, 50);
+  }
+}
 
 /** 读取侧栏分组折叠状态（不含当前路由强制展开的覆盖）。 */
 function readSidebarCollapsedMap() {
@@ -452,6 +625,10 @@ function renderShell(title) {
       const map = readSidebarCollapsedMap();
       map[groupId] = nextCollapsed;
       writeSidebarCollapsedMap(map);
+      // 展开后把该分组滚进可视区，避免底部项被裁切还要手滚
+      if (!nextCollapsed) {
+        ensureSidebarGroupInView(groupEl);
+      }
     });
   });
   document.getElementById("btnLogout").onclick = async () => {
@@ -476,16 +653,24 @@ function renderShell(title) {
 }
 
 /** 条形图渲染（支持轴标签） */
-function renderBars(values, { percent = false, labels = null } = {}) {
+function renderBars(values, { percent = false, labels = null, height = 120 } = {}) {
   const nums = values.map(Number);
   const max = Math.max(...nums, 0.0001);
+  const chartH = Math.max(40, Number(height) || 120);
   const labs = Array.isArray(labels) && labels.length === nums.length ? labels : null;
-  return `<div class="bar-chart ${labs ? "bar-chart-labeled" : ""}">${nums
+  return `<div class="bar-chart ${labs ? "bar-chart-labeled" : ""}" style="--bar-chart-h:${chartH}px">${nums
     .map((v, i) => {
-      const h = Math.max(4, Math.round((Number(v) / max) * 100));
+      // 以当前序列最高值为 100% 高度基准（像素），避免父级 height:auto 时百分比失效
+      const hPx = Math.max(4, Math.round((Number(v) / max) * chartH));
       const label = percent ? `${Math.round(Number(v) * 100)}%` : String(v);
-      const axis = labs ? `<em>${escapeHtml(String(labs[i]))}</em>` : "";
-      return `<div class="bar" style="--bar-h:${h}%;--bar-i:${i}" title="${label}"><span>${label}</span>${axis}</div>`;
+      const fullLab = labs ? String(labs[i] ?? "") : "";
+      const shortLab = fullLab.length > 8 ? `${fullLab.slice(0, 8)}…` : fullLab;
+      const axis = labs
+        ? `<em title="${escapeHtml(fullLab)}">${escapeHtml(shortLab || "—")}</em>`
+        : "";
+      return `<div class="bar" style="height:${hPx}px;--bar-i:${i}" title="${escapeHtml(label)}${
+        fullLab ? ` · ${escapeHtml(fullLab)}` : ""
+      }"><span>${escapeHtml(label)}</span>${axis}</div>`;
     })
     .join("")}</div>`;
 }
@@ -517,6 +702,7 @@ function playPageEnter() {
 
 async function dispatchRender() {
   closeAllModals();
+  stopDashWelcomeClock();
   playPageEnter();
   const path = currentPath();
   // 知识库工作区（旧 /documents、/snapshots 归一化到 ?tab=）
@@ -552,7 +738,23 @@ async function dispatchRender() {
   if (path === "/admin/knowledge-bases") return pageKbList();
   if (path === "/admin/ragas") return pageRagas();
   if (path === "/admin/qa-sessions") return pageQaSessions();
-  if (path === "/admin/kb-faqs") return pageKbFaqs();
+  if (path === "/admin/kb-faqs") {
+    try {
+      const kbId = await resolveFaqWorkspaceKbId();
+      if (!kbId) {
+        toast("请先创建或开通知识库", "info");
+        return navigate("/admin/knowledge-bases");
+      }
+      return navigate(kbWorkspacePath(kbId, "faq"));
+    } catch (e) {
+      toast(e.message || "无法打开知识库 FAQ", "error");
+      return navigate("/admin/knowledge-bases");
+    }
+  }
+  if (path === "/admin/sensitivity") {
+    toast("敏感话题权限已并入「角色管理 / 用户管理 / 审计日志」", "info");
+    return navigate("/admin/roles");
+  }
   if (path === "/admin/hit-test") return pageHitTest();
   if (path === "/admin/qa-analytics") return pageQaAnalytics();
   if (path === "/admin/audit") return pageAudit();
@@ -586,9 +788,10 @@ function renderDashboardWelcome() {
     <section class="dash-welcome">
       <div class="dash-welcome-main">
         <p class="dash-welcome-kicker">知识运营控制台</p>
-        <h1>${timeGreeting}，${name} 👋</h1>
+        <h1>${timeGreeting}，${name}</h1>
         <p>当前身份 <strong>${roleLabel}</strong> · ${focus}</p>
       </div>
+      <div class="dash-welcome-clock" id="dashWelcomeClock" aria-live="polite"></div>
       <div class="dash-welcome-actions">
         ${hasPermission("kb:read") ? `<button type="button" class="btn" data-go="/admin/knowledge-bases">${escapeHtml(kbLabel)}</button>` : ""}
         <a class="btn btn-secondary" href="/#/chat">去问答</a>
@@ -650,6 +853,41 @@ function errorRangeLabels(hours, buckets = 4) {
   return labels;
 }
 
+let _dashClockTimer = null;
+function stopDashWelcomeClock() {
+  if (_dashClockTimer) {
+    clearInterval(_dashClockTimer);
+    _dashClockTimer = null;
+  }
+}
+function formatDashClockParts(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const date = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const week = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][d.getDay()];
+  return {
+    time,
+    date: `${date}  ${week}`,
+  };
+}
+function startDashWelcomeClock() {
+  stopDashWelcomeClock();
+  const el = document.getElementById("dashWelcomeClock");
+  if (!el) return;
+  const tick = () => {
+    const node = document.getElementById("dashWelcomeClock");
+    if (!node) {
+      stopDashWelcomeClock();
+      return;
+    }
+    const { date, time } = formatDashClockParts();
+    // 上：24 小时时间；下：日期 + 星期
+    node.innerHTML = `<div class="dash-clock-date">${escapeHtml(time)}</div><div class="dash-clock-time">${escapeHtml(date)}</div>`;
+  };
+  tick();
+  _dashClockTimer = setInterval(tick, 1000);
+}
+
 async function pageDashboard() {
   if (!requirePerm("system:read", "首页")) return;
   const welcome = renderDashboardWelcome();
@@ -679,12 +917,6 @@ async function pageDashboard() {
     const useful = Number(feedback?.useful || 0);
     const useless = Number(feedback?.useless || 0);
     const fbTotal = useful + useless;
-    const requestEvents = Number(feedback?.request_events || 0);
-    const answerableEvents = Number(feedback?.answerable_events ?? requestEvents);
-    const rawRate = Number(feedback?.feedback_rate);
-    const boundedRate = Number.isFinite(rawRate) ? Math.min(1, Math.max(0, rawRate)) : 0;
-    const feedbackRateDisplay =
-      feedback && answerableEvents > 0 ? `${(boundedRate * 100).toFixed(2)}%` : "—";
     const fbTrend = Array.isArray(feedback?.trend) ? feedback.trend : [];
     const fbTrendLabels = fbTrend.map((x) => {
       const d = String(x.date || "");
@@ -750,17 +982,14 @@ async function pageDashboard() {
     document.getElementById("pageRoot").innerHTML = `
       ${welcome}
       <section class="dash-section">
-        <div class="dash-section-head">
-          <h2>核心指标</h2>
-        </div>
         <div class="stat-grid dash-stat-grid dash-stat-grid-8">
           <div class="stat-card"><div class="label">知识库数</div><div class="value" data-count-up="${s.kb_count ?? 0}">0</div></div>
           <div class="stat-card"><div class="label">文档数</div><div class="value" data-count-up="${s.doc_count ?? 0}">0</div></div>
+          <div class="stat-card" title="全库 FAQ 合计"><div class="label">FAQ数</div><div class="value" data-count-up="${s.faq_count ?? 0}">0</div></div>
           <div class="stat-card"><div class="label">用户数</div><div class="value" data-count-up="${s.user_count ?? 0}">0</div></div>
           <div class="stat-card"><div class="label">活跃会话</div><div class="value" data-count-up="${s.active_sessions ?? 0}">0</div></div>
           <div class="stat-card"><div class="label">近${fbDays}日点赞</div><div class="value" data-count-up="${useful}">0</div></div>
           <div class="stat-card"><div class="label">近${fbDays}日点踩</div><div class="value" data-count-up="${useless}">0</div></div>
-          <div class="stat-card" title="近 ${fbDays} 日问答中已收到反馈的占比（按消息对齐，不超过 100%）"><div class="label">反馈覆盖率</div><div class="value">${escapeHtml(feedbackRateDisplay)}</div></div>
           <div class="stat-card"><div class="label">反馈总数</div><div class="value" data-count-up="${fbTotal}">0</div></div>
         </div>
       </section>
@@ -785,18 +1014,20 @@ async function pageDashboard() {
             <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/guard">拦截详情</button>
           </div>
         </div>
-        <div class="card dash-chart-card span-4">
+        <div class="card dash-chart-card span-6">
           <div class="card-header">
             <div class="card-header-text"><h3 class="card-title" id="dashHitTitle">近 7 天评测命中率</h3>
-              <p class="card-sub">来自「命中率测试」已完成任务，非线上问答质量</p>
+              <p class="card-sub">命中率测试已完成任务的日均命中率，非线上实时指标</p>
             </div>
             <div class="card-header-actions">${chartRangeSelect("dashHitRange", dayOpts, hitDays)}</div>
           </div>
           <div id="dashHitChart" class="dash-chart-body"></div>
         </div>
-        <div class="card dash-chart-card span-8">
+        <div class="card dash-chart-card span-6 dash-err-card">
           <div class="card-header">
-            <div class="card-header-text"><h3 class="card-title" id="dashErrTitle">近 24 小时错误</h3></div>
+            <div class="card-header-text"><h3 class="card-title" id="dashErrTitle">近 24 小时错误</h3>
+              <p class="card-sub">接口与流水线异常次数，按所选时间窗口分桶</p>
+            </div>
             <div class="card-header-actions">${chartRangeSelect("dashErrRange", errOpts, errHours)}</div>
           </div>
           <div id="dashErrChart" class="dash-chart-body"></div>
@@ -815,6 +1046,7 @@ async function pageDashboard() {
     paintQa();
     paintHit();
     paintErr();
+    startDashWelcomeClock();
 
     document.getElementById("dashQaRange")?.addEventListener("change", (e) => {
       qaDays = Number(e.target.value) || 7;
@@ -1149,6 +1381,7 @@ async function pageUsers() {
           ? `<div class="table-actions table-actions-stack">
                     <div class="table-actions-row">
                       <button type="button" class="btn btn-secondary btn-sm" data-role="${escapeHtml(u.id)}">角色</button>
+                      <button type="button" class="btn btn-secondary btn-sm" data-user-sens="${escapeHtml(u.id)}">密级</button>
                     </div>
                     <div class="table-actions-row">
                       <button type="button" class="btn ${u.status === "disabled" ? "btn-success" : "btn-danger"} btn-sm" data-toggle="${escapeHtml(u.id)}" data-status="${escapeHtml(u.status)}">${u.status === "disabled" ? "启用" : "禁用"}</button>
@@ -1236,6 +1469,58 @@ async function pageUsers() {
       };
     });
 
+    document.querySelectorAll("[data-user-sens]").forEach((btn) => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute("data-user-sens");
+        const user = pageItems.find((x) => String(x.id) === String(id)) || allUsers.find((x) => String(x.id) === String(id));
+        if (!user) return;
+        await ensureSensitivityLevels();
+        let cur = "normal";
+        let reason = "";
+        try {
+          const data = await api.get(`/admin/sensitivity/users/${id}/override`);
+          if (data?.override) {
+            cur = data.override.max_sensitivity_level || "normal";
+            reason = data.override.reason || "";
+          }
+        } catch (_) {
+          /* ignore */
+        }
+        const result = await openWideModal({
+          title: `密级覆盖 · ${user.username}`,
+          bodyHtml: `
+            <p class="text-muted" style="margin:0 0 12px;font-size:13px">覆盖高于角色默认时生效；清空则恢复角色上限。</p>
+            <label class="text-muted">最高可读密级</label>
+            <select class="form-control" id="userSensLevel" style="margin:6px 0 12px">${sensitivityOptionsHtml(cur)}</select>
+            <label class="text-muted">原因（可选）</label>
+            <input class="form-control" id="userSensReason" maxlength="200" value="${escapeHtml(reason)}" style="margin:6px 0" />`,
+          actionsHtml: `
+            <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+            <button type="button" class="btn btn-danger" data-act="clear">清除覆盖</button>
+            <button type="button" class="btn" data-act="ok">保存</button>`,
+        });
+        if (!result) return;
+        const act = result.action;
+        const level = result.root.querySelector("#userSensLevel")?.value || "normal";
+        const why = result.root.querySelector("#userSensReason")?.value?.trim() || null;
+        result.root.remove();
+        try {
+          if (act === "clear") {
+            await api.delete(`/admin/sensitivity/users/${id}/override`);
+            toast("已清除密级覆盖", "success");
+          } else {
+            await api.post(`/admin/sensitivity/users/${id}/override`, {
+              max_level: level,
+              reason: why,
+            });
+            toast("已设置密级覆盖", "success");
+          }
+        } catch (e) {
+          toast(e.message || "操作失败", "error");
+        }
+      };
+    });
+
     document.querySelectorAll("[data-del-user]").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.getAttribute("data-del-user");
@@ -1284,7 +1569,7 @@ async function pageUsers() {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">用户列表</h3>
-            <p class="card-sub">共 ${escapeHtml(fmtCount(total))} 人${escapeHtml(filterHint)} · 第 ${listPage}/${totalPages} 页 · 超管/管理员置顶${allUsers.length >= 5000 ? " · 已加载达上限" : ""}</p>
+            <p class="card-sub">共 ${escapeHtml(fmtCount(total))} 人${escapeHtml(filterHint)} · 第 ${listPage}/${totalPages} 页${allUsers.length >= 5000 ? " · 已加载达上限" : ""}</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-users">
@@ -1596,7 +1881,8 @@ async function pageRoles() {
     });
   };
 
-  const paint = () => {
+  const paint = async () => {
+    await ensureSensitivityLevels();
     const items = visibleRoles();
     const total = items.length;
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE) || 1);
@@ -1605,17 +1891,28 @@ async function pageRoles() {
     const pageItems = items.slice(start, start + PAGE_SIZE);
     const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
 
+    let sensByRole = {};
+    try {
+      const sensData = await api.get("/admin/sensitivity/roles");
+      for (const row of sensData.items || []) {
+        if (row?.role) sensByRole[String(row.role)] = row;
+      }
+    } catch (_) {
+      sensByRole = {};
+    }
+    const canEditSens = typeof isSuperAdmin === "function" ? isSuperAdmin() : false;
+
     root.innerHTML = `
       ${pageHead({
         title: "角色管理",
-        desc: "内置：超级管理员 / 管理员 / 员工 / 访客。仅超级管理员可配置角色权限。",
+        desc: "内置：超级管理员 / 管理员 / 员工 / 访客。仅超级管理员可配置角色权限与内容密级上限。",
         actions: canWrite ? `<button class="btn btn-sm" id="btnNewRole">新建角色</button>` : "",
       })}
       <div class="card panel-fill">
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">角色列表</h3>
-            <p class="card-sub">共 ${escapeHtml(fmtCount(total))} 个角色 · 第 ${listPage}/${totalPages} 页</p>
+            <p class="card-sub">共 ${escapeHtml(fmtCount(total))} 个角色 · 第 ${listPage}/${totalPages} 页 · 密级上限为该角色默认可读最高档</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-roles">
@@ -1625,6 +1922,8 @@ async function pageRoles() {
             <col class="roles-col-desc" />
             <col class="roles-col-builtin" />
             <col class="roles-col-num" />
+            <col class="roles-col-sens" />
+            <col class="roles-col-sens-default" />
             <col class="roles-col-actions" />
           </colgroup>
           <thead><tr>
@@ -1633,6 +1932,8 @@ async function pageRoles() {
             <th class="col-desc">说明</th>
             <th class="col-builtin">内置</th>
             <th class="col-num">权限数</th>
+            <th class="col-sens">密级上限</th>
+            <th class="col-sens-default">内置默认</th>
             <th class="col-actions">操作</th>
           </tr></thead>
           <tbody>
@@ -1644,12 +1945,24 @@ async function pageRoles() {
                       const canEditThis = canWrite && (isSuperAdmin() || !isSuperRole);
                       const canConfigPerms = isSuperAdmin() && canEditThis;
                       const desc = r.description || "";
+                      const sens = sensByRole[String(r.name)] || null;
+                      const curLevel = sens?.max_sensitivity_level || sens?.default_level || "normal";
+                      const defaultLevel = sens?.default_level || curLevel;
+                      const sensCell = sens
+                        ? `<select class="form-control" data-role-level data-sens-role="${escapeHtml(r.name)}" ${
+                            canEditSens ? "" : "disabled"
+                          } title="${canEditSens ? "修改后自动保存" : "仅超管可改"}">${sensitivityOptionsHtml(
+                            curLevel
+                          )}</select>`
+                        : `<span class="text-muted">—</span>`;
                       return `<tr>
                   <td class="col-name"><strong>${escapeHtml(r.display_name || r.name)}</strong></td>
                   <td class="col-code"><code>${escapeHtml(r.name)}</code></td>
                   <td class="col-desc">${escapeHtml(desc || "—")}</td>
                   <td class="col-builtin">${r.is_builtin ? `<span class="badge badge-info">内置</span>` : "-"}</td>
                   <td class="col-num">${(r.permissions || []).length}</td>
+                  <td class="col-sens">${sensCell}</td>
+                  <td class="col-sens-default">${escapeHtml(sensitivityLabel(defaultLevel))}</td>
                   <td class="col-actions">
                     <div class="table-actions">
                       <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
@@ -1661,7 +1974,7 @@ async function pageRoles() {
                 </tr>`;
                     })
                     .join("")
-                : `<tr><td colspan="6" class="text-muted">暂无角色</td></tr>`
+                : `<tr><td colspan="8" class="text-muted">暂无角色</td></tr>`
             }
           </tbody>
         </table></div>
@@ -1687,12 +2000,29 @@ async function pageRoles() {
       },
     });
     wireRowActions(pageItems);
+    if (canEditSens) {
+      root.querySelectorAll("select[data-role-level][data-sens-role]").forEach((sel) => {
+        sel.onchange = async () => {
+          const role = sel.getAttribute("data-sens-role");
+          const max_level = sel.value;
+          sel.disabled = true;
+          try {
+            await api.put(`/admin/sensitivity/roles/${encodeURIComponent(role)}`, { max_level });
+            toast("已更新角色密级上限", "success");
+          } catch (err) {
+            toast(err.message || "更新失败", "error");
+          } finally {
+            sel.disabled = false;
+          }
+        };
+      });
+    }
   };
 
   root.innerHTML = `<div class="loading">加载角色…</div>`;
   try {
     allRoles = await fetchAllPagedItems("/roles");
-    paint();
+    await paint();
   } catch (e) {
     root.innerHTML = `<div class="card text-danger">${escapeHtml(e.message)}</div>`;
   }
@@ -1811,6 +2141,47 @@ function departmentDisplayName(deptOrName, code) {
   return String(deptOrName || "");
 }
 
+/** 用户状态中文 */
+function userStatusLabel(status) {
+  const key = String(status || "").toLowerCase();
+  return (
+    {
+      active: "活跃",
+      disabled: "禁用",
+      pending: "待验证",
+      inactive: "停用",
+    }[key] ||
+    (status ? String(status) : "-")
+  );
+}
+
+function userStatusBadgeHtml(status) {
+  const key = String(status || "").toLowerCase();
+  const cls =
+    key === "active"
+      ? "badge badge-success"
+      : key === "disabled" || key === "inactive"
+        ? "badge badge-danger"
+        : "badge badge-warning";
+  return `<span class="${cls}">${escapeHtml(userStatusLabel(status))}</span>`;
+}
+
+/** 知识库状态中文（部门详情等列表共用） */
+function kbStatusLabel(status) {
+  const key = String(status || "").toLowerCase();
+  return (
+    {
+      active: "已同步",
+      ready: "已就绪",
+      processing: "处理中",
+      vectorizing: "向量化中",
+      error: "异常",
+      disabled: "已停用",
+    }[key] ||
+    (status ? String(status) : "-")
+  );
+}
+
 /** 部门编码 → 中文名 */
 function departmentLabelOf(code, departments = []) {
   const raw = String(code || "").trim();
@@ -1830,7 +2201,8 @@ function openDepartmentForm({ title, dept = null, onSave }) {
       <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
       <div class="modal-body">
         <label class="form-label">部门编码</label>
-        <input class="form-control" name="code" required maxlength="50" value="${escapeHtml(dept?.code || "")}" placeholder="如 A / B / HR" ${dept ? "" : ""} />
+        <input class="form-control" name="code" required maxlength="50" value="${escapeHtml(dept?.code || "")}" placeholder="大写字母/数字，如 RD、HR" />
+        <p class="text-muted" style="margin:6px 0 0;font-size:12px">创建后尽量不要改；GUEST 为系统保留（访客）。</p>
         <label class="form-label" style="margin-top:10px">部门名称</label>
         <input class="form-control" name="name" required maxlength="100" value="${escapeHtml(dept ? departmentDisplayName(dept) : "")}" placeholder="如 研发部" />
         <label class="form-label" style="margin-top:10px">部门介绍</label>
@@ -1939,15 +2311,12 @@ async function pageDepartments() {
                           <div class="table-actions table-actions-stack">
                             <div class="table-actions-row">
                               <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments/${escapeHtml(d.id)}">管理</button>
-                              ${canWrite ? `<button type="button" class="btn btn-secondary btn-sm" data-edit="${escapeHtml(d.id)}">编辑</button>` : ""}
+                              ${
+                                canWrite && String(d.code).toUpperCase() !== "GUEST"
+                                  ? `<button type="button" class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>`
+                                  : ""
+                              }
                             </div>
-                            ${
-                              canWrite && String(d.code).toUpperCase() !== "GUEST"
-                                ? `<div class="table-actions-row">
-                              <button type="button" class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>
-                            </div>`
-                                : ""
-                            }
                           </div>
                         </td>
                       </tr>`
@@ -1984,21 +2353,6 @@ async function pageDepartments() {
           },
         });
     }
-
-    root.querySelectorAll("[data-edit]").forEach((btn) => {
-      btn.onclick = () => {
-        const d = allDepts.find((x) => String(x.id) === btn.getAttribute("data-edit"));
-        if (!d) return;
-        openDepartmentForm({
-          title: `编辑「${departmentDisplayName(d)}」`,
-          dept: d,
-          onSave: async (payload) => {
-            await api.put(`/departments/${d.id}`, payload);
-            toast("部门已更新", "success");
-          },
-        });
-      };
-    });
 
     root.querySelectorAll("[data-del]").forEach((btn) => {
       btn.onclick = async () => {
@@ -2052,13 +2406,39 @@ async function pageDepartmentDetail(deptId) {
         desc: `${d.is_enabled ? "启用" : "停用"} · 编码 ${d.code} · 成员 ${members.length} · 知识库 ${kbs.length}`,
         actions: `
           <button type="button" class="btn btn-secondary btn-sm" data-go="/admin/departments">返回列表</button>
-          ${canWrite ? `<button type="button" class="btn btn-sm" id="btnEditDept">编辑介绍</button>` : ""}
         `,
       })}
       <div class="page-grid">
       <div class="card span-12">
-        <div class="card-header"><div class="card-header-text"><h3 class="card-title">部门介绍</h3></div></div>
-        <div style="padding:14px 16px;background:var(--color-bg);border:1px solid var(--color-border);border-radius:var(--radius);white-space:pre-wrap;line-height:1.6">${escapeHtml(d.description || "暂无部门介绍")}</div>
+        <div class="card-header">
+          <div class="card-header-text"><h3 class="card-title">部门编辑</h3>
+          <p class="card-sub">${canWrite ? "修改后点击保存生效" : "只读查看"}</p></div>
+        </div>
+        <form class="dept-edit-form" id="deptEditForm">
+          <div class="dept-edit-grid">
+            <label class="form-field">
+              <span class="form-label">部门编码</span>
+              <input class="form-control" name="code" required maxlength="50" value="${escapeHtml(d.code || "")}" ${canWrite ? "" : "readonly"} placeholder="大写字母/数字，如 RD、HR" />
+            </label>
+            <label class="form-field">
+              <span class="form-label">部门名称</span>
+              <input class="form-control" name="name" required maxlength="100" value="${escapeHtml(departmentDisplayName(d))}" ${canWrite ? "" : "readonly"} placeholder="如 研发部" />
+            </label>
+            <label class="form-field dept-edit-enabled">
+              <span class="form-label">状态</span>
+              <label class="dept-edit-check"><input type="checkbox" name="is_enabled" ${d.is_enabled === false ? "" : "checked"} ${canWrite ? "" : "disabled"} /> 启用</label>
+            </label>
+          </div>
+          <label class="form-field" style="display:block;margin-top:12px">
+            <span class="form-label">部门介绍</span>
+            <textarea class="form-control" name="description" rows="4" ${canWrite ? "" : "readonly"} placeholder="可选，介绍部门职责与范围">${escapeHtml(d.description || "")}</textarea>
+          </label>
+          ${
+            canWrite
+              ? `<div class="dept-edit-actions"><button type="submit" class="btn btn-primary btn-sm">保存</button></div>`
+              : ""
+          }
+        </form>
       </div>
       <div class="card span-6">
           <div class="card-header">
@@ -2075,7 +2455,7 @@ async function pageDepartmentDetail(deptId) {
                         (u) => `<tr>
                           <td>${escapeHtml(u.username)}</td>
                           <td>${escapeHtml(u.nickname || "-")}</td>
-                          <td>${escapeHtml(u.status || "-")}</td>
+                          <td>${userStatusBadgeHtml(u.status)}</td>
                           <td>${
                             canWrite
                               ? `<button type="button" class="btn btn-text btn-sm" data-rm-user="${escapeHtml(u.id)}" style="color:var(--color-danger)">移除</button>`
@@ -2104,7 +2484,7 @@ async function pageDepartmentDetail(deptId) {
                         (k) => `<tr>
                           <td>${escapeHtml(k.name)}</td>
                           <td>${k.visibility === "public" ? `<span class="badge badge-success">公开(访客可见)</span>` : `<span class="badge">部门内</span>`}</td>
-                          <td>${escapeHtml(k.status || "-")}</td>
+                          <td>${escapeHtml(kbStatusLabel(k.status))}</td>
                           <td class="col-actions">
                             <div class="table-actions">
                               <button type="button" class="btn btn-text btn-sm" data-go="/admin/knowledge-bases/${escapeHtml(k.id)}">打开</button>
@@ -2129,17 +2509,29 @@ async function pageDepartmentDetail(deptId) {
       btn.onclick = () => navigate(btn.getAttribute("data-go"));
     });
 
-    const btnEdit = document.getElementById("btnEditDept");
-    if (btnEdit) {
-      btnEdit.onclick = () =>
-        openDepartmentForm({
-          title: `编辑「${departmentDisplayName(d)}」`,
-          dept: d,
-          onSave: async (payload) => {
-            await api.put(`/departments/${d.id}`, payload);
-            toast("部门已更新", "success");
-          },
-        });
+    const deptEditForm = document.getElementById("deptEditForm");
+    if (deptEditForm && canWrite) {
+      deptEditForm.onsubmit = async (ev) => {
+        ev.preventDefault();
+        const fd = new FormData(ev.currentTarget);
+        const payload = {
+          code: String(fd.get("code") || "").trim(),
+          name: String(fd.get("name") || "").trim(),
+          description: String(fd.get("description") || "").trim() || null,
+          is_enabled: !!fd.get("is_enabled"),
+        };
+        if (!payload.code || !payload.name) {
+          toast("请填写编码与名称", "error");
+          return;
+        }
+        try {
+          await api.put(`/departments/${d.id}`, payload);
+          toast("部门已更新", "success");
+          pageDepartmentDetail(deptId);
+        } catch (err) {
+          toast(err.message || "保存失败", "error");
+        }
+      };
     }
 
     const btnAddMember = document.getElementById("btnAddMember");
@@ -2903,13 +3295,42 @@ async function renderModelUsage(model, days) {
 }
 
 /* ========== 知识库工作区（同页 Tab + ?tab=） ========== */
-const KB_WS_TABS = ["overview", "docs", "snaps"];
-const KB_WS_TAB_LABELS = { overview: "知识库详情", docs: "文档管理", snaps: "历史快照" };
+const KB_WS_TABS = ["overview", "docs", "faq", "snaps"];
+const KB_WS_TAB_LABELS = { overview: "知识库详情", docs: "文档管理", faq: "FAQ", snaps: "历史快照" };
+const ADMIN_LAST_KB_KEY = "admin.lastKbId";
+
+function rememberLastKbId(kbId) {
+  const id = String(kbId || "").trim();
+  if (!id) return;
+  try {
+    localStorage.setItem(ADMIN_LAST_KB_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
+function readLastKbId() {
+  try {
+    return String(localStorage.getItem(ADMIN_LAST_KB_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function resolveFaqWorkspaceKbId() {
+  const list = await fetchAllPagedItems("/knowledge-bases", { pageSize: 100, maxItems: 100 });
+  const ids = new Set((list || []).map((k) => String(k.id)));
+  const last = readLastKbId();
+  if (last && ids.has(last)) return last;
+  if (list?.length) return String(list[0].id);
+  return "";
+}
 
 function normalizeKbTab(tab) {
   const t = String(tab || "overview").toLowerCase();
   if (t === "documents") return "docs";
   if (t === "snapshots") return "snaps";
+  if (t === "kb-faqs" || t === "faqs") return "faq";
   if (t === "acl") {
     try {
       if (!sessionStorage.getItem("kb_acl_tab_tip")) {
@@ -2929,9 +3350,20 @@ function getKbTabFromHash() {
   return normalizeKbTab(new URLSearchParams(q).get("tab"));
 }
 
-function kbWorkspacePath(kbId, tab) {
+function kbWorkspacePath(kbId, tab, extraParams = {}) {
   const t = normalizeKbTab(tab);
-  return t === "overview" ? `/admin/knowledge-bases/${kbId}` : `/admin/knowledge-bases/${kbId}?tab=${t}`;
+  const qs = new URLSearchParams();
+  if (t !== "overview") qs.set("tab", t);
+  Object.entries(extraParams || {}).forEach(([key, val]) => {
+    if (val == null || val === "") return;
+    qs.set(key, String(val));
+  });
+  const q = qs.toString();
+  return q ? `/admin/knowledge-bases/${kbId}?${q}` : `/admin/knowledge-bases/${kbId}`;
+}
+
+function getKbWorkspaceQuery() {
+  return new URLSearchParams(location.hash.split("?")[1] || "");
 }
 
 function isKbDocsView(kbId) {
@@ -2939,6 +3371,13 @@ function isKbDocsView(kbId) {
   const re = new RegExp(`^/admin/knowledge-bases/${String(kbId).replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}$`);
   if (!re.test(path)) return false;
   return getKbTabFromHash() === "docs";
+}
+
+function isKbFaqView(kbId) {
+  const path = currentPath();
+  const re = new RegExp(`^/admin/knowledge-bases/${String(kbId).replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}$`);
+  if (!re.test(path)) return false;
+  return getKbTabFromHash() === "faq";
 }
 
 function renderKbWorkspaceBar(kbId, kbName, tab, kbList) {
@@ -2952,6 +3391,7 @@ function renderKbWorkspaceBar(kbId, kbName, tab, kbList) {
   const visibleTabs = KB_WS_TABS.filter((t) => {
     if (t === "docs") return hasPermission("doc:read");
     if (t === "snaps") return hasPermission("snapshot:read");
+    if (t === "faq") return hasPermission("system:read") || hasPermission("kb:read");
     return true;
   });
   const tabs = visibleTabs
@@ -2962,7 +3402,7 @@ function renderKbWorkspaceBar(kbId, kbName, tab, kbList) {
     .join("");
   return `<nav class="kb-workspace-bar" aria-label="知识库工作区">
     <div class="kb-ws-nav">
-      <button type="button" class="kb-ws-tab kb-ws-back" data-go="/admin/knowledge-bases">知识库管理</button>
+      <button type="button" class="kb-ws-tab kb-ws-back" data-go="/admin/knowledge-bases">返回</button>
       <span class="kb-ws-sep" aria-hidden="true">——</span>
       <select class="form-control kb-ws-select" id="kbWsSelect" aria-label="切换知识库">${options}</select>
     </div>
@@ -2990,10 +3430,12 @@ function bindKbWorkspaceBar(kbId) {
 }
 
 async function pageKbWorkspace(id) {
-  if (!requirePerm("kb:read", "知识库")) return;
+  if (!requirePerm("kb:read", "知识库管理")) return;
+  rememberLastKbId(id);
   let tab = getKbTabFromHash();
   if (tab === "docs" && !hasPermission("doc:read")) tab = "overview";
   if (tab === "snaps" && !hasPermission("snapshot:read")) tab = "overview";
+  if (tab === "faq" && !(hasPermission("system:read") || hasPermission("kb:read"))) tab = "overview";
   document.getElementById("pageRoot").innerHTML = `<div class="loading">加载知识库…</div>`;
   let kbList = [];
   let kbName = id;
@@ -3011,6 +3453,7 @@ async function pageKbWorkspace(id) {
   bindKbWorkspaceBar(id);
   if (tab === "docs") await pageDocuments(id, { embedded: true, mountId: "kbWsBody" });
   else if (tab === "snaps") await pageSnapshots(id, { embedded: true, mountId: "kbWsBody" });
+  else if (tab === "faq") await pageKbFaqs({ embedded: true, mountId: "kbWsBody", kbId: id, kbName });
   else await pageKbDetail(id, { embedded: true, mountId: "kbWsBody" });
 }
 
@@ -3046,30 +3489,75 @@ async function pageKbList() {
       return true;
     };
 
+    const sortKbs = (list) =>
+      [...list].sort((a, b) => {
+        const pa = a.is_pinned ? 1 : 0;
+        const pb = b.is_pinned ? 1 : 0;
+        if (pa !== pb) return pb - pa;
+        if (pa) {
+          const ta = String(a.pinned_at || "");
+          const tb = String(b.pinned_at || "");
+          if (ta !== tb) return ta < tb ? 1 : -1;
+        }
+        return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+      });
+
+    const canManageKb = (k) => {
+      if (k?.can_manage === true) return true;
+      if (isSuperAdmin() || isAdminUser()) return true;
+      const me = getUser();
+      if (me?.id && k?.creator_id && String(me.id) === String(k.creator_id)) return true;
+      return false;
+    };
+
     const renderCard = (k) => {
       const st = String(k.status || "").toLowerCase();
-      const canWriteKb = hasPermission("kb:write");
-      return `<article class="kb-card kb-card-clickable" data-kb-open="${escapeHtml(k.id)}" tabindex="0" role="link" aria-label="打开 ${escapeHtml(k.name)}">
-          <div class="kb-card-cover"><span>${escapeHtml((k.name || "知").slice(0, 1))}</span>${kbTypeBadge(k.type)}</div>
+      const showMore = canManageKb(k);
+      const pinned = !!k.is_pinned;
+      const moreMenu = showMore
+        ? `<div class="kb-card-more">
+              <button type="button" class="kb-card-more-btn" data-kb-more="${escapeHtml(k.id)}" aria-label="更多操作" aria-haspopup="true" aria-expanded="false" title="更多">
+                <span aria-hidden="true">⋯</span>
+              </button>
+              <div class="kb-card-more-menu" hidden role="menu">
+                <button type="button" class="kb-card-more-item" role="menuitem" data-kb-pin="${escapeHtml(k.id)}" data-pinned="${pinned ? "1" : "0"}">${pinned ? "取消置顶" : "置顶"}</button>
+                <button type="button" class="kb-card-more-item is-danger" role="menuitem" data-kb-del="${escapeHtml(k.id)}" data-kb-name="${escapeHtml(k.name || "")}">删除</button>
+              </div>
+            </div>`
+        : `<span class="kb-card-more-spacer" aria-hidden="true"></span>`;
+      return `<article class="kb-card kb-card-clickable${pinned ? " is-pinned" : ""}" data-kb-open="${escapeHtml(k.id)}" tabindex="0" role="link" aria-label="打开 ${escapeHtml(k.name)}">
+          <div class="kb-card-cover">
+            <div class="kb-card-cover-main">
+              <h3 class="kb-card-cover-title" title="${escapeHtml(k.name || "")}">${escapeHtml(k.name || "未命名知识库")}</h3>
+              <span class="status-dot kb-card-cover-status ${st === "processing" || st === "vectorizing" ? "is-processing" : ""}">${escapeHtml(statusLabel(k.status))}</span>
+            </div>
+            <span class="kb-card-cover-badges">${kbTypeBadge(k.type)}${pinned ? `<span class="kb-pin-badge" title="已置顶">置顶</span>` : ""}</span>
+          </div>
           <div class="kb-card-body">
-            <div class="kb-card-heading"><h3>${escapeHtml(k.name)}</h3><span class="status-dot ${st === "processing" || st === "vectorizing" ? "is-processing" : ""}">${escapeHtml(statusLabel(k.status))}</span></div>
-            <p>${escapeHtml(k.description || "暂未填写知识库简介，可进入详情页补充说明。")}</p>
+            <p>${escapeHtml(k.description || "暂未填写知识库简介，可进入管理页补充说明。")}</p>
             <div class="kb-card-meta"><span>${escapeHtml(fmtCount(k.document_count ?? k.doc_count ?? 0))} 份文档</span><span>${formatDateTime(k.updated_at)}</span></div>
             <div class="kb-card-access kb-card-tags">${accessScopeBadge(k)}</div>
             <div class="kb-card-actions">
-              <button type="button" class="btn btn-sm kb-card-btn kb-card-btn-detail" data-kb-detail="${escapeHtml(k.id)}">知识库详情</button>
-              ${
-                canWriteKb
-                  ? `<button type="button" class="btn btn-sm kb-card-btn kb-card-btn-del" data-kb-del="${escapeHtml(k.id)}" data-kb-name="${escapeHtml(k.name || "")}">删除</button>`
-                  : ""
-              }
+              ${moreMenu}
+              <button type="button" class="btn btn-sm kb-card-btn kb-card-btn-detail" data-kb-detail="${escapeHtml(k.id)}">知识库管理</button>
             </div>
           </div>
         </article>`;
     };
 
+    const closeAllKbMenus = () => {
+      document.querySelectorAll(".kb-card-more-menu").forEach((m) => {
+        m.hidden = true;
+      });
+      document.querySelectorAll(".kb-card-more-btn[aria-expanded='true']").forEach((b) => {
+        b.setAttribute("aria-expanded", "false");
+      });
+      document.querySelectorAll(".kb-card.is-menu-open").forEach((c) => c.classList.remove("is-menu-open"));
+    };
+
     const bindCards = () => {
-      const stopOnAction = (e) => e.target.closest("[data-kb-detail], [data-kb-del]");
+      const stopOnAction = (e) =>
+        e.target.closest("[data-kb-detail], [data-kb-del], [data-kb-more], [data-kb-pin], .kb-card-more-menu");
       document.querySelectorAll(".kb-card-clickable[data-kb-open]").forEach((card) => {
         const open = () => navigate(kbWorkspacePath(card.getAttribute("data-kb-open"), "overview"));
         card.addEventListener("click", (e) => {
@@ -3090,9 +3578,47 @@ async function pageKbList() {
           navigate(kbWorkspacePath(b.getAttribute("data-kb-detail"), "overview"));
         });
       });
+      document.querySelectorAll("[data-kb-more]").forEach((b) => {
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const menu = b.parentElement?.querySelector(".kb-card-more-menu");
+          const card = b.closest(".kb-card");
+          if (!menu) return;
+          const willOpen = menu.hidden;
+          closeAllKbMenus();
+          document.querySelectorAll(".kb-card.is-menu-open").forEach((c) => c.classList.remove("is-menu-open"));
+          if (willOpen) {
+            menu.hidden = false;
+            b.setAttribute("aria-expanded", "true");
+            card?.classList.add("is-menu-open");
+          }
+        });
+      });
+      document.querySelectorAll("[data-kb-pin]").forEach((b) => {
+        b.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const kid = b.getAttribute("data-kb-pin");
+          const currentlyPinned = b.getAttribute("data-pinned") === "1";
+          closeAllKbMenus();
+          try {
+            const updated = await api.put(`/knowledge-bases/${kid}`, { is_pinned: !currentlyPinned });
+            const idx = allItems.findIndex((x) => String(x.id) === String(kid));
+            if (idx >= 0) {
+              allItems[idx] = { ...allItems[idx], ...updated, is_pinned: !currentlyPinned };
+              if (!currentlyPinned) allItems[idx].pinned_at = updated?.pinned_at || new Date().toISOString();
+              else allItems[idx].pinned_at = null;
+            }
+            toast(currentlyPinned ? "已取消置顶" : "已置顶", "success");
+            paintList();
+          } catch (err) {
+            toast(err.message || "置顶失败", "error");
+          }
+        });
+      });
       document.querySelectorAll("[data-kb-del]").forEach((b) => {
         b.addEventListener("click", async (e) => {
           e.stopPropagation();
+          closeAllKbMenus();
           const kid = b.getAttribute("data-kb-del");
           const kname = b.getAttribute("data-kb-name") || kid;
           const ok = await confirmDialog({
@@ -3115,8 +3641,18 @@ async function pageKbList() {
       if (btnCreateCard) btnCreateCard.onclick = () => document.getElementById("btnCreateKb")?.click();
     };
 
+    const onDocClickCloseMenu = (e) => {
+      if (!document.getElementById("kbCardGrid")) return;
+      if (!e.target.closest(".kb-card-more")) closeAllKbMenus();
+    };
+    if (window.__kbCardMoreMenuHandler) {
+      document.removeEventListener("click", window.__kbCardMoreMenuHandler);
+    }
+    window.__kbCardMoreMenuHandler = onDocClickCloseMenu;
+    document.addEventListener("click", onDocClickCloseMenu);
+
     const paintList = () => {
-      const items = allItems.filter(matchKb);
+      const items = sortKbs(allItems.filter(matchKb));
       const total = items.length;
       const totalPages = Math.max(1, Math.ceil(total / KB_PAGE_SIZE) || 1);
       if (listPage > totalPages) listPage = totalPages;
@@ -3225,6 +3761,7 @@ async function pageKbList() {
     const btnCreate = document.getElementById("btnCreateKb");
     if (btnCreate) {
       btnCreate.onclick = async () => {
+        await ensureSensitivityLevels();
         const mask = document.createElement("div");
         mask.className = "modal-mask";
         mask.innerHTML = `
@@ -3243,6 +3780,9 @@ async function pageKbList() {
               <label class="form-label" style="margin-top:10px">访问范围（可多选部门）</label>
               ${departmentMultiSelectHtml(departments, [], { idPrefix: "createKbDept" })}
               <p class="text-muted" style="margin:6px 0 0;font-size:12px">可同时授权多个部门访问同一知识库。勾选访客=所有人可见；不选=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
+              <label class="form-label" style="margin-top:10px">默认敏感等级</label>
+              <select class="form-control" name="default_sensitivity_level">${sensitivityOptionsHtml("normal")}</select>
+              <p class="text-muted" style="margin:6px 0 0;font-size:12px">仅影响之后新建的文档/FAQ；存量请在编辑时勾选「同步密级」。公开/访客库建议保持「普通」。</p>
               <label class="form-label" style="margin-top:10px">标签（逗号分隔）</label>
               <input class="form-control" name="tags" maxlength="500" placeholder="可选" />
               <label class="form-label" style="margin-top:10px">描述</label>
@@ -3287,6 +3827,7 @@ async function pageKbList() {
               embedding_model: "text-embedding-v3",
               chunk_size: 500,
               chunk_overlap: 50,
+              default_sensitivity_level: String(fd.get("default_sensitivity_level") || "normal"),
             });
             toast("创建成功", "success");
             mask.remove();
@@ -3325,6 +3866,7 @@ async function pageKbDetail(id, opts = {}) {
              <button class="btn btn-danger btn-sm" id="btnDeleteKb">删除知识库</button>`
           : "",
       });
+      await ensureSensitivityLevels();
       const overviewGrid = `<div class="page-grid kb-detail-top">
           <div class="card span-6">
             <div class="card-header">
@@ -3339,6 +3881,8 @@ async function pageKbDetail(id, opts = {}) {
               <div class="meta-row"><span class="meta-label">简介</span><span class="meta-value">${escapeHtml(k.description || "无简介")}</span></div>
               <div class="meta-row"><span class="meta-label">标签</span><span class="meta-value">${escapeHtml((k.tags || []).join(", ") || "-")}</span></div>
               <div class="meta-row"><span class="meta-label">访问范围</span><span class="meta-value">${accessScopeBadge(k)}</span></div>
+              <div class="meta-row"><span class="meta-label">默认敏感等级</span><span class="meta-value">${escapeHtml(sensitivityLabel(k.default_sensitivity_level))}</span></div>
+              <div class="meta-row"><span class="meta-label">FAQ 命中</span><span class="meta-value">${k.faq_enabled === false ? "已关闭" : "已开启"}</span></div>
               <div class="meta-row"><span class="meta-label">索引版本</span><span class="meta-value">${escapeHtml(k.current_index_version)}</span></div>
             </div>
           </div>
@@ -3348,6 +3892,8 @@ async function pageKbDetail(id, opts = {}) {
               <div class="stat-grid" style="grid-template-columns:1fr 1fr;margin-bottom:12px">
                 <div class="stat-card"><div class="label">文档数</div><div class="value">${escapeHtml(fmtCount(k.document_count ?? k.doc_count ?? 0))}</div></div>
                 <div class="stat-card"><div class="label">分段数</div><div class="value">${escapeHtml(fmtCount(k.chunk_count ?? 0))}</div></div>
+                <div class="stat-card"><div class="label">FAQ数</div><div class="value">${escapeHtml(fmtCount(k.faq_count ?? 0))}</div></div>
+                <div class="stat-card"><div class="label">快照数</div><div class="value">${escapeHtml(fmtCount(k.snapshot_count ?? 0))}</div></div>
               </div>
               <div class="meta-list">
                 <div class="meta-row"><span class="meta-label">创建</span><span class="meta-value">${formatDateTime(k.created_at)}</span></div>
@@ -3365,6 +3911,7 @@ async function pageKbDetail(id, opts = {}) {
       const btnEdit = document.getElementById("btnEditKb");
       if (btnEdit) {
         btnEdit.onclick = async () => {
+          await ensureSensitivityLevels();
           const departments = await loadDepartmentOptions();
           const result = await openWideModal({
             title: "编辑知识库",
@@ -3383,6 +3930,21 @@ async function pageKbDetail(id, opts = {}) {
                 ${departmentMultiSelectHtml(departments, kbDepartmentCodes(k), { idPrefix: "editKbDept" })}
               </div>
               <p class="text-muted" style="margin:0 0 12px;font-size:12px">可同时授权多个部门。勾选访客=所有人可见；不选=仅创建者与管理员。功能权限请在「组织与权限」由超管配置。</p>
+              <label class="text-muted">默认敏感等级</label>
+              <select class="form-control" id="editDefaultSens" style="margin:6px 0 8px">${sensitivityOptionsHtml(k.default_sensitivity_level || "normal")}</select>
+              <label class="kb-sync-sens-check" style="display:flex;gap:8px;align-items:center;margin:0 0 6px;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="editSyncSens" />
+                <span>同步密级</span>
+              </label>
+              <label id="editSyncForceWrap" class="kb-sync-sens-check" style="display:none;gap:8px;align-items:flex-start;margin:0 0 8px;font-size:12px;cursor:pointer;line-height:1.45;padding-left:22px">
+                <input type="checkbox" id="editSyncForce" style="margin-top:2px" />
+                <span><span style="color:var(--color-danger,#c62828)">强制覆盖全部</span>（含手工设置的密级；默认只改「普通」）</span>
+              </label>
+              <p class="text-muted" style="margin:0 0 12px;font-size:12px">保存只改库默认，不自动改存量；存量请勾选「同步密级」。</p>
+              <label class="kb-sync-sens-check" style="display:flex;gap:8px;align-items:flex-start;margin:0 0 6px;font-size:13px;cursor:pointer;line-height:1.45">
+                <input type="checkbox" id="editFaqEnabled" ${k.faq_enabled === false ? "" : "checked"} style="margin-top:2px" />
+                <span>启用 FAQ 命中<span class="text-muted" style="display:block;font-size:12px;margin-top:2px">整库开关：关闭后该库 FAQ 不参与秒答与热门推荐，记录仍保留</span></span>
+              </label>
               <label class="text-muted">标签（逗号分隔）</label>
               <input class="form-control" id="editTags" maxlength="500" value="${escapeHtml((k.tags || []).join(", "))}" style="margin:6px 0 12px" />
               <label class="text-muted">描述</label>
@@ -3390,7 +3952,21 @@ async function pageKbDetail(id, opts = {}) {
             actionsHtml: `
               <button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
               <button type="button" class="btn" data-act="ok">保存</button>`,
-            onReady: (mask) => bindDepartmentMultiSelect(mask.querySelector("#editDepartmentScope")),
+            onReady: (mask) => {
+              bindDepartmentMultiSelect(mask.querySelector("#editDepartmentScope"));
+              const syncCb = mask.querySelector("#editSyncSens");
+              const forceWrap = mask.querySelector("#editSyncForceWrap");
+              const syncToggle = () => {
+                if (!forceWrap) return;
+                forceWrap.style.display = syncCb?.checked ? "flex" : "none";
+                if (!syncCb?.checked) {
+                  const forceCb = mask.querySelector("#editSyncForce");
+                  if (forceCb) forceCb.checked = false;
+                }
+              };
+              syncCb?.addEventListener("change", syncToggle);
+              syncToggle();
+            },
           });
           if (!result) return;
           const name = result.root.querySelector("#editName")?.value?.trim();
@@ -3398,6 +3974,10 @@ async function pageKbDetail(id, opts = {}) {
           const selectedDepts = readSelectedDepartments(result.root.querySelector("#editDepartmentScope"));
           const tags = result.root.querySelector("#editTags")?.value?.split(",").map((t) => t.trim()).filter(Boolean) || [];
           const description = result.root.querySelector("#editDesc")?.value?.trim() || undefined;
+          const default_sensitivity_level = result.root.querySelector("#editDefaultSens")?.value || "normal";
+          const faq_enabled = Boolean(result.root.querySelector("#editFaqEnabled")?.checked);
+          const doSync = Boolean(result.root.querySelector("#editSyncSens")?.checked);
+          const syncForce = Boolean(result.root.querySelector("#editSyncForce")?.checked);
           result.root.remove();
           if (!name) {
             toast("请填写名称", "error");
@@ -3410,8 +3990,21 @@ async function pageKbDetail(id, opts = {}) {
               tags,
               description,
               departments: selectedDepts,
+              default_sensitivity_level,
+              faq_enabled,
             });
-            toast("已更新", "success");
+            if (doSync) {
+              const res = await api.post(`/knowledge-bases/${id}/sensitivity/sync`, {
+                mode: syncForce ? "force" : "only_normal",
+              });
+              const a = res.affected || {};
+              toast(
+                `已保存并同步（${syncModeLabel(res.mode)} → ${sensitivityLabel(res.target_level)}）：文档 ${a.documents || 0} / 分段 ${a.chunks || 0} / FAQ ${a.faqs || 0}`,
+                "success"
+              );
+            } else {
+              toast("已更新", "success");
+            }
             await render();
           } catch (e) {
             toast(e.message || "更新失败", "error");
@@ -3466,13 +4059,18 @@ const DOC_STATUS_META = {
   segmenting: { label: "分段中", badge: "badge-info" },
   pending_segment: { label: "待分段", badge: "badge-warning" },
   vectorizing: { label: "向量化中", badge: "badge-info" },
+  generating_faq: { label: "更新FAQ中", badge: "badge-info" },
   ready: { label: "已就绪", badge: "badge-success" },
   error: { label: "失败", badge: "badge-danger" },
   archived: { label: "已归档", badge: "" },
 };
 
-function docStatusBadge(status) {
-  const key = String(status || "").toLowerCase();
+function docStatusBadge(status, opts = {}) {
+  const faqJob = String(opts.faqJobStatus || "").toLowerCase();
+  let key = String(status || "").toLowerCase();
+  if (key === "ready" && (faqJob === "queued" || faqJob === "running")) {
+    key = "generating_faq";
+  }
   const meta = DOC_STATUS_META[key];
   const label = meta?.label || (status ? String(status) : "-");
   const badgeClass = meta?.badge ? `badge ${meta.badge}` : "badge";
@@ -3572,7 +4170,28 @@ async function pageDocuments(kbId, opts = {}) {
     }
   };
 
-  /** 轮询文档至 ready / error；超时也标为处理失败 */
+  /** 单文件阶段进度：上传框只跟到向量化就绪（FAQ 后台异步，不卡进度） */
+  const itemStageProgress = (item) => {
+    const st = item.status;
+    if (st === "ready") return 100;
+    if (st === "error" || st === "upload_error" || st === "cancelled") return 100;
+    if (st === "pending") return 0;
+    if (st === "uploading") return 8;
+    const pipe = String(item.pipeStatus || "").toLowerCase();
+    const map = {
+      uploaded: 12,
+      parsing: 28,
+      processing: 40,
+      normalizing: 40,
+      pending_segment: 48,
+      segmenting: 58,
+      vectorizing: 78,
+      ready: 100,
+    };
+    return map[pipe] || (st === "processing" ? 18 : 5);
+  };
+
+  /** 轮询至文档向量化就绪；FAQ 入队后后台跑，不在上传框等待 */
   const waitForPipeline = async (item) => {
     if (!item?.docId) {
       item.status = "error";
@@ -3591,6 +4210,8 @@ async function pageDocuments(kbId, opts = {}) {
         const doc = await api.get(`/knowledge-bases/${kbId}/documents/${item.docId}`);
         const st = String(doc?.status || "").toLowerCase();
         item.pipeStatus = st;
+        item.faqJobStatus = String(doc?.faq_job_status || "").toLowerCase();
+        item.faqCount = Number(doc?.faq_count || 0);
         if (st === "ready") {
           item.status = "ready";
           delete item.error;
@@ -3602,7 +4223,6 @@ async function pageDocuments(kbId, opts = {}) {
           return;
         }
         if (!DOC_BUSY_STATUSES.has(st) && st && st !== "uploaded") {
-          // 未知终态：按失败处理，避免死循环
           item.status = "error";
           item.error = `未知状态：${st}`;
           return;
@@ -3613,7 +4233,6 @@ async function pageDocuments(kbId, opts = {}) {
           item.error = "文档已不存在或已被删除";
           return;
         }
-        // 瞬时错误继续轮询
       }
       paintDropzoneBatch();
       await refreshListThrottled();
@@ -3768,8 +4387,8 @@ async function pageDocuments(kbId, opts = {}) {
     const processing = uploadBatch.filter((x) => x.status === "processing" || x.status === "uploading").length;
     const pending = uploadBatch.filter((x) => x.status === "pending").length;
     const terminal = ready + fail + cancelled;
-    const doneCount = terminal;
-    const pct = Math.round((doneCount / total) * 100);
+    const stageSum = uploadBatch.reduce((sum, x) => sum + itemStageProgress(x), 0);
+    const pct = Math.max(0, Math.min(100, Math.round(stageSum / total)));
     const busy = !uploadBatchDone || processing > 0 || pending > 0;
     const canResume = uploadBatchDone && cancelled > 0;
     const canRetry = uploadBatchDone && fail > 0 && cancelled === 0;
@@ -3786,19 +4405,19 @@ async function pageDocuments(kbId, opts = {}) {
     if (busy && (pending > 0 || uploadBatch.some((x) => x.status === "uploading"))) {
       const step = Math.min(uploadBatch.filter((x) => x.status !== "pending").length + 1, total);
       title = `文档上传中 · ${Math.min(step, total)}/${total}`;
-      lead = "正在逐个上传；上传后仍会解析与向量化，可随时取消剩余文件";
+      lead = "正在逐个上传；上传后会解析与向量化。FAQ 在后台异步生成，无需在此等待";
     } else if (busy && processing > 0) {
       title = `处理中 · ${ready + fail}/${total}`;
-      lead = "文件已接收，正在解析 / 分段 / 向量化，请稍候";
+      lead = "正在解析 / 分段 / 向量化；就绪后可离开本区，FAQ 会在后台继续生成（见下方列表状态）";
     } else if (cancelled) {
       title = `已结束 · 就绪 ${ready} · 失败 ${fail} · 取消 ${cancelled}`;
       lead = "可继续上传剩余文件；处理失败项会留在文档列表，可点重试";
     } else if (fail) {
       title = `已结束 · 就绪 ${ready} 个，失败 ${fail} 个`;
-      lead = "上传失败可在本区重试；处理失败会留在下方列表，也可点列表「重试」";
+      lead = "上传失败可在本区重试；处理失败会留在下方列表，也可点列表「重试」。FAQ 若仍在生成，见列表「更新FAQ中」";
     } else {
-      title = `全部就绪（${ready} 个）`;
-      lead = "本批已全部处理完成，可继续选择新文件或文件夹上传";
+      title = `文档已就绪（${ready} 个）`;
+      lead = "向量化已完成，可继续上传或去做别的事；FAQ 在后台异步生成，进度看下方文档列表";
     }
 
     const actionsHtml = busy
@@ -4452,6 +5071,7 @@ async function pageDocuments(kbId, opts = {}) {
 
   const renderList = async () => {
     try {
+      await ensureSensitivityLevels();
       const data = await api.get(
         `/knowledge-bases/${kbId}/documents?page=${listPage}&page_size=${DOC_PAGE_SIZE}`
       );
@@ -4462,7 +5082,13 @@ async function pageDocuments(kbId, opts = {}) {
         listPage = totalPages;
         return renderList();
       }
-      const busy = items.some((d) => DOC_BUSY_STATUSES.has(String(d.status || "")));
+      const isFaqBusyDoc = (d) => {
+        const job = String(d.faq_job_status || "").toLowerCase();
+        return job === "queued" || job === "running";
+      };
+      const busy = items.some(
+        (d) => DOC_BUSY_STATUSES.has(String(d.status || "")) || isFaqBusyDoc(d)
+      );
       if (refreshTimer) {
         clearTimeout(refreshTimer);
         refreshTimer = null;
@@ -4475,7 +5101,9 @@ async function pageDocuments(kbId, opts = {}) {
 
       const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
 
-      const selectableCount = items.filter((d) => !DOC_BUSY_STATUSES.has(String(d.status || ""))).length;
+      const selectableCount = items.filter(
+        (d) => !DOC_BUSY_STATUSES.has(String(d.status || "")) && !isFaqBusyDoc(d)
+      ).length;
 
       const docActions = canUpload
         ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
@@ -4487,7 +5115,7 @@ async function pageDocuments(kbId, opts = {}) {
       mountEl().innerHTML = `
       ${pageHead({
         title: "文档管理",
-        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown；可拖拽文件/文件夹。上传后仍会解析与向量化；处理失败会留在列表并可重试。",
+        desc: "支持 PDF、Word（DOC/DOCX）、TXT、Markdown；可拖拽文件/文件夹。上传后解析与向量化；FAQ 后台异步生成（列表显示「更新FAQ中」），无需在上传区等待。",
         actions: docActions,
       })}
       ${
@@ -4500,7 +5128,7 @@ async function pageDocuments(kbId, opts = {}) {
         <div class="card-header">
           <div class="card-header-text">
             <h3 class="card-title">文档列表</h3>
-            <p class="card-sub">分段 / 预处理 / 向量化状态 · 共 ${total} 份 · 第 ${listPage}/${totalPages} 页${busy ? " · 处理中自动刷新" : ""}</p>
+            <p class="card-sub">分段 / 预处理 / 向量化 · FAQ 后台更新 · 共 ${total} 份 · 第 ${listPage}/${totalPages} 页${busy ? " · 处理中自动刷新" : ""}</p>
           </div>
         </div>
         <div class="table-wrap"><table class="table table-docs">
@@ -4511,6 +5139,8 @@ async function pageDocuments(kbId, opts = {}) {
             <col class="docs-col-name" />
             <col class="docs-col-size" />
             <col class="docs-col-num" />
+            <col class="docs-col-faq" />
+            <col class="docs-col-sens" />
             <col class="docs-col-status" />
             <col class="docs-col-actions" />
           </colgroup>
@@ -4521,6 +5151,8 @@ async function pageDocuments(kbId, opts = {}) {
             <th class="col-name">文件名</th>
             <th class="col-size">大小</th>
             <th class="col-num">分段</th>
+            <th class="col-num">FAQ</th>
+            <th class="col-sens">敏感等级</th>
             <th class="col-status">状态</th>
             <th class="col-actions">操作</th>
           </tr></thead>
@@ -4529,7 +5161,9 @@ async function pageDocuments(kbId, opts = {}) {
               .map((d, i) => {
                 const st = String(d.status || "");
                 const isError = st === "error";
-                const isBusy = DOC_BUSY_STATUSES.has(st);
+                const faqJob = String(d.faq_job_status || "").toLowerCase();
+                const isBusy =
+                  DOC_BUSY_STATUSES.has(st) || faqJob === "queued" || faqJob === "running";
                 const seq = (listPage - 1) * DOC_PAGE_SIZE + i + 1;
                 return `<tr>
                   ${
@@ -4542,22 +5176,42 @@ async function pageDocuments(kbId, opts = {}) {
                   <td class="col-name"><span class="cell-primary">${escapeHtml(d.filename || d.name)}</span></td>
                   <td class="col-size">${escapeHtml(formatSize(d.file_size ?? d.size))}</td>
                   <td class="col-num">${escapeHtml(fmtCount(d.chunk_count ?? 0))}</td>
-                  <td class="col-status">${docStatusBadge(st)}${
+                  <td class="col-num">${escapeHtml(fmtCount(d.faq_count ?? 0))}</td>
+                  <td class="col-sens">${sensitivityBadgeHtml(d.sensitivity_level)}</td>
+                  <td class="col-status">${docStatusBadge(st, { faqJobStatus: faqJob })}${
                     isError && d.error_message
                       ? `<div class="text-danger" style="font-size:12px;margin-top:4px;line-height:1.35;max-width:9.5rem;margin-inline:auto;word-break:break-word">${escapeHtml(String(d.error_message).slice(0, 100))}</div>`
                       : ""
                   }</td>
                   <td class="col-actions">
-                    <div class="table-actions">
-                      <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">文档处理</button>
-                      ${canWrite && !isBusy ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
-                      ${canWrite && isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
+                    <div class="table-actions table-actions-stack">
+                      <div class="table-actions-row">
+                        <button class="btn btn-secondary btn-sm" data-preview="${escapeHtml(d.id)}" data-name="${escapeHtml(d.filename || "")}">文档处理</button>
+                        ${
+                          hasPermission("system:read") || hasPermission("kb:read")
+                            ? `<button type="button" class="btn btn-secondary btn-sm" data-doc-faq="${escapeHtml(d.id)}">相关 FAQ</button>`
+                            : ""
+                        }
+                        ${
+                          canWrite
+                            ? `<button type="button" class="btn btn-secondary btn-sm" data-doc-sens="${escapeHtml(d.id)}" data-doc-sens-cur="${escapeHtml(d.sensitivity_level || "normal")}">改密级</button>`
+                            : ""
+                        }
+                      </div>
+                      ${
+                        canWrite
+                          ? `<div class="table-actions-row">
+                        ${!isBusy ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
+                        ${isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
+                      </div>`
+                          : ""
+                      }
                     </div>
                   </td>
                 </tr>`;
               })
               .join("") ||
-              `<tr><td colspan="${canWrite ? 8 : 7}" class="text-muted">暂无文档</td></tr>`}
+              `<tr><td colspan="${canWrite ? 10 : 9}" class="text-muted">暂无文档</td></tr>`}
           </tbody>
         </table></div>
         <div class="table-card-footer">
@@ -4619,7 +5273,7 @@ async function pageDocuments(kbId, opts = {}) {
           if (!ids.length) return toast("请先勾选要删除的文档", "error");
           const ok = await confirmDialog({
             title: "批量删除文档",
-            message: `将删除已勾选的 ${ids.length} 份文档及其向量数据，确定？`,
+            message: `将删除已勾选的 ${ids.length} 份文档及其向量数据，并同时删除仅来源于这些文档的 FAQ。确定继续？`,
             confirmText: "批量删除",
           });
           if (!ok) return;
@@ -4664,6 +5318,12 @@ async function pageDocuments(kbId, opts = {}) {
       document.querySelectorAll("[data-preview]").forEach((btn) => {
         btn.onclick = () => openDocWorkbench(btn.getAttribute("data-preview"), btn.getAttribute("data-name"));
       });
+      document.querySelectorAll("[data-doc-faq]").forEach((btn) => {
+        btn.onclick = () => {
+          const docId = btn.getAttribute("data-doc-faq");
+          navigate(kbWorkspacePath(kbId, "faq", { source_doc_id: docId }));
+        };
+      });
       document.querySelectorAll("[data-retry]").forEach((btn) => {
         btn.onclick = async () => {
           try {
@@ -4675,9 +5335,41 @@ async function pageDocuments(kbId, opts = {}) {
           }
         };
       });
+      document.querySelectorAll("[data-doc-sens]").forEach((btn) => {
+        btn.onclick = async () => {
+          const docId = btn.getAttribute("data-doc-sens");
+          const cur = btn.getAttribute("data-doc-sens-cur") || "normal";
+          await ensureSensitivityLevels();
+          const result = await openWideModal({
+            title: "修改文档敏感等级",
+            bodyHtml: `<label class="text-muted">敏感等级</label>
+              <select class="form-control" id="docSensLevel" style="margin-top:8px">${sensitivityOptionsHtml(cur)}</select>
+              <p class="text-muted" style="margin:10px 0 0;font-size:12px">将同步到该文档全部分段，并重算关联 FAQ 密级（多来源取最高档）。</p>`,
+            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+              <button type="button" class="btn" data-act="ok">保存</button>`,
+          });
+          if (!result) return;
+          const level = result.root.querySelector("#docSensLevel")?.value || "normal";
+          result.root.remove();
+          try {
+            await api.put(`/knowledge-bases/${kbId}/documents/${docId}/sensitivity`, {
+              sensitivity_level: level,
+            });
+            toast("文档密级已更新（分段与关联 FAQ 已同步）", "success");
+            await renderList();
+          } catch (e) {
+            toast(e.message || "更新失败", "error");
+          }
+        };
+      });
       document.querySelectorAll("[data-del]").forEach((btn) => {
         btn.onclick = async () => {
-          const ok = await confirmDialog({ title: "删除文档", message: "将删除文档及其向量数据，确定？", confirmText: "删除" });
+          const ok = await confirmDialog({
+            title: "删除文档",
+            message: "将删除该文档及其向量数据，并同时删除仅来源于该文档的 FAQ。确定继续？",
+            confirmText: "删除",
+            danger: true,
+          });
           if (!ok) return;
           try {
             await api.delete(`/knowledge-bases/${kbId}/documents/${btn.getAttribute("data-del")}`);
@@ -4761,8 +5453,8 @@ function openWideModal({ title, bodyHtml, actionsHtml, width = "min(760px,calc(1
         resolve(null);
         return;
       }
-      if (act === "ok") {
-        resolve({ ok: true, root: mask });
+      if (act === "ok" || act === "clear") {
+        resolve({ ok: true, action: act, root: mask });
       }
     });
     document.body.appendChild(mask);
@@ -4855,6 +5547,7 @@ async function pageSnapshots(kbId, opts = {}) {
             <col class="snap-col-trigger" />
             <col class="snap-col-num" />
             <col class="snap-col-num" />
+            <col class="snap-col-num" />
             <col class="snap-col-desc" />
             <col class="snap-col-actions" />
           </colgroup>
@@ -4864,6 +5557,7 @@ async function pageSnapshots(kbId, opts = {}) {
             <th class="col-trigger">触发方式</th>
             <th class="col-num">文档数</th>
             <th class="col-num">分段数</th>
+            <th class="col-num">FAQ数</th>
             <th class="col-desc">说明</th>
             <th class="col-actions">操作</th>
           </tr></thead>
@@ -4888,6 +5582,7 @@ async function pageSnapshots(kbId, opts = {}) {
                   <td class="col-trigger">${triggerBadge(s.trigger)}</td>
                   <td class="col-num">${escapeHtml(fmtCount(s.document_count ?? 0))}</td>
                   <td class="col-num">${escapeHtml(fmtCount(s.total_chunks ?? 0))}</td>
+                  <td class="col-num">${escapeHtml(fmtCount(s.faq_count ?? 0))}</td>
                   <td class="col-desc">${escapeHtml(s.description || "—")}</td>
                   <td class="col-actions"><div class="table-actions">${ops.join("")}</div></td>
                 </tr>`;
@@ -4976,12 +5671,19 @@ async function pageSnapshots(kbId, opts = {}) {
           const docs = d.documents || [];
           const rules = d.segment_rules || {};
           const perms = d.permission_snapshot || [];
+          const faqCount = d.faq_count ?? d.config_snapshot?.faq_count ?? 0;
+          const faqsCaptured = d.config_snapshot?.faqs_captured === true;
           await openWideModal({
             title: `快照详情 · ${d.name || ""}`,
             bodyHtml: `
               <p><span class="text-muted">触发方式：</span>${triggerBadge(d.trigger)}
                 <span class="text-muted" style="margin-left:12px">创建时间：</span>${formatDateTime(d.created_at)}</p>
               <p class="text-muted">${escapeHtml(d.description || "无说明")}</p>
+              <p><span class="text-muted">FAQ：</span>${
+                faqsCaptured
+                  ? `${escapeHtml(fmtCount(faqCount))} 条（回退时可还原）`
+                  : `<span class="text-muted">旧快照未收录 FAQ</span>`
+              }</p>
               <h4 style="margin:14px 0 8px;font-size:14px">分段规则</h4>
               <p>分段长度 <code>${escapeHtml(rules.chunk_size ?? "-")}</code> · 重叠
                 <code>${escapeHtml(rules.chunk_overlap ?? "-")}</code> · 切分方式
@@ -5010,7 +5712,7 @@ async function pageSnapshots(kbId, opts = {}) {
                           .slice(0, 50)
                           .map(
                             (doc) =>
-                              `<tr><td>${escapeHtml(doc.filename || "-")}</td><td>${escapeHtml(doc.status || "-")}</td><td>${escapeHtml(fmtCount(doc.chunk_count ?? 0))}</td></tr>`
+                              `<tr><td>${escapeHtml(doc.filename || "-")}</td><td>${escapeHtml(doc.status || doc.metadata?.status || "-")}</td><td>${escapeHtml(fmtCount(doc.chunk_count ?? 0))}</td></tr>`
                           )
                           .join("")
                       : `<tr><td colspan="3" class="text-muted">无文档</td></tr>`
@@ -6000,6 +6702,10 @@ const AUDIT_ACTION_LABELS = {
   "kb.create": "创建知识库",
   "kb.update": "更新知识库",
   "kb.delete": "删除知识库",
+  "kb.default_sensitivity_changed": "变更库默认密级",
+  "kb.sensitivity_sync": "同步库内密级",
+  "doc.sensitivity": "变更文档密级",
+  denied: "权限拒答",
   "doc.upload": "上传文档",
   "doc.delete": "删除文档",
   "doc.pipeline_error": "文档处理失败",
@@ -6633,127 +7339,384 @@ async function pageQaSessions() {
   await paint();
 }
 
-/* ========== 知识库 FAQ /admin/kb-faqs ========== */
-async function pageKbFaqs() {
-  if (!requirePerm("system:read", "知识库 FAQ")) return;
-  const root = document.getElementById("pageRoot");
+/* ========== 敏感话题权限（已拆并；旧路由重定向） ========== */
+async function pageSensitivity() {
+  return navigate("/admin/roles");
+}
+
+/* ========== 知识库 FAQ（工作区 Tab；旧 /admin/kb-faqs 跳转） ========== */
+/** FAQ 列表排序：状态优先于密级（与后端 admin/faq/list 一致）。 */
+function faqListSortRank(item) {
+  const st = String(item?.status || "");
+  const statusRank = st === "pending_review" ? 0 : st === "active" ? 1 : 2;
+  const sens = String(item?.sensitivity_level || "normal");
+  const sensRank = sens === "restricted" ? 0 : sens === "confidential" ? 1 : 2;
+  return statusRank * 10 + sensRank;
+}
+
+function compareFaqsByListOrder(a, b) {
+  const d = faqListSortRank(a) - faqListSortRank(b);
+  if (d !== 0) return d;
+  const ta = Date.parse(a?.updated_at || "") || 0;
+  const tb = Date.parse(b?.updated_at || "") || 0;
+  return tb - ta;
+}
+
+/** 本页内按父子关系重排：父条下紧跟其子问；父不在本页的子问仍作独立行并标子问。 */
+function orderFaqsAsTree(items) {
+  const list = Array.isArray(items) ? items : [];
+  const byId = new Map(list.map((it) => [String(it.id), it]));
+  const childrenOf = new Map();
+  const roots = [];
+  for (const it of list) {
+    const pid = it.split_from_id ? String(it.split_from_id) : "";
+    if (pid && byId.has(pid)) {
+      if (!childrenOf.has(pid)) childrenOf.set(pid, []);
+      childrenOf.get(pid).push(it);
+    } else {
+      roots.push(it);
+    }
+  }
+  // 状态 > 密级 > 更新时间（改密级/改状态后与后端一致重排）
+  roots.sort(compareFaqsByListOrder);
+  for (const kids of childrenOf.values()) kids.sort(compareFaqsByListOrder);
+  const out = [];
+  const walk = (node, depth) => {
+    out.push({
+      item: node,
+      depth,
+      parentOnPage: depth > 0,
+      orphanChild: depth === 0 && Boolean(node.split_from_id),
+    });
+    const kids = childrenOf.get(String(node.id)) || [];
+    for (const child of kids) walk(child, depth + 1);
+  };
+  for (const r of roots) walk(r, 0);
+  return out;
+}
+
+async function pageKbFaqs(opts = {}) {
+  const { embedded = false, mountId = "pageRoot", kbId: fixedKbId = "", kbName: fixedKbName = "" } = opts;
+  if (!embedded && !requirePerm("system:read", "知识库 FAQ")) return;
+  if (embedded && !(hasPermission("system:read") || hasPermission("kb:read"))) {
+    document.getElementById(mountId).innerHTML = `<div class="card empty-state">无 FAQ 查看权限</div>`;
+    return;
+  }
+  const root = document.getElementById(mountId);
   root.innerHTML = `<div class="loading">加载知识库 FAQ…</div>`;
   const canWrite = hasPermission("kb:write");
+  const FAQ_PAGE_SIZE = 50;
+
+  const readFaqQuery = () => {
+    const q = embedded ? getKbWorkspaceQuery() : new URLSearchParams();
+    return {
+      page: Math.max(1, parseInt(q.get("page") || "1", 10) || 1),
+      status: q.get("status") || "",
+      sensitivity_level: q.get("sensitivity_level") || "",
+      keyword: q.get("keyword") || "",
+      source_doc_id: q.get("source_doc_id") || "",
+      is_compound: q.get("is_compound") === "true" ? "true" : q.get("is_compound") === "false" ? "false" : "",
+    };
+  };
+
+  const pushFaqQuery = (patch = {}) => {
+    if (!embedded || !fixedKbId) return false;
+    const cur = readFaqQuery();
+    const next = { ...cur, ...patch };
+    const params = {};
+    if (next.status) params.status = next.status;
+    if (next.sensitivity_level) params.sensitivity_level = next.sensitivity_level;
+    if (next.keyword) params.keyword = next.keyword;
+    if (next.source_doc_id) params.source_doc_id = next.source_doc_id;
+    if (next.is_compound === "true" || next.is_compound === "false") params.is_compound = next.is_compound;
+    if (next.page && Number(next.page) > 1) params.page = String(next.page);
+    navigate(kbWorkspacePath(fixedKbId, "faq", params));
+    return true;
+  };
+
   try {
-    const kbs = await api.get("/admin/faq/kbs");
-    let selectedKb = kbs[0]?.id || "";
+    await ensureSensitivityLevels();
+    let selectedKb = String(fixedKbId || "");
+    let sourceDocLabel = "";
+
     const paint = async () => {
+      if (embedded && fixedKbId) selectedKb = String(fixedKbId);
+      const filters = readFaqQuery();
       if (!selectedKb) {
-        root.innerHTML = `
-          ${pageHead({ title: "知识库 FAQ", desc: "按知识库缓存常见问答；文档就绪后自动生成，命中可秒答。" })}
-          <div class="card empty-state">暂无知识库</div>`;
+        root.innerHTML = `<div class="card empty-state">暂无知识库</div>`;
         return;
       }
-      const status = root.querySelector("[data-faq-status]")?.value || "";
-      const keyword = root.querySelector("[data-faq-keyword]")?.value || "";
-      const qs = new URLSearchParams({ kb_id: selectedKb, page: "1", size: "50" });
-      if (status) qs.set("status", status);
-      if (keyword.trim()) qs.set("keyword", keyword.trim());
+      if (embedded) rememberLastKbId(selectedKb);
+
+      const qs = new URLSearchParams({
+        kb_id: selectedKb,
+        page: String(filters.page || 1),
+        size: String(FAQ_PAGE_SIZE),
+      });
+      if (filters.status) qs.set("status", filters.status);
+      if (filters.sensitivity_level) qs.set("sensitivity_level", filters.sensitivity_level);
+      if (filters.keyword.trim()) qs.set("keyword", filters.keyword.trim());
+      if (filters.source_doc_id) qs.set("source_doc_id", filters.source_doc_id);
+      if (filters.is_compound === "true" || filters.is_compound === "false") {
+        qs.set("is_compound", filters.is_compound);
+      }
+
       const data = await api.get(`/admin/faq/list?${qs.toString()}`);
       const items = data.items || [];
+      const total = Number(data.total || 0);
+      const totalPages = Math.max(1, Math.ceil(total / FAQ_PAGE_SIZE) || 1);
+      const listPage = Math.min(filters.page || 1, totalPages);
+      const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
+
+      let docOptions = [];
+      try {
+        const docs = await api.get(`/knowledge-bases/${selectedKb}/documents?page=1&page_size=100`);
+        docOptions = docs.items || [];
+      } catch {
+        docOptions = [];
+      }
+      if (filters.source_doc_id) {
+        const hit = docOptions.find((d) => String(d.id) === String(filters.source_doc_id));
+        sourceDocLabel = hit ? hit.filename || hit.name || filters.source_doc_id.slice(0, 8) : filters.source_doc_id.slice(0, 8);
+      } else {
+        sourceDocLabel = "";
+      }
+
       root.innerHTML = `
-        ${pageHead({
-          title: "知识库 FAQ",
-          desc: "文档向量化完成后异步生成；访客热门点选可直达答案。角色缓存已进入只读过渡期。",
-        })}
         <div class="card panel-fill">
-          <div class="card-header" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+          <div class="card-header">
             <div class="card-header-text">
               <h3 class="card-title">FAQ 列表</h3>
-              <p class="card-sub">当前库：${escapeHtml(data.kb_name || "")} · 命中开关 ${data.faq_enabled ? "开启" : "关闭"}</p>
+              <p class="card-sub">当前库：${escapeHtml(data.kb_name || fixedKbName || "")} · FAQ 命中 ${data.faq_enabled ? "开启" : "关闭"}（整库，可在「编辑知识库」修改）· 共 ${escapeHtml(fmtCount(total))} 条</p>
             </div>
-            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-              <select class="form-control" data-faq-kb style="min-width:180px">
-                ${kbs
-                  .map(
-                    (kb) =>
-                      `<option value="${escapeHtml(kb.id)}" ${kb.id === selectedKb ? "selected" : ""}>${escapeHtml(kb.name)} (${fmtCount(kb.active_faq_count || 0)})</option>`
-                  )
-                  .join("")}
-              </select>
-              <select class="form-control" data-faq-status>
-                <option value="">全部状态</option>
-                <option value="active" ${status === "active" ? "selected" : ""}>active</option>
-                <option value="pending_review" ${status === "pending_review" ? "selected" : ""}>pending_review</option>
-                <option value="disabled" ${status === "disabled" ? "selected" : ""}>disabled</option>
-              </select>
-              <input class="form-control" data-faq-keyword placeholder="搜索问题/答案" value="${escapeHtml(keyword)}" />
+          </div>
+          <div class="toolbar faq-toolbar">
+            <select class="form-control" data-faq-status aria-label="筛选状态">
+              <option value="">全部状态</option>
+              <option value="active" ${filters.status === "active" ? "selected" : ""}>${faqStatusLabel("active")}</option>
+              <option value="pending_review" ${filters.status === "pending_review" ? "selected" : ""}>${faqStatusLabel("pending_review")}</option>
+              <option value="disabled" ${filters.status === "disabled" ? "selected" : ""}>${faqStatusLabel("disabled")}</option>
+            </select>
+            <select class="form-control" data-faq-sens-filter aria-label="筛选密级">
+              <option value="">全部密级</option>
+              ${(_sensitivityLevelsCache || SENSITIVITY_LEVEL_FALLBACK)
+                .map(
+                  (lv) =>
+                    `<option value="${escapeHtml(lv.code)}" ${
+                      filters.sensitivity_level === lv.code ? "selected" : ""
+                    }>${escapeHtml(lv.label)}</option>`
+                )
+                .join("")}
+            </select>
+            <select class="form-control" data-faq-compound aria-label="复合题筛选">
+              <option value="" ${!filters.is_compound ? "selected" : ""}>全部题型</option>
+              <option value="true" ${filters.is_compound === "true" ? "selected" : ""}>仅复合题</option>
+              <option value="false" ${filters.is_compound === "false" ? "selected" : ""}>非复合题</option>
+            </select>
+            <select class="form-control" data-faq-source-doc aria-label="来源文档">
+              <option value="">全部来源文档</option>
+              ${docOptions
+                .map(
+                  (d) =>
+                    `<option value="${escapeHtml(d.id)}" ${String(d.id) === String(filters.source_doc_id) ? "selected" : ""}>${escapeHtml(d.filename || d.name || d.id)}</option>`
+                )
+                .join("")}
+            </select>
+            <input class="form-control" data-faq-keyword placeholder="搜索问题/答案" value="${escapeHtml(filters.keyword)}" aria-label="搜索问题或答案" />
+            <div class="faq-toolbar-actions">
               <button type="button" class="btn btn-secondary btn-sm" data-faq-refresh>刷新</button>
               ${
                 canWrite
-                  ? `<button type="button" class="btn btn-sm" data-faq-toggle>${data.faq_enabled ? "关闭命中" : "开启命中"}</button>
-                     <button type="button" class="btn btn-sm" data-faq-regen>重新生成</button>
-                     <button type="button" class="btn btn-sm" data-faq-batch-approve>批量通过</button>
-                     <button type="button" class="btn btn-danger btn-sm" data-faq-batch-disable>批量停用</button>`
+                  ? `<button type="button" class="btn btn-sm" data-faq-regen>重新生成</button>
+                     <button type="button" class="btn btn-sm" data-faq-batch-approve>通过</button>
+                     <button type="button" class="btn btn-sm" data-faq-batch-sens>修改密级</button>
+                     <button type="button" class="btn btn-danger btn-sm" data-faq-batch-disable>停用</button>
+                     <button type="button" class="btn btn-danger btn-sm" data-faq-batch-delete>删除</button>`
                   : ""
               }
             </div>
           </div>
-          <div class="table-wrap"><table class="table">
+          <div class="table-wrap"><table class="table table-kb-faqs">
+            <colgroup>
+              <col class="faq-col-check" />
+              <col class="faq-col-question" />
+              <col class="faq-col-answer" />
+              <col class="faq-col-status" />
+              <col class="faq-col-sens" />
+              <col class="faq-col-quality" />
+              <col class="faq-col-hits" />
+              <col class="faq-col-source" />
+              <col class="faq-col-actions" />
+            </colgroup>
             <thead><tr>
-              <th style="width:36px"><input type="checkbox" data-faq-check-all /></th>
-              <th>问题</th><th>答案摘要</th><th>状态</th><th>质量</th><th>命中</th><th>来源</th><th class="col-actions">操作</th>
+              <th class="col-check"><input type="checkbox" data-faq-check-all /></th>
+              <th class="col-question">问题</th>
+              <th class="col-answer">答案摘要</th>
+              <th class="col-status">状态</th>
+              <th class="col-sens">密级</th>
+              <th class="col-quality">质量</th>
+              <th class="col-hits">命中</th>
+              <th class="col-source">来源</th>
+              <th class="col-actions">操作</th>
             </tr></thead>
             <tbody>
               ${
                 items.length
-                  ? items
-                      .map(
-                        (item) => `<tr data-faq-id="${escapeHtml(item.id)}">
-                          <td><input type="checkbox" data-faq-check value="${escapeHtml(item.id)}" /></td>
-                          <td title="${escapeHtml(item.question)}">${escapeHtml(item.question)}</td>
-                          <td style="max-width:280px">${escapeHtml((item.answer || "").slice(0, 120))}${(item.answer || "").length > 120 ? "…" : ""}</td>
-                          <td><span class="badge ${item.status === "active" ? "badge-success" : item.status === "pending_review" ? "badge-warning" : "badge-danger"}">${escapeHtml(item.status)}</span></td>
-                          <td>${escapeHtml(String(item.quality_score ?? "-"))}</td>
-                          <td>${escapeHtml(fmtCount(item.hit_count ?? 0))}</td>
-                          <td>${escapeHtml(item.source || "")}</td>
+                  ? orderFaqsAsTree(items)
+                      .map(({ item, depth, orphanChild }) => {
+                        const isSplitChild = Boolean(item.split_from_id);
+                        const compoundTip =
+                          item.is_compound && !isSplitChild
+                            ? `<span class="badge badge-warning" title="疑似一题多问">复合</span> `
+                            : "";
+                        const treeMark =
+                          depth > 0
+                            ? `<span class="faq-tree-mark" aria-hidden="true">└</span><span class="faq-child-badge">子问</span>`
+                            : orphanChild
+                              ? `<span class="faq-child-badge" title="父条不在本页">子问</span>`
+                              : "";
+                        const primaryBtn = canWrite
+                          ? `<button type="button" class="btn btn-text btn-sm" data-faq-edit>编辑</button>`
+                          : `<button type="button" class="btn btn-text btn-sm" data-faq-view>查看</button>`;
+                        const isSplitParent =
+                          item.status === "disabled" && item.stale_reason === "split_parent";
+                        // 仅复合题且非拆分子条可拆；不可拆不显示任何拆相关按钮
+                        let splitActionBtn = "";
+                        if (canWrite && isSplitParent) {
+                          splitActionBtn = `<button type="button" class="btn btn-text btn-sm" data-faq-revoke-split>撤销拆分</button>`;
+                        } else if (
+                          canWrite &&
+                          item.is_compound &&
+                          !isSplitChild &&
+                          !isSplitParent &&
+                          item.status !== "disabled"
+                        ) {
+                          splitActionBtn = `<button type="button" class="btn btn-text btn-sm" data-faq-split>可拆单问</button>`;
+                        }
+                        const rowClass = depth > 0 || orphanChild ? "faq-row-child" : "";
+                        return `<tr class="${rowClass}" data-faq-id="${escapeHtml(item.id)}"${
+                          item.split_from_id
+                            ? ` data-faq-parent="${escapeHtml(item.split_from_id)}"`
+                            : ""
+                        }>
+                          <td class="col-check"><input type="checkbox" data-faq-check value="${escapeHtml(item.id)}" /></td>
+                          <td class="col-question">${treeMark}${compoundTip}${escapeHtml(item.question)}</td>
+                          <td class="col-answer">${escapeHtml(item.answer || "")}</td>
+                          <td class="col-status">${faqStatusBadgeHtml(item.status)}</td>
+                          <td class="col-sens">${sensitivityBadgeHtml(item.sensitivity_level)}</td>
+                          <td class="col-quality">${escapeHtml(String(item.quality_score ?? "-"))}</td>
+                          <td class="col-hits">${escapeHtml(fmtCount(item.hit_count ?? 0))}</td>
+                          <td class="col-source">${escapeHtml(faqSourceLabel(item.source))}${
+                            isSplitParent
+                              ? `<div class="text-muted" style="font-size:11px">已拆分（父条）</div>`
+                              : isSplitChild
+                                ? `<div class="text-muted" style="font-size:11px">${
+                                    orphanChild ? "拆分子问 · 父条不在本页" : "拆分子问"
+                                  }</div>`
+                                : item.stale_reason === "split_revoked"
+                                  ? `<div class="text-muted" style="font-size:11px">撤销拆分已停用</div>`
+                                  : ""
+                          }</td>
                           <td class="col-actions">
-                            <button type="button" class="btn btn-text btn-sm" data-faq-view>查看</button>
-                            ${canWrite ? `<button type="button" class="btn btn-text btn-sm" data-faq-edit>编辑</button>` : ""}
+                            <div class="table-actions faq-actions">
+                              ${splitActionBtn}
+                              ${primaryBtn}
+                            </div>
                           </td>
-                        </tr>`
-                      )
+                        </tr>`;
+                      })
                       .join("")
-                  : `<tr><td colspan="8" class="text-muted">该知识库暂无 FAQ</td></tr>`
+                  : `<tr><td colspan="9" class="text-muted">该知识库暂无 FAQ</td></tr>`
               }
             </tbody>
           </table></div>
+          <div class="table-card-footer">
+            <div class="table-card-footer-start"></div>
+            <div class="pager" id="faqPager">
+              ${pageButtons}
+              ${pageJump}
+            </div>
+          </div>
         </div>`;
 
-      root.querySelector("[data-faq-kb]").onchange = (e) => {
-        selectedKb = e.target.value;
+      const applyFilterNav = (patch) => {
+        if (pushFaqQuery({ ...patch, page: patch.page != null ? patch.page : 1 })) return;
+        Object.assign(filters, patch);
         paint().catch((err) => toast(err.message, "error"));
       };
-      root.querySelector("[data-faq-refresh]").onclick = () => paint().catch((err) => toast(err.message, "error"));
-      root.querySelector("[data-faq-status]").onchange = () => paint().catch((err) => toast(err.message, "error"));
+
+      root.querySelector("[data-faq-refresh]").onclick = async () => {
+        const btn = root.querySelector("[data-faq-refresh]");
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "刷新中…";
+        }
+        try {
+          await paint();
+          toast("已刷新", "success");
+        } catch (err) {
+          toast(err.message || "刷新失败", "error");
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = "刷新";
+          }
+        }
+      };
+      root.querySelector("[data-faq-status]").onchange = (e) => applyFilterNav({ status: e.target.value });
+      root.querySelector("[data-faq-sens-filter]").onchange = (e) =>
+        applyFilterNav({ sensitivity_level: e.target.value });
+      root.querySelector("[data-faq-compound]").onchange = (e) => applyFilterNav({ is_compound: e.target.value });
+      root.querySelector("[data-faq-source-doc]").onchange = (e) =>
+        applyFilterNav({ source_doc_id: e.target.value || "" });
       root.querySelector("[data-faq-keyword]").onkeydown = (e) => {
-        if (e.key === "Enter") paint().catch((err) => toast(err.message, "error"));
+        if (e.key === "Enter") applyFilterNav({ keyword: e.target.value || "" });
       };
       root.querySelector("[data-faq-check-all]")?.addEventListener("change", (e) => {
         root.querySelectorAll("[data-faq-check]").forEach((el) => {
           el.checked = e.target.checked;
         });
       });
+      const pager = document.getElementById("faqPager");
+      if (pager) {
+        bindCompactPager(pager, {
+          page: listPage,
+          totalPages,
+          onGo: (p) => applyFilterNav({ page: p }),
+        });
+      }
       const selectedIds = () => Array.from(root.querySelectorAll("[data-faq-check]:checked")).map((el) => el.value);
       if (canWrite) {
-        root.querySelector("[data-faq-toggle]").onclick = async () => {
-          try {
-            await api.post(`/knowledge-bases/${selectedKb}/faq/toggle`, { enabled: !data.faq_enabled });
-            toast("已更新知识库 FAQ 开关");
-            await paint();
-          } catch (err) {
-            toast(err.message, "error");
-          }
-        };
         root.querySelector("[data-faq-regen]").onclick = async () => {
+          const okConfirm = await confirmDialog({
+            title: "重新生成 FAQ",
+            message: "将为当前库全部「已就绪」文档排队生成 FAQ，按文档串行执行，可能较久。确定继续？",
+            confirmText: "重新生成",
+          });
+          if (!okConfirm) return;
           try {
             const res = await api.post(`/admin/knowledge-bases/${selectedKb}/regenerate-faq`, {});
-            toast(res.task_id ? `已排队：${res.task_id}` : "已排队重新生成");
+            const n = res.document_count ?? res.data?.document_count;
+            const tid = res.task_id || res.data?.task_id || "";
+            toast(
+              typeof n === "number"
+                ? `已排队 ${n} 个文档${tid ? `（${String(tid).slice(0, 8)}…）` : ""}，后台串行生成中`
+                : tid
+                  ? `已排队：${tid}`
+                  : "已排队重新生成"
+            );
+            await paint();
+            // 短轮询刷新，便于看到数量变化
+            const started = Date.now();
+            const poll = async () => {
+              if (Date.now() - started > 120000) return;
+              try {
+                await paint();
+              } catch {
+                /* ignore */
+              }
+              setTimeout(poll, 15000);
+            };
+            setTimeout(poll, 15000);
           } catch (err) {
             toast(err.message, "error");
           }
@@ -6763,7 +7726,34 @@ async function pageKbFaqs() {
           if (!ids.length) return toast("请先勾选 FAQ", "error");
           try {
             await api.post("/admin/faq/batch", { action: "approve", faq_ids: ids });
-            toast("已批量通过");
+            toast("已通过");
+            await paint();
+          } catch (err) {
+            toast(err.message, "error");
+          }
+        };
+        root.querySelector("[data-faq-batch-sens]").onclick = async () => {
+          const ids = selectedIds();
+          if (!ids.length) return toast("请先勾选 FAQ", "error");
+          await ensureSensitivityLevels();
+          const result = await openWideModal({
+            title: "修改 FAQ 敏感等级",
+            bodyHtml: `<label class="text-muted">将已勾选的 ${ids.length} 条 FAQ 设为</label>
+              <select class="form-control" id="faqSensLevel" style="margin-top:8px">${sensitivityOptionsHtml("normal")}</select>
+              <p class="text-muted" style="margin:10px 0 0;font-size:12px">仅改 FAQ 自身密级，不影响来源文档。</p>`,
+            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+              <button type="button" class="btn" data-act="ok">保存</button>`,
+          });
+          if (!result) return;
+          const level = result.root.querySelector("#faqSensLevel")?.value || "normal";
+          result.root.remove();
+          try {
+            const res = await api.post("/admin/faq/batch", {
+              action: "set_sensitivity",
+              faq_ids: ids,
+              sensitivity_level: level,
+            });
+            toast(`已更新密级 ${res.affected ?? ids.length} 条`, "success");
             await paint();
           } catch (err) {
             toast(err.message, "error");
@@ -6774,7 +7764,25 @@ async function pageKbFaqs() {
           if (!ids.length) return toast("请先勾选 FAQ", "error");
           try {
             await api.post("/admin/faq/batch", { action: "disable", faq_ids: ids });
-            toast("已批量停用");
+            toast("已停用");
+            await paint();
+          } catch (err) {
+            toast(err.message, "error");
+          }
+        };
+        root.querySelector("[data-faq-batch-delete]").onclick = async () => {
+          const ids = selectedIds();
+          if (!ids.length) return toast("请先勾选 FAQ", "error");
+          const ok = await confirmDialog({
+            title: "删除 FAQ",
+            message: `将永久删除已勾选的 ${ids.length} 条 FAQ，确定继续？`,
+            confirmText: "删除",
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            await api.post("/admin/faq/batch", { action: "delete", faq_ids: ids });
+            toast("已删除");
             await paint();
           } catch (err) {
             toast(err.message, "error");
@@ -6784,9 +7792,35 @@ async function pageKbFaqs() {
       root.querySelectorAll("[data-faq-id]").forEach((row) => {
         const id = row.getAttribute("data-faq-id");
         const item = items.find((x) => x.id === id);
-        row.querySelector("[data-faq-view]").onclick = () => openKbFaqDetail(item, { canWrite, onSaved: paint });
+        const viewBtn = row.querySelector("[data-faq-view]");
+        if (viewBtn) viewBtn.onclick = () => openKbFaqDetail(item, { canWrite: false, onSaved: paint });
         const editBtn = row.querySelector("[data-faq-edit]");
         if (editBtn) editBtn.onclick = () => openKbFaqDetail(item, { canWrite, edit: true, onSaved: paint });
+        const splitBtn = row.querySelector("[data-faq-split]");
+        if (splitBtn) {
+          splitBtn.onclick = async () => {
+            const ok = await confirmDialog({
+              title: "可拆单问",
+              message: "将调用模型把该 FAQ 拆成多条单意图问题；原条目会停用并标记为「已拆分（父条）」。确定继续？",
+            });
+            if (!ok) return;
+            splitBtn.disabled = true;
+            splitBtn.textContent = "拆分中…";
+            try {
+              const res = await api.post(`/admin/faq/${id}/split`, {});
+              toast(`已拆成 ${res.child_count || 0} 条`);
+              await paint();
+            } catch (err) {
+              toast(err.message, "error");
+              splitBtn.disabled = false;
+              splitBtn.textContent = "可拆单问";
+            }
+          };
+        }
+        const revokeBtn = row.querySelector("[data-faq-revoke-split]");
+        if (revokeBtn) {
+          revokeBtn.onclick = () => openFaqSplitRevokeDialog(item, { onDone: paint });
+        }
       });
     };
     await paint();
@@ -6795,12 +7829,97 @@ async function pageKbFaqs() {
   }
 }
 
+/** 撤销拆分：列出子问，勾选要停用的项；未勾选保留；父条恢复。 */
+async function openFaqSplitRevokeDialog(item, options = {}) {
+  if (!item?.id) return;
+  let children = [];
+  try {
+    const data = await api.get(`/admin/faq/${item.id}/split-children`);
+    children = data.children || [];
+  } catch (err) {
+    toast(err.message || "加载子问失败", "error");
+    return;
+  }
+
+  const listHtml = children.length
+    ? children
+        .map((c) => {
+          const disabled = !c.available;
+          const statusText =
+            c.status === "deleted" ? "已删除" : faqStatusLabel(c.status) || c.status || "-";
+          return `<label class="faq-revoke-item ${disabled ? "is-disabled" : ""}" style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--table-divider,rgba(0,0,0,.06))">
+            <input type="checkbox" data-revoke-child value="${escapeHtml(c.id)}" ${disabled ? "disabled" : "checked"} style="margin-top:4px" />
+            <span style="min-width:0;flex:1">
+              <span style="display:block;line-height:1.45">${escapeHtml(c.question || "")}</span>
+              <span class="text-muted" style="font-size:12px">${escapeHtml(statusText)}${disabled ? " · 不可选" : ""}</span>
+            </span>
+          </label>`;
+        })
+        .join("")
+    : `<p class="text-muted" style="margin:0">未找到拆分产生的子问。仍可只恢复父条。</p>`;
+
+  const result = await openWideModal({
+    title: "撤销拆分",
+    width: "min(640px,calc(100vw - 24px))",
+    bodyHtml: `
+      <p style="margin:0 0 12px;line-height:1.55">是否撤销已拆单问？将<strong>恢复父条</strong>；勾选的子问会<strong>停用</strong>（不删除）；未勾选的子问保留。</p>
+      <p class="text-muted" style="margin:0 0 8px;font-size:12px">父条：${escapeHtml((item.question || "").slice(0, 120))}</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
+        <strong style="font-size:13px">已拆单问</strong>
+        <span>
+          <button type="button" class="btn btn-text btn-sm" data-revoke-all>全选</button>
+          <button type="button" class="btn btn-text btn-sm" data-revoke-none>全不选</button>
+        </span>
+      </div>
+      <div data-revoke-list style="max-height:min(360px,50vh);overflow:auto">${listHtml}</div>
+    `,
+    actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
+      <button type="button" class="btn" data-act="ok">确认撤销</button>`,
+    onReady: (root) => {
+      root.querySelector("[data-revoke-all]")?.addEventListener("click", () => {
+        root.querySelectorAll("[data-revoke-child]:not(:disabled)").forEach((el) => {
+          el.checked = true;
+        });
+      });
+      root.querySelector("[data-revoke-none]")?.addEventListener("click", () => {
+        root.querySelectorAll("[data-revoke-child]:not(:disabled)").forEach((el) => {
+          el.checked = false;
+        });
+      });
+    },
+  });
+  if (!result) return;
+  const selected = Array.from(result.root.querySelectorAll("[data-revoke-child]:checked")).map(
+    (el) => el.value
+  );
+  result.root.remove();
+  try {
+    const res = await api.post(`/admin/faq/${item.id}/split-revoke`, { child_ids: selected });
+    const n = res.revoked_count || 0;
+    toast(n ? `已恢复父条，并停用 ${n} 条子问` : "已恢复父条（未停用子问）");
+    if (options.onDone) await options.onDone();
+  } catch (err) {
+    toast(err.message || "撤销失败", "error");
+  }
+}
+
 async function openKbFaqDetail(item, options = {}) {
   if (!item) return;
   const canWrite = Boolean(options.canWrite);
   const edit = Boolean(options.edit);
+  await ensureSensitivityLevels();
+  const level = item.sensitivity_level || "normal";
   const mask = document.createElement("div");
   mask.className = "modal-mask";
+  const compoundNote = item.is_compound ? " · 疑似复合题" : "";
+  const staleNote =
+    item.stale_reason === "split_parent"
+      ? " · 已拆分（父条）"
+      : item.stale_reason === "split_revoked"
+        ? " · 撤销拆分已停用"
+        : item.stale_reason
+          ? ` · ${escapeHtml(item.stale_reason)}`
+          : "";
   mask.innerHTML = `
     <div class="modal" role="dialog" aria-modal="true" style="width:min(720px,calc(100vw - 24px));max-height:90vh;overflow:auto">
       <div class="modal-header"><h3 style="margin:0">FAQ 详情</h3></div>
@@ -6809,7 +7928,11 @@ async function openKbFaqDetail(item, options = {}) {
         <textarea class="form-control" data-faq-q rows="2" ${canWrite && edit ? "" : "readonly"}>${escapeHtml(item.question || "")}</textarea>
         <label class="form-label" style="margin-top:12px">答案</label>
         <textarea class="form-control" data-faq-a rows="8" ${canWrite && edit ? "" : "readonly"}>${escapeHtml(item.answer || "")}</textarea>
-        <p class="text-muted" style="margin-top:12px">状态 ${escapeHtml(item.status || "")} · 来源 ${escapeHtml(item.source || "")} · 命中 ${escapeHtml(fmtCount(item.hit_count || 0))}</p>
+        <label class="form-label" style="margin-top:12px">敏感等级</label>
+        <select class="form-control" data-faq-sens ${canWrite && edit ? "" : "disabled"}>
+          ${sensitivityOptionsHtml(level)}
+        </select>
+        <p class="text-muted" style="margin-top:12px">状态 ${escapeHtml(faqStatusLabel(item.status))} · 来源 ${escapeHtml(faqSourceLabel(item.source))} · 命中 ${escapeHtml(fmtCount(item.hit_count || 0))}${compoundNote}${staleNote}</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-close>关闭</button>
@@ -6828,6 +7951,7 @@ async function openKbFaqDetail(item, options = {}) {
         await api.put(`/admin/faq/${item.id}`, {
           question: mask.querySelector("[data-faq-q]").value,
           answer: mask.querySelector("[data-faq-a]").value,
+          sensitivity_level: mask.querySelector("[data-faq-sens]").value,
         });
         toast("已保存");
         mask.remove();
@@ -7182,10 +8306,18 @@ async function pageAudit() {
   };
 
   const load = async () => {
+    await ensureSensitivityLevels();
     const data = await fetchAuditPage(listPage, AUDIT_PAGE_SIZE);
     const items = data.items || [];
     const total = Number(data.total ?? items.length) || 0;
     const totalPages = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE) || 1);
+    let sensItems = [];
+    try {
+      const sensData = await api.get("/admin/sensitivity/audit?page=1&size=20");
+      sensItems = sensData.items || [];
+    } catch (_) {
+      sensItems = [];
+    }
     auditTotalPages = totalPages;
     if (listPage > totalPages) {
       listPage = totalPages;
@@ -7198,8 +8330,38 @@ async function pageAudit() {
     document.getElementById("pageRoot").innerHTML = `
       ${pageHead({
         title: "审计日志",
-        desc: "记录操作者、时间、对象、请求标识与结果。可按全部页面 / 指定页码 / 已选数据导出 CSV。",
+        desc: "记录操作者、时间、对象、请求标识与结果。可按全部页面 / 指定页码 / 已选数据导出 CSV。敏感访问与库密级配置见下方「敏感访问」区块。",
       })}
+      <div class="card panel-fill" style="margin-bottom:16px">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">敏感访问</h3>
+            <p class="card-sub">拒答与库默认/同步配置变更（最近 20 条）</p>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>时间</th><th>用户</th><th>动作</th><th>密级</th><th>来源</th><th>问题/说明</th></tr></thead>
+          <tbody>
+            ${
+              sensItems.length
+                ? sensItems
+                    .map((a) => {
+                      const detailText = sensAuditDetailText(a);
+                      return `<tr>
+                      <td class="col-time">${formatDateTimeHtml(a.created_at)}</td>
+                      <td>${escapeHtml(a.user_id || "访客")}</td>
+                      <td>${escapeHtml(actionLabel(a.action))}</td>
+                      <td>${escapeHtml(sensitivityLabel(a.sensitivity_level))}</td>
+                      <td>${escapeHtml(sensAuditSourceLabel(a.source))}</td>
+                      <td title="${escapeHtml(detailText)}">${escapeHtml(String(detailText).slice(0, 80))}</td>
+                    </tr>`;
+                    })
+                    .join("")
+                : `<tr><td colspan="6" class="text-muted">暂无敏感审计记录</td></tr>`
+            }
+          </tbody>
+        </table></div>
+      </div>
       <div class="card panel-fill">
         <div class="card-header">
           <div class="card-header-text">
@@ -7529,30 +8691,76 @@ async function pageQaAnalytics() {
     ? renderCountList(cacheDist, cacheLabelOf)
     : `<p class="text-muted">暂无缓存分布</p>`;
 
-  const topicItems = Array.isArray(topics?.items) ? topics.items : [];
-  const topicChartHtml = topicItems.length
-    ? renderBars(
-        topicItems.slice(0, 12).map((x) => x.sample_count || 0),
-        { labels: topicItems.slice(0, 12).map((x) => x.name || "—") }
-      )
-    : `<p class="text-muted">暂无主题簇。可点击「重建主题」从近期问答事件聚合关键词。</p>`;
-  const topicTableHtml = topicItems.length
-    ? `<div class="table-wrap"><table class="data-table">
-        <thead><tr><th>主题</th><th>关键词</th><th>样本数</th><th>代表问题</th></tr></thead>
-        <tbody>${topicItems
+  const topicItemsAll = Array.isArray(topics?.items) ? topics.items : [];
+  const TOPIC_DISPLAY_TOP = 12;
+
+  /** 同一代表问题合并为一行；主题/关键词去重后用顿号拼接；样本数取最大避免重复计数。 */
+  const mergeTopicsByQuestion = (items) => {
+    const map = new Map();
+    for (const t of items || []) {
+      const q = String(t.representative_question || "").trim() || "—";
+      const themes = [];
+      const pushTheme = (v) => {
+        const s = String(v || "").trim();
+        if (s && !themes.includes(s)) themes.push(s);
+      };
+      pushTheme(t.name);
+      if (Array.isArray(t.keywords)) t.keywords.forEach(pushTheme);
+      else if (typeof t.keywords === "string") pushTheme(t.keywords);
+      const count = Number(t.sample_count || 0) || 0;
+      const hit = map.get(q);
+      if (!hit) {
+        map.set(q, { representative_question: q, themes: [...themes], sample_count: count });
+      } else {
+        themes.forEach((th) => {
+          if (!hit.themes.includes(th)) hit.themes.push(th);
+        });
+        hit.sample_count = Math.max(hit.sample_count, count);
+      }
+    }
+    return [...map.values()].sort((a, b) => b.sample_count - a.sample_count);
+  };
+
+  const topicMergedAll = mergeTopicsByQuestion(topicItemsAll);
+  const topicItems = topicMergedAll.slice(0, TOPIC_DISPLAY_TOP);
+  const buildTopicChartHtml = (rows) =>
+    rows.length
+      ? renderBars(
+          rows.map((x) => x.sample_count || 0),
+          {
+            labels: rows.map((x) => x.themes?.[0] || x.representative_question || "—"),
+            height: 132,
+          }
+        )
+      : `<p class="text-muted">暂无主题簇。可点击「重建主题」从近期问答事件聚合关键词。</p>`;
+  const buildTopicTableHtml = (rows) =>
+    rows.length
+      ? `<div class="table-wrap"><table class="table data-table table-topics">
+        <colgroup>
+          <col class="topics-col-q" />
+          <col class="topics-col-themes" />
+          <col class="topics-col-count" />
+        </colgroup>
+        <thead><tr>
+          <th class="col-topic-q">代表问题</th>
+          <th class="col-topic-themes">主题</th>
+          <th class="col-num">样本数</th>
+        </tr></thead>
+        <tbody>${rows
           .map((t) => {
-            const kws = Array.isArray(t.keywords) ? t.keywords.join("、") : "";
+            const themesText = (t.themes || []).join("、") || "—";
+            const q = t.representative_question || "—";
             return `<tr>
-              <td>${escapeHtml(t.name || "—")}</td>
-              <td class="text-muted">${escapeHtml(kws || "—")}</td>
-              <td>${escapeHtml(fmtCount(t.sample_count || 0))}</td>
-              <td class="text-muted" title="${escapeHtml(t.representative_question || "")}">${escapeHtml(
-                (t.representative_question || "—").slice(0, 80)
-              )}</td>
+              <td class="col-topic-q" title="${escapeHtml(q)}">${escapeHtml(String(q))}</td>
+              <td class="col-topic-themes text-muted" title="${escapeHtml(themesText)}">${escapeHtml(themesText)}</td>
+              <td class="col-num">${escapeHtml(fmtCount(t.sample_count || 0))}</td>
             </tr>`;
           })
           .join("")}</tbody></table></div>`
-    : "";
+      : "";
+
+  const topicChartHtml = buildTopicChartHtml(topicItems);
+  const topicTableHtml = buildTopicTableHtml(topicItems);
 
   document.getElementById("pageRoot").innerHTML = `
     ${pageHead({
@@ -7599,8 +8807,9 @@ async function pageQaAnalytics() {
     <div class="card span-12">
       <div class="card-header">
         <div class="card-header-text"><h3 class="card-title">问题主题分布</h3>
-        <p class="card-sub">关键词粗聚类 · 仅聚合数据，不含完整问答原文</p></div>
+        <p class="card-sub">按代表问题合并主题 · 展示样本数 Top ${TOPIC_DISPLAY_TOP}（重建最多 20 个且频次≥2）· 仅聚合数据</p></div>
         <div class="card-header-actions">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnTopicsRefresh">刷新</button>
           <button type="button" class="btn btn-secondary btn-sm" id="btnTopicsRebuild">重建主题</button>
         </div>
       </div>
@@ -7610,6 +8819,34 @@ async function pageQaAnalytics() {
     </div>`;
 
   document.getElementById("btnQaAnalyticsRefresh")?.addEventListener("click", () => pageQaAnalytics());
+
+  const paintTopicsBlock = (rows) => {
+    const chartEl = document.getElementById("qaTopicChart");
+    const tableEl = document.getElementById("qaTopicTable");
+    if (chartEl) chartEl.innerHTML = buildTopicChartHtml(rows);
+    if (tableEl) tableEl.innerHTML = buildTopicTableHtml(rows);
+  };
+
+  const btnTopicsRefresh = document.getElementById("btnTopicsRefresh");
+  if (btnTopicsRefresh) {
+    btnTopicsRefresh.onclick = async () => {
+      btnTopicsRefresh.disabled = true;
+      const oldText = btnTopicsRefresh.textContent;
+      btnTopicsRefresh.textContent = "刷新中…";
+      try {
+        const fresh = (await api.get("/monitor/analytics/topics")) || { items: [] };
+        const merged = mergeTopicsByQuestion(fresh.items || []).slice(0, TOPIC_DISPLAY_TOP);
+        paintTopicsBlock(merged);
+        toast("主题已刷新", "success");
+      } catch (e) {
+        toast(e.message || "刷新失败", "error");
+      } finally {
+        btnTopicsRefresh.disabled = false;
+        btnTopicsRefresh.textContent = oldText || "刷新";
+      }
+    };
+  }
+
   const btnRebuild = document.getElementById("btnTopicsRebuild");
   if (btnRebuild) {
     btnRebuild.onclick = async () => {
@@ -7636,6 +8873,9 @@ async function pageMonitor() {
     clearInterval(monitorHealthTimer);
     monitorHealthTimer = null;
   }
+
+  const root = document.getElementById("pageRoot");
+  root.innerHTML = `<div class="loading">加载系统监控…</div>`;
 
   const HEALTH_LABELS = {
     postgres: "PostgreSQL",
@@ -7738,7 +8978,7 @@ async function pageMonitor() {
         <li><span class="monitor-stat-label">LLM Guard 近 7 天阻拦</span><span class="monitor-stat-value">${escapeHtml(fmtCount(stats.guard_blocked_7d ?? 0))}</span></li>
       </ul>`
       : `<p class="text-muted">${escapeHtml(stats?.error || "暂无统计")}</p>`;
-  document.getElementById("pageRoot").innerHTML = `
+  root.innerHTML = `
     ${pageHead({
       title: "系统监控",
       desc: "健康检查、运行统计与 Grafana 面板。",
@@ -8252,6 +9492,7 @@ async function pageFastApi() {
   "/admin/ragas",
   "/admin/qa-sessions",
   "/admin/kb-faqs",
+  "/admin/sensitivity",
   "/admin/hit-test",
   "/admin/qa-analytics",
   "/admin/audit",

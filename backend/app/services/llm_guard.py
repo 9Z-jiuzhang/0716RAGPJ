@@ -131,6 +131,27 @@ class GuardDecision:
 class LLMGuardService:
     """输入安全检查、意图分类和阻拦审计服务。"""
 
+    async def evaluate_local_gate(
+        self,
+        db: AsyncSession,
+        *,
+        question: str,
+        user: User | None,
+        guest_id: str | None,
+        client_ip: str | None = None,
+    ) -> GuardDecision:
+        """仅本地规则层（毫秒级）：明确恶意立即拦截；其余放行，完整 LLM Guard 延后。"""
+        if not settings.LLM_GUARD_ENABLED:
+            return GuardDecision(True, "unknown", 0.0, "guard_disabled", "disabled")
+
+        local = self._evaluate_local(question)
+        if local is not None:
+            if not local.allowed:
+                await self._record_block(db, question, user, guest_id, local, client_ip=client_ip)
+            return local
+        # 本地无法定性：先放行，供 FAQ 秒答；未命中 FAQ 后再走完整 evaluate。
+        return GuardDecision(True, "unknown", 0.4, "local_rules_passed", "rule")
+
     async def evaluate(
         self,
         db: AsyncSession,

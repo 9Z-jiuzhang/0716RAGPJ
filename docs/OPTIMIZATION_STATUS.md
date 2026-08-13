@@ -3,7 +3,7 @@
 > 本文描述**当前仓库已落地能力**；高风险能力默认开关关闭，开启后即可生效。  
 > 外部「六维核查修订版」计划文档包不在本仓库内；以本文与 `.env.example` / `config.py` 为准。
 
-最后核对日期：2026-07-31（含端口 9xxx、自建 Langfuse、Chroma 9800→8000 映射说明）。
+最后核对日期：2026-08-13（含 FAQ Cache V2.0 一期、快照 FAQ、密级门控）。
 
 ## 总览
 
@@ -16,6 +16,7 @@
 | W4 | Session V2、L1–L4 缓存、0.80 语义门控 | **已完成（默认保守）** |
 | W5 | 多副本样例、Scheduler、有界并发、队列观察入队 | **已完成（默认保守）** |
 | W6 | VectorStorePort、统计图表、主题粗聚类 | **已完成（默认 chroma 读）** |
+| FAQ-V2.0 | 知识库 FAQ 缓存一期（`ZY_Cache_V2.0`） | **已完成**；二期见 `docs/FAQ_PHASE2_ACCEPTANCE.md` |
 
 ### 计划内故意保留的默认
 
@@ -126,3 +127,26 @@
 | V3.2 | 左右分栏（左宣言 / 右预览）；副标题打字机轮播；CTA「立即登录」「访客登录」；9Z logo；`brand-mark.js` 落地页与管理端侧栏共用（localStorage 同步构图） |
 | 共享资源 | `frontend/shared/js/env-particle-field.js`、`brand-mark.js`、`img/logo-9z.png` |
 | 验证 | 本机入口 http://localhost:9080/ ；硬刷新以绕过 CSS/JS cache-bust |
+
+## 知识库 FAQ 缓存一期（ZY_Cache_V2.0，2026-08-13）
+
+与「按角色缓存」解耦的产品能力，详见 [`KB_FAQ.md`](KB_FAQ.md)：
+
+| 项 | 说明 |
+|----|------|
+| 主缓存 | `kb_cached_faqs`；精确键 `kb_id + normalized_question` |
+| 生成 | 文档 `ready` 后异步；默认 25/文档、500/库 |
+| 命中 | FAQ 秒答优先于多级 QA 缓存 / 角色只读回退 / RAG |
+| 访客 | 热门列表点选秒答；同题粘贴亦可短路体验 |
+| 密级 | FAQ 命中与热门按 `user_max_level` 过滤 |
+| 快照 | `snapshot_faqs`；回退还原 FAQ，重建跳过重新生成 |
+| 角色缓存 | 停写；`ROLE_CACHE_READONLY_FALLBACK` 过渡期可读 |
+| 二期 | 语义命中、QA 缓存密级键、文档 API 对齐等 → [`FAQ_PHASE2_ACCEPTANCE.md`](FAQ_PHASE2_ACCEPTANCE.md) |
+
+## 已知边界（FAQ 相关，二期处理）
+
+1. FAQ **无语义命中**（`embedding` 字段预留）；近义题仍可能走 RAG。
+2. L3 语义 QA 缓存仍多为观察/空候选。
+3. QA 精确缓存键尚未纳入密级（跨密级泄漏风险，二期 B1）。
+4. 角色缓存只读回退尚未最终关闭（二期 B3）。
+

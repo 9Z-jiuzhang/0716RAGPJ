@@ -8,7 +8,7 @@ import uuid
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.models import User
-from app.schemas.document import UpdateChunkRequest, UpdateSegmentRulesRequest
+from app.schemas.document import DocumentSensitivityUpdate, UpdateChunkRequest, UpdateSegmentRulesRequest
 from app.schemas.response import ok
 from app.services import document_pipeline, document_service
 from app.utils.exceptions import DocumentError
@@ -98,7 +98,8 @@ async def get_document(
         doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
     except DocumentError as exc:
         _raise_doc_error(exc)
-    return ok(document_service.to_document_response(doc).model_dump())
+    data = await document_service.to_document_response_with_faq(db, doc)
+    return ok(data.model_dump())
 
 
 @router.get("/{doc_id}/content")
@@ -292,6 +293,28 @@ async def list_chunks(
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(data.model_dump())
+
+
+@router.put("/{doc_id}/sensitivity")
+async def update_document_sensitivity(
+    kb_id: str,
+    doc_id: str,
+    body: DocumentSensitivityUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission("doc:write")),
+):
+    """更新文档敏感等级，并同步到分段。"""
+    try:
+        doc = await document_service.update_document_sensitivity(
+            db,
+            _uuid(kb_id, "kb_id"),
+            _uuid(doc_id, "doc_id"),
+            body.sensitivity_level,
+            user,
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+    return ok(document_service.to_document_response(doc).model_dump())
 
 
 @router.put("/{doc_id}/chunks/{chunk_id}")

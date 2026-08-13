@@ -12,6 +12,7 @@ from app.core.database import SessionLocal
 from app.core.config import settings
 from app.models import DocumentChunk
 from app.models.enums import DocumentStatus, SnapshotTrigger
+from app.models.sensitivity import normalize_sensitivity_level
 from app.repositories import document as doc_repo
 from app.services import embedding, parsers, storage, vector_store
 from app.services.chunking import (
@@ -50,15 +51,24 @@ async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = 
                         skip_auto_snapshot=True,
                     )
             await db.commit()
+            # 文档就绪：清 L2 精确缓存，再异步生成 FAQ
+            try:
+                from app.services.qa_cache import qa_cache_service
+
+                await qa_cache_service.invalidate_by_kb(
+                    tenant_id=settings.FAQ_TENANT_ID,
+                    kb_ids=[doc.kb_id],
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("L2 cache invalidate after pipeline failed doc=%s", document_id, exc_info=True)
             # 就绪后异步生成 FAQ，不阻塞文档状态
             if settings.FAQ_GENERATION_ENABLED:
-                import asyncio
-
                 from app.services.kb_faq_service import kb_faq_service
 
-                asyncio.create_task(
-                    kb_faq_service.generate_from_document(document_id),
-                    name=f"kb-faq-gen-{document_id}",
+                await kb_faq_service.enqueue_document(
+                    document_id,
+                    kb_id=doc.kb_id,
+                    tenant_id=settings.FAQ_TENANT_ID,
                 )
                 logger.info("FAQ生成任务已入队 doc=%s", document_id)
         except Exception as exc:
@@ -96,12 +106,14 @@ async def run_resegment_pipeline(
     skip_auto_snapshot: bool = False,
     index_version: str | None = None,
     preserve_other_versions: bool = False,
+    skip_faq_generation: bool = False,
 ) -> None:
     """重分段 + 向量化（API re-segment 异步任务）。
 
     skip_auto_snapshot：回退重建等场景避免嵌套自动快照。
     index_version：写入向量库的目标索引版本（回退 building 版本）。
     preserve_other_versions：只改目标版本集合，不删其它版本向量。
+    skip_faq_generation：回退已还原 FAQ 时跳过重新生成，避免覆盖。
     """
     async with SessionLocal() as db:
         doc = await doc_repo.get_document_by_id(db, document_id)
@@ -141,14 +153,23 @@ async def run_resegment_pipeline(
                     preserve_other_versions=preserve_other_versions,
                 )
             await db.commit()
-            if settings.FAQ_GENERATION_ENABLED:
-                import asyncio
+            try:
+                from app.core.config import settings
+                from app.services.qa_cache import qa_cache_service
 
+                await qa_cache_service.invalidate_by_kb(
+                    tenant_id=settings.FAQ_TENANT_ID,
+                    kb_ids=[doc.kb_id],
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("L2 cache invalidate after resegment failed doc=%s", document_id, exc_info=True)
+            if settings.FAQ_GENERATION_ENABLED and not skip_faq_generation:
                 from app.services.kb_faq_service import kb_faq_service
 
-                asyncio.create_task(
-                    kb_faq_service.generate_from_document(document_id),
-                    name=f"kb-faq-reseg-{document_id}",
+                await kb_faq_service.enqueue_document(
+                    document_id,
+                    kb_id=doc.kb_id,
+                    tenant_id=settings.FAQ_TENANT_ID,
                 )
                 logger.info("FAQ生成任务已入队 doc=%s", document_id)
         except Exception as exc:
@@ -245,6 +266,7 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
             char_count=p.char_count,
             chunk_metadata=p.metadata,
             is_enabled=True,
+            sensitivity_level=normalize_sensitivity_level(getattr(doc, "sensitivity_level", None)),
         )
         for p in previews
     ]
@@ -396,6 +418,7 @@ async def run_rollback_rebuild(
                         skip_auto_snapshot=True,
                         index_version=target_version,
                         preserve_other_versions=True,
+                        skip_faq_generation=True,
                     )
                 else:
                     await _vectorize(

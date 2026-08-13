@@ -1782,6 +1782,16 @@ html[data-theme="light"] .table-actions .btn:not(.btn-danger):not(.btn-success):
   box-shadow: none !important;
 }
 
+/* 文档/内容密级：机密（琥珀橙，与鎏金极高密区分） */
+.badge-sens-confidential,
+.table .badge-sens-confidential {
+  background: color-mix(in srgb, #c45c26 16%, transparent) !important;
+  background-image: none !important;
+  border: none !important;
+  color: #c45c26 !important;
+  box-shadow: none !important;
+}
+
 /* 内置徽章：与 info 同色（主色蓝） */
 .table .col-builtin .badge,
 html[data-theme="dark"] .table .col-builtin .badge,
@@ -2110,9 +2120,9 @@ html[data-theme="dark"] .checkbox-grid {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: max-content;
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(480px, calc(100vw - 32px));
   pointer-events: none;
 }
 
@@ -2121,17 +2131,20 @@ html[data-theme="dark"] .checkbox-grid {
 }
 
 .toast {
-  min-width: 220px;
-  max-width: 360px;
-  padding: 12px 18px;
-  border-radius: 14px;
+  min-width: 280px;
+  max-width: 440px;
+  padding: 22px 26px;
+  border-radius: 16px;
   background: var(--card-glass-grad);
   backdrop-filter: blur(12px);
   border: var(--glass-border);
-  border-left: 3px solid var(--color-primary);
+  border-left: 4px solid var(--color-primary);
   box-shadow: var(--shadow-modal);
   color: var(--color-text-body);
   text-align: center;
+  font-size: 15px;
+  line-height: 1.5;
+  font-weight: 500;
   animation: rise-in 0.2s ease;
   transition: var(--theme-transition);
 }

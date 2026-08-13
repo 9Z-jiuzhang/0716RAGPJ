@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.base import utcnow
 from app.models.enums import SnapshotTrigger
-from app.models.snapshot import Snapshot, SnapshotDocument
+from app.models.snapshot import Snapshot, SnapshotDocument, SnapshotFAQ
 
 
 class SnapshotRepository:
@@ -23,7 +23,7 @@ class SnapshotRepository:
         """按 ID 查询快照（可限定知识库），含文档列表。"""
         stmt = (
             select(Snapshot)
-            .options(selectinload(Snapshot.documents))
+            .options(selectinload(Snapshot.documents), selectinload(Snapshot.faqs))
             .where(Snapshot.id == snapshot_id, Snapshot.status == "active")
         )
         if kb_id is not None:
@@ -181,4 +181,11 @@ class SnapshotRepository:
     async def add_documents(self, docs: list[SnapshotDocument]) -> None:
         """批量写入快照文档。"""
         self.db.add_all(docs)
+        await self.db.flush()
+
+    async def add_faqs(self, faqs: list[SnapshotFAQ]) -> None:
+        """批量写入快照 FAQ。"""
+        if not faqs:
+            return
+        self.db.add_all(faqs)
         await self.db.flush()

@@ -21,6 +21,16 @@ class DocumentResponse(BaseModel):
     creator_id: str
     created_at: datetime
     updated_at: datetime
+    sensitivity_level: str = "normal"
+    faq_count: int = 0
+    faq_job_status: str | None = Field(
+        default=None,
+        description="FAQ 生成任务状态：queued/running/done/error/skipped；无任务时为空",
+    )
+
+
+class DocumentSensitivityUpdate(BaseModel):
+    sensitivity_level: Literal["normal", "confidential", "restricted"] = "normal"
 
 
 class DocumentContentPreviewResponse(BaseModel):
@@ -52,8 +62,11 @@ class DocumentListItem(BaseModel):
     file_type: str
     file_size: int
     chunk_count: int
+    faq_count: int = 0
     status: str
     created_at: datetime
+    sensitivity_level: str = "normal"
+    faq_job_status: str | None = None
 
 
 class DocumentListResponse(BaseModel):

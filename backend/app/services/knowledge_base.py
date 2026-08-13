@@ -14,15 +14,20 @@ from app.core.constants import (
     GUEST_DEPARTMENT_CODE,
     normalize_department,
 )
+from app.core.config import settings
 from app.core.exceptions import (
     ConflictException,
+    ForbiddenException,
     KnowledgeBaseAlreadyExistsException,
     KnowledgeBaseNotFoundException,
     VectorizeTaskNotFoundException,
 )
-from app.models import Document, User, VectorizeTask
+from app.models import Document, DocumentChunk, User, VectorizeTask
 from app.models.enums import SnapshotTrigger
+from app.models.kb_faq import KBCachedFAQ
 from app.models.knowledge_base import KBPermission, KnowledgeBase
+from app.models.sensitivity import normalize_sensitivity_level
+from app.models.snapshot import Snapshot
 from app.schemas.common import PageResponse
 from app.schemas.enums import KnowledgeBaseStatus, KnowledgeBaseType, Visibility
 from app.schemas.knowledge_base import (
@@ -32,6 +37,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseFilter,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
+    KbSensitivitySyncResponse,
     ReVectorizeRequest,
     VectorizeStatusResponse,
 )
@@ -46,7 +52,9 @@ from app.services.kb_departments import (
     resolve_departments_payload,
 )
 from app.services.observability import write_audit
+from app.services.sensitivity_service import sensitivity_service
 from app.services.snapshot_hooks import take_auto_snapshot
+from app.utils.identity_helpers import is_platform_admin_user
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +63,18 @@ def _enum_str(value: object) -> str:
     return value.value if hasattr(value, "value") else str(value)
 
 
+def _assert_can_set_restricted(user: User, level: str) -> None:
+    if normalize_sensitivity_level(level) == "restricted" and not is_platform_admin_user(user):
+        raise ForbiddenException("仅管理员可将密级设为极高密")
+
+
 class KnowledgeBaseService:
     """知识库服务，提供知识库 CRUD、权限与向量化操作。"""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_kb(self, data: KnowledgeBaseCreate, creator_id: UUID) -> KnowledgeBaseResponse:
+    async def create_kb(self, data: KnowledgeBaseCreate, creator: User) -> KnowledgeBaseResponse:
         """创建知识库。同名且未删除时抛冲突。"""
         existing = await self.db.scalar(
             select(KnowledgeBase).where(
@@ -71,6 +84,9 @@ class KnowledgeBaseService:
         )
         if existing is not None:
             raise KnowledgeBaseAlreadyExistsException(data.name)
+
+        default_level = normalize_sensitivity_level(data.default_sensitivity_level)
+        _assert_can_set_restricted(creator, default_level)
 
         # 部门驱动：可见性由多部门关联派生（含 GUEST -> public）
         fields_set = getattr(data, "model_fields_set", set()) or set()
@@ -93,22 +109,47 @@ class KnowledgeBaseService:
             chunk_size=data.chunk_size,
             chunk_overlap=data.chunk_overlap,
             status=KnowledgeBaseStatus.ACTIVE.value,
-            creator_id=creator_id,
+            creator_id=creator.id,
+            default_sensitivity_level=default_level,
         )
         self.db.add(kb)
         await self.db.flush()
         await replace_kb_departments(self.db, kb, dept_codes)
         await write_audit(
             self.db,
-            user_id=creator_id,
+            user_id=creator.id,
             action="kb.create",
             resource_type="kb",
             resource_id=str(kb.id),
-            detail={"name": kb.name, "departments": dept_codes, "type": kb.type},
+            detail={
+                "name": kb.name,
+                "departments": dept_codes,
+                "type": kb.type,
+                "default_sensitivity_level": default_level,
+            },
         )
+        if default_level != "normal":
+            detail = {"old": "normal", "new": default_level, "fields": ["default_sensitivity_level"]}
+            await write_audit(
+                self.db,
+                user_id=creator.id,
+                action="kb.default_sensitivity_changed",
+                resource_type="kb",
+                resource_id=str(kb.id),
+                detail=detail,
+            )
+            await sensitivity_service.log_config_change(
+                self.db,
+                tenant_id=settings.FAQ_TENANT_ID,
+                user_id=creator.id,
+                action="kb.default_sensitivity_changed",
+                sensitivity_level=default_level,
+                detail=detail,
+                context="create",
+            )
         await self.db.commit()
         await self.db.refresh(kb)
-        return await self._to_response(kb)
+        return await self._to_response(kb, can_manage=True)
 
     async def list_kbs(
         self,
@@ -155,7 +196,11 @@ class KnowledgeBaseService:
                 await self.db.scalars(
                     select(KnowledgeBase)
                     .where(*conditions)
-                    .order_by(KnowledgeBase.updated_at.desc())
+                    .order_by(
+                        KnowledgeBase.is_pinned.desc(),
+                        KnowledgeBase.pinned_at.desc().nulls_last(),
+                        KnowledgeBase.updated_at.desc(),
+                    )
                     .offset((page - 1) * page_size)
                     .limit(page_size)
                 )
@@ -163,19 +208,32 @@ class KnowledgeBaseService:
         )
         items = []
         codes_map = await list_kb_department_codes_map(self.db, [kb.id for kb in rows])
+        can_manage_map = await self._can_manage_map(current_user, rows)
         for kb in rows:
-            items.append(await self._to_response(kb, department_codes=codes_map.get(kb.id)))
+            items.append(
+                await self._to_response(
+                    kb,
+                    department_codes=codes_map.get(kb.id),
+                    can_manage=can_manage_map.get(kb.id, False),
+                )
+            )
         return PageResponse(items=items, total=total, page=page, page_size=page_size)
 
     async def get_kb(self, kb_id: str, current_user: User) -> KnowledgeBaseResponse:
         """获取知识库详情（调用方已做权限校验）。"""
         kb = await self._get_active_kb(kb_id)
-        return await self._to_response(kb, include_permissions=True)
+        can_manage_map = await self._can_manage_map(current_user, [kb])
+        return await self._to_response(
+            kb,
+            include_permissions=True,
+            can_manage=can_manage_map.get(kb.id, False),
+        )
 
-    async def update_kb(self, kb_id: str, data: KnowledgeBaseUpdate, user_id: UUID) -> KnowledgeBaseResponse:
-        """更新知识库元信息。"""
+    async def update_kb(self, kb_id: str, data: KnowledgeBaseUpdate, user: User) -> KnowledgeBaseResponse:
+        """更新知识库元信息。含默认密级变更时走 R1：通用审计仅写 kb.default_sensitivity_changed。"""
         kb = await self._get_active_kb(kb_id)
         payload = data.model_dump(exclude_unset=True)
+        old_default = normalize_sensitivity_level(getattr(kb, "default_sensitivity_level", None))
         if "name" in payload and payload["name"] != kb.name:
             clash = await self.db.scalar(
                 select(KnowledgeBase).where(
@@ -186,14 +244,21 @@ class KnowledgeBaseService:
             )
             if clash is not None:
                 raise KnowledgeBaseAlreadyExistsException(payload["name"])
+        if "is_pinned" in payload and payload["is_pinned"] is not None:
+            kb.is_pinned = bool(payload["is_pinned"])
+            kb.pinned_at = datetime.now(timezone.utc) if kb.is_pinned else None
         for field, value in payload.items():
-            if field in ("department", "departments", "visibility"):
-                # 部门/可见性在下方统一处理
+            if field in ("department", "departments", "visibility", "is_pinned"):
+                # 部门/可见性在下方统一处理；置顶已单独处理
                 continue
             if value is None:
                 continue
             if field == "type":
                 setattr(kb, field, _enum_str(value))
+            elif field == "default_sensitivity_level":
+                level = normalize_sensitivity_level(value)
+                _assert_can_set_restricted(user, level)
+                kb.default_sensitivity_level = level
             else:
                 setattr(kb, field, value)
         fields_set = getattr(data, "model_fields_set", set()) or set()
@@ -205,17 +270,131 @@ class KnowledgeBaseService:
         )
         if dept_codes is not None:
             await replace_kb_departments(self.db, kb, dept_codes)
-        await write_audit(
-            self.db,
-            user_id=user_id,
-            action="kb.update",
-            resource_type="kb",
-            resource_id=str(kb.id),
-            detail={"fields": sorted(payload.keys())},
-        )
+        new_default = normalize_sensitivity_level(getattr(kb, "default_sensitivity_level", None))
+        default_changed = "default_sensitivity_level" in payload and old_default != new_default
+        if default_changed:
+            detail = {
+                "old": old_default,
+                "new": new_default,
+                "fields": sorted(payload.keys()),
+            }
+            await write_audit(
+                self.db,
+                user_id=user.id,
+                action="kb.default_sensitivity_changed",
+                resource_type="kb",
+                resource_id=str(kb.id),
+                detail=detail,
+            )
+            await sensitivity_service.log_config_change(
+                self.db,
+                tenant_id=settings.FAQ_TENANT_ID,
+                user_id=user.id,
+                action="kb.default_sensitivity_changed",
+                sensitivity_level=new_default,
+                detail=detail,
+                context="update",
+            )
+        else:
+            await write_audit(
+                self.db,
+                user_id=user.id,
+                action="kb.update",
+                resource_type="kb",
+                resource_id=str(kb.id),
+                detail={"fields": sorted(payload.keys())},
+            )
+        faq_turned_off = "faq_enabled" in payload and payload.get("faq_enabled") is False
         await self.db.commit()
         await self.db.refresh(kb)
-        return await self._to_response(kb)
+        if faq_turned_off:
+            try:
+                from app.services.kb_faq_service import kb_faq_service
+
+                await kb_faq_service.invalidate_kb_faq_redis(
+                    tenant_id=settings.FAQ_TENANT_ID, kb_id=kb.id
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("kb update: FAQ Redis invalidate failed kb=%s", kb.id, exc_info=True)
+        can_manage_map = await self._can_manage_map(user, [kb])
+        return await self._to_response(kb, can_manage=can_manage_map.get(kb.id, False))
+
+    async def sync_kb_sensitivity(
+        self,
+        kb_id: str,
+        *,
+        mode: str,
+        user: User,
+    ) -> KbSensitivitySyncResponse:
+        """将库内文档/分段/FAQ 密级同步为当前库默认。不快照；清缓存在 commit 后。"""
+        from sqlalchemy import update as sa_update
+
+        if mode not in ("only_normal", "force"):
+            raise ForbiddenException("无效同步模式")
+        kb = await self._get_active_kb(kb_id)
+        target = normalize_sensitivity_level(getattr(kb, "default_sensitivity_level", None))
+        _assert_can_set_restricted(user, target)
+
+        doc_where = [Document.kb_id == kb.id]
+        chunk_where = [DocumentChunk.kb_id == kb.id]
+        faq_where = [KBCachedFAQ.kb_id == kb.id]
+        if mode == "only_normal":
+            doc_where.append(Document.sensitivity_level == "normal")
+            chunk_where.append(DocumentChunk.sensitivity_level == "normal")
+            faq_where.append(KBCachedFAQ.sensitivity_level == "normal")
+
+        doc_result = await self.db.execute(
+            sa_update(Document).where(*doc_where).values(sensitivity_level=target)
+        )
+        chunk_result = await self.db.execute(
+            sa_update(DocumentChunk).where(*chunk_where).values(sensitivity_level=target)
+        )
+        faq_result = await self.db.execute(
+            sa_update(KBCachedFAQ).where(*faq_where).values(sensitivity_level=target)
+        )
+        affected = {
+            "documents": int(doc_result.rowcount or 0),
+            "chunks": int(chunk_result.rowcount or 0),
+            "faqs": int(faq_result.rowcount or 0),
+        }
+        detail = {"mode": mode, "target": target, "affected": affected}
+        await write_audit(
+            self.db,
+            user_id=user.id,
+            action="kb.sensitivity_sync",
+            resource_type="kb",
+            resource_id=str(kb.id),
+            detail=detail,
+        )
+        await sensitivity_service.log_config_change(
+            self.db,
+            tenant_id=settings.FAQ_TENANT_ID,
+            user_id=user.id,
+            action="kb.sensitivity_sync",
+            sensitivity_level=target,
+            detail=detail,
+            context="sync",
+        )
+        await self.db.commit()
+
+        from app.services.kb_faq_service import kb_faq_service
+        from app.services.qa_cache import qa_cache_service
+
+        try:
+            await kb_faq_service.invalidate_kb_faq_redis(tenant_id=settings.FAQ_TENANT_ID, kb_id=kb.id)
+        except Exception:  # noqa: BLE001
+            logger.warning("sync sensitivity: FAQ Redis invalidate failed kb=%s", kb.id, exc_info=True)
+        try:
+            await qa_cache_service.invalidate_by_kb(tenant_id=settings.FAQ_TENANT_ID, kb_ids=[kb.id])
+        except Exception:  # noqa: BLE001
+            logger.warning("sync sensitivity: L2 invalidate failed kb=%s", kb.id, exc_info=True)
+
+        return KbSensitivitySyncResponse(
+            kb_id=str(kb.id),
+            mode=mode,  # type: ignore[arg-type]
+            target_level=target,
+            affected=affected,
+        )
 
     async def delete_kb(self, kb_id: str, permanent: bool, user_id: UUID) -> None:
         """软删除或物理删除知识库。"""
@@ -443,12 +622,49 @@ class KnowledgeBaseService:
             raise KnowledgeBaseNotFoundException(kb_id)
         return kb
 
+    async def _can_manage_map(self, user: User, kbs: list[KnowledgeBase]) -> dict[UUID, bool]:
+        """平台管理员/超管、创建者，或持有该库 kb:admin 授权 → 可管理（置顶/删除等）。"""
+        if not kbs:
+            return {}
+        if is_platform_admin_user(user):
+            return {kb.id: True for kb in kbs}
+
+        result: dict[UUID, bool] = {}
+        pending: list[UUID] = []
+        for kb in kbs:
+            if kb.creator_id == user.id:
+                result[kb.id] = True
+            else:
+                pending.append(kb.id)
+                result[kb.id] = False
+
+        if not pending:
+            return result
+
+        role_ids = [r.id for r in user.roles if r.is_enabled]
+        subject = [KBPermission.user_id == user.id]
+        if role_ids:
+            subject.append(KBPermission.role_id.in_(role_ids))
+        granted = (
+            await self.db.scalars(
+                select(KBPermission.kb_id).where(
+                    KBPermission.kb_id.in_(pending),
+                    KBPermission.permission_code == "kb:admin",
+                    or_(*subject),
+                )
+            )
+        ).all()
+        for kid in granted:
+            result[kid] = True
+        return result
+
     async def _to_response(
         self,
         kb: KnowledgeBase,
         *,
         include_permissions: bool = False,
         department_codes: list[str] | None = None,
+        can_manage: bool | None = None,
     ) -> KnowledgeBaseResponse:
         doc_count = (
             await self.db.scalar(
@@ -462,6 +678,20 @@ class KnowledgeBaseService:
                     Document.kb_id == kb.id,
                     Document.status != "archived",
                 )
+            )
+            or 0
+        )
+        faq_count = (
+            await self.db.scalar(
+                select(func.count()).select_from(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb.id)
+            )
+            or 0
+        )
+        snapshot_count = (
+            await self.db.scalar(
+                select(func.count())
+                .select_from(Snapshot)
+                .where(Snapshot.kb_id == kb.id, Snapshot.status == "active")
             )
             or 0
         )
@@ -511,9 +741,18 @@ class KnowledgeBaseService:
             chunk_size=kb.chunk_size,
             chunk_overlap=kb.chunk_overlap,
             status=status,
+            default_sensitivity_level=normalize_sensitivity_level(
+                getattr(kb, "default_sensitivity_level", None)
+            ),
+            faq_enabled=bool(getattr(kb, "faq_enabled", True)),
+            is_pinned=bool(getattr(kb, "is_pinned", False)),
+            pinned_at=getattr(kb, "pinned_at", None),
+            can_manage=bool(can_manage) if can_manage is not None else False,
             current_index_version=kb.current_index_version,
             document_count=int(doc_count),
             chunk_count=int(chunk_count),
+            faq_count=int(faq_count),
+            snapshot_count=int(snapshot_count),
             creator_id=kb.creator_id,
             created_at=kb.created_at,
             updated_at=kb.updated_at,

@@ -9,6 +9,7 @@ from app.schemas.identity import LoginResponse, TokenResponse, UserResponse
 ROLE_RANK: dict[str, int] = {
     "super_admin": 100,
     "admin": 50,
+    "hr": 35,
     "staff": 20,
     "kb_admin": 20,
     "guest": 10,

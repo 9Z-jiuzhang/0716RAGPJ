@@ -31,6 +31,7 @@ BUILTIN_PERMISSIONS: dict[str, tuple[str, str]] = {
 ROLE_DISPLAY_NAMES: dict[str, str] = {
     "super_admin": "超级管理员",
     "admin": "管理员",
+    "hr": "HR",
     "staff": "员工",
     "guest": "访客",
 }
@@ -38,6 +39,7 @@ ROLE_DISPLAY_NAMES: dict[str, str] = {
 # 内置角色 -> (描述, 权限 code 列表；"*" 表示全部)
 # super_admin：全部权限（含模型配置）
 # admin：管理用户/角色/知识库/审计/监控，不可改模型密钥，不可改超管，不可配置角色权限
+# hr：可问答 + 查看知识库（密级默认可到 confidential，由敏感权限表配置）
 # staff：授权范围内的知识库上传与维护
 # guest：公开库问答
 BUILTIN_ROLES: dict[str, tuple[str, list[str]]] = {
@@ -66,6 +68,14 @@ BUILTIN_ROLES: dict[str, tuple[str, list[str]]] = {
             "model:read",
             "system:read",
             "audit:read",
+        ],
+    ),
+    "hr": (
+        "HR，可检索授权知识库并问答；敏感密级默认可访问机密",
+        [
+            "qa:ask",
+            "kb:read",
+            "doc:read",
         ],
     ),
     "staff": (

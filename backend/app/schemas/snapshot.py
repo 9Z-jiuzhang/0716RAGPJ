@@ -69,6 +69,7 @@ class SnapshotListItem(BaseModel):
     status: str
     document_count: int = Field(default=0, description="快照包含的文档数")
     total_chunks: int = Field(default=0, description="快照内总分段数")
+    faq_count: int = Field(default=0, description="快照包含的 FAQ 数")
     creator_id: UUID
     created_at: datetime
 

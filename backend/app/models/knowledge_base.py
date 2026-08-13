@@ -55,6 +55,25 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         server_default="true",
         comment="是否启用该知识库 FAQ 命中与热门列表",
     )
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="是否置顶（列表优先展示）",
+    )
+    pinned_at: Mapped[datetime_type | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="最近置顶时间（同档内按此倒序）",
+    )
+    default_sensitivity_level: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="normal",
+        server_default="normal",
+        comment="库默认敏感等级 normal/confidential/restricted",
+    )
     current_index_version: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="当前生效索引版本号")
     creator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     deleted_at: Mapped[datetime_type | None] = mapped_column(DateTime, nullable=True)
@@ -80,7 +99,13 @@ class KnowledgeBase(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         lazy="noload",
     )
 
-    __table_args__ = (UniqueConstraint("name", "deleted_at", name="uq_kb_name_deleted"),)
+    __table_args__ = (
+        UniqueConstraint("name", "deleted_at", name="uq_kb_name_deleted"),
+        CheckConstraint(
+            "default_sensitivity_level IN ('normal', 'confidential', 'restricted')",
+            name="ck_kb_default_sensitivity_level",
+        ),
+    )
 
 
 class KBDepartment(Base, UUIDPrimaryKeyMixin):

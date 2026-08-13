@@ -19,6 +19,7 @@ class SystemStatsResponse(BaseModel):
     user_count: int = 0
     kb_count: int = 0
     doc_count: int = 0
+    faq_count: int = Field(0, description="知识库 FAQ 总数（全库合计）")
     active_sessions: int = 0
     task_queue_size: int = 0
     qa_trend_7d: list[int] = Field(default_factory=lambda: [0] * 7, description="近7天每日问答量")

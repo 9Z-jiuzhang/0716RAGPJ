@@ -9,11 +9,12 @@
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,8 +23,9 @@ from app.models.base import utcnow
 from app.models.document import Document, DocumentChunk, KbChunkRule
 from app.models.enums import IndexVersionStatus, SnapshotStatus, SnapshotTrigger
 from app.models.index_version import IndexVersion
+from app.models.kb_faq import KBCachedFAQ
 from app.models.knowledge_base import KBPermission, KnowledgeBase
-from app.models.snapshot import Snapshot, SnapshotDocument
+from app.models.snapshot import Snapshot, SnapshotDocument, SnapshotFAQ
 from app.repositories.snapshot import SnapshotRepository
 from app.schemas.snapshot import (
     ConfigChangeItem,
@@ -122,6 +124,10 @@ class SnapshotService:
     async def _build_config_snapshot(self, kb: KnowledgeBase) -> dict[str, Any]:
         """捕获知识库元信息、分段规则、权限配置与当前索引版本。"""
         segment_rules = await self._load_kb_segment_rules(kb)
+        faq_count = int(
+            await self.db.scalar(select(func.count()).select_from(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb.id))
+            or 0
+        )
         return {
             "kb": {
                 "id": str(kb.id),
@@ -135,6 +141,8 @@ class SnapshotService:
                 "chunk_overlap": kb.chunk_overlap,
                 "status": kb.status,
                 "current_index_version": kb.current_index_version,
+                "faq_enabled": bool(getattr(kb, "faq_enabled", True)),
+                "faq_count": faq_count,
             },
             "segment_rules": segment_rules,
             "permissions": [
@@ -146,6 +154,8 @@ class SnapshotService:
                 for p in (kb.permissions or [])
             ],
             "index_version": kb.current_index_version,
+            "faq_count": faq_count,
+            "faqs_captured": True,
             "captured_at": utcnow().isoformat(),
         }
 
@@ -185,11 +195,133 @@ class SnapshotService:
             )
         return items
 
+    async def _build_snapshot_faqs(self, snapshot_id: UUID, kb_id: UUID) -> list[SnapshotFAQ]:
+        """将当前知识库 FAQ 全量写入快照（不含 embedding）。"""
+        rows = list((await self.db.scalars(select(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb_id))).all())
+        items: list[SnapshotFAQ] = []
+        for faq in rows:
+            items.append(
+                SnapshotFAQ(
+                    snapshot_id=snapshot_id,
+                    faq_id=faq.id,
+                    tenant_id=faq.tenant_id or "default",
+                    question=faq.question,
+                    normalized_question=faq.normalized_question,
+                    answer=faq.answer,
+                    source_document_ids=list(faq.source_document_ids or []),
+                    chunk_ids=list(faq.chunk_ids or []),
+                    citations=list(faq.citations or []),
+                    quality_score=float(faq.quality_score or 0.7),
+                    hit_count=int(faq.hit_count or 0),
+                    status=faq.status or "active",
+                    source=faq.source or "document_auto",
+                    stale_reason=faq.stale_reason,
+                    model_version=faq.model_version,
+                    reject_count=int(faq.reject_count or 0),
+                    is_active=bool(faq.is_active),
+                    version=int(faq.version or 1),
+                    sensitivity_level=faq.sensitivity_level or "normal",
+                    is_compound=bool(faq.is_compound),
+                    split_from_id=faq.split_from_id,
+                    source_created_at=faq.created_at.isoformat() if faq.created_at else None,
+                    source_updated_at=faq.updated_at.isoformat() if faq.updated_at else None,
+                )
+            )
+        return items
+
+    @staticmethod
+    def _parse_faq_ts(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+
+    async def _restore_faqs_from_snap(
+        self,
+        kb_id: UUID,
+        snap: Snapshot,
+        *,
+        document_ids: set[UUID] | None = None,
+    ) -> int:
+        """按快照还原 FAQ。旧快照未捕获 FAQ 时跳过，避免误清空。"""
+        cfg = snap.config_snapshot or {}
+        if not cfg.get("faqs_captured") and not (snap.faqs or []):
+            return 0
+
+        from app.services.kb_faq_service import kb_faq_service
+        from app.services.qa_cache import qa_cache_service
+
+        snap_faqs = list(snap.faqs or [])
+        if document_ids is None:
+            await self.db.execute(delete(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb_id))
+            to_restore = snap_faqs
+        else:
+            doc_strs = {str(x) for x in document_ids}
+            to_restore = [
+                f
+                for f in snap_faqs
+                if any(str(d) in doc_strs for d in (f.source_document_ids or []))
+            ]
+            live_rows = list((await self.db.scalars(select(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb_id))).all())
+            norms = {f.normalized_question for f in to_restore}
+            for row in live_rows:
+                srcs = [str(x) for x in (row.source_document_ids or [])]
+                if any(s in doc_strs for s in srcs) or row.normalized_question in norms:
+                    await self.db.delete(row)
+            await self.db.flush()
+
+        for f in to_restore:
+            created_at = self._parse_faq_ts(f.source_created_at)
+            updated_at = self._parse_faq_ts(f.source_updated_at)
+            row = KBCachedFAQ(
+                id=f.faq_id,
+                tenant_id=f.tenant_id or settings.FAQ_TENANT_ID,
+                kb_id=kb_id,
+                question=f.question,
+                normalized_question=f.normalized_question,
+                answer=f.answer,
+                source_document_ids=list(f.source_document_ids or []),
+                chunk_ids=list(f.chunk_ids or []),
+                citations=list(f.citations or []),
+                quality_score=float(f.quality_score or 0.7),
+                hit_count=int(f.hit_count or 0),
+                status=f.status or "active",
+                source=f.source or "document_auto",
+                stale_reason=f.stale_reason,
+                model_version=f.model_version,
+                reject_count=int(f.reject_count or 0),
+                is_active=bool(f.is_active),
+                version=int(f.version or 1),
+                sensitivity_level=f.sensitivity_level or "normal",
+                is_compound=bool(f.is_compound),
+                split_from_id=f.split_from_id,
+            )
+            if created_at is not None:
+                row.created_at = created_at
+            if updated_at is not None:
+                row.updated_at = updated_at
+            self.db.add(row)
+
+        await self.db.flush()
+        try:
+            await kb_faq_service.invalidate_kb_faq_redis(tenant_id=settings.FAQ_TENANT_ID, kb_id=kb_id)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await qa_cache_service.invalidate_by_kb(tenant_id=settings.FAQ_TENANT_ID, kb_ids=[kb_id])
+        except Exception:  # noqa: BLE001
+            pass
+        return len(to_restore)
+
     def _to_list_item(self, snap: Snapshot) -> SnapshotListItem:
         # 列表接口不再加载 documents，优先用汇总列
         docs = getattr(snap, "documents", None) or []
         doc_count = snap.document_count if snap.document_count is not None else len(docs)
         total_chunks = snap.chunk_count if snap.chunk_count is not None else sum(d.chunk_count for d in docs)
+        cfg = snap.config_snapshot or {}
+        faq_count = int(cfg.get("faq_count") or (cfg.get("kb") or {}).get("faq_count") or 0)
         return SnapshotListItem(
             id=snap.id,
             kb_id=snap.kb_id,
@@ -199,6 +331,7 @@ class SnapshotService:
             status=snap.status,
             document_count=doc_count,
             total_chunks=total_chunks,
+            faq_count=faq_count,
             creator_id=snap.creator_id,
             created_at=snap.created_at,
         )
@@ -327,6 +460,11 @@ class SnapshotService:
         if snap_docs:
             await self.repo.add_documents(snap_docs)
             await self.db.refresh(snapshot, attribute_names=["documents"])
+
+        snap_faqs = await self._build_snapshot_faqs(snapshot_id, kb.id)
+        if snap_faqs:
+            await self.repo.add_faqs(snap_faqs)
+            await self.db.refresh(snapshot, attribute_names=["faqs"])
 
         if run_cleanup:
             exclude = set(exclude_from_cleanup or set())
@@ -500,9 +638,12 @@ class SnapshotService:
             kb.embedding_model = kb_meta["embedding_model"]
         if kb_meta.get("visibility"):
             kb.visibility = kb_meta["visibility"]
+        if "faq_enabled" in kb_meta and kb_meta["faq_enabled"] is not None:
+            kb.faq_enabled = bool(kb_meta["faq_enabled"])
 
         await self._restore_kb_segment_rules(kb, snap)
         await self._restore_permissions(kb, snap)
+        await self._restore_faqs_from_snap(kb.id, snap)
         kb.status = "active"
         await self.db.flush()
 
@@ -821,9 +962,14 @@ class SnapshotService:
                 kb.embedding_model = kb_meta["embedding_model"]
             if kb_meta.get("visibility"):
                 kb.visibility = kb_meta["visibility"]
+            if "faq_enabled" in kb_meta and kb_meta["faq_enabled"] is not None:
+                kb.faq_enabled = bool(kb_meta["faq_enabled"])
 
             await self._restore_kb_segment_rules(kb, snap)
             await self._restore_permissions(kb, snap)
+            await self._restore_faqs_from_snap(kb.id, snap)
+        else:
+            await self._restore_faqs_from_snap(kb.id, snap, document_ids=set(restored_ids))
 
         # 5) 创建新索引版本（building），不覆盖历史、暂不激活
         # 选择性回退也必须把未选中但仍有效的文档写入新版本，否则 activate 后检索丢失

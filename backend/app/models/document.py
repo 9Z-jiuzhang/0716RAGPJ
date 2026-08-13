@@ -69,6 +69,13 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         JSON, nullable=False, default=_default_segment_rules, comment="文档级分段规则"
     )
     index_version: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="当前索引版本标记")
+    sensitivity_level: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="normal",
+        server_default="normal",
+        comment="敏感等级 normal/confidential/restricted",
+    )
 
     knowledge_base: Mapped[KnowledgeBase] = relationship("KnowledgeBase", back_populates="documents")
     chunks: Mapped[list[DocumentChunk]] = relationship(
@@ -117,6 +124,13 @@ class DocumentChunk(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "metadata", JSON, default=dict, nullable=False, comment="标题层级、页码等元信息"
     )
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, comment="是否参与检索")
+    sensitivity_level: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="normal",
+        server_default="normal",
+        comment="敏感等级（默认同步自文档）",
+    )
     # 全文检索向量：由 content 自动生成，应用层只读
     content_tsv: Mapped[Any | None] = mapped_column(
         TSVECTOR,

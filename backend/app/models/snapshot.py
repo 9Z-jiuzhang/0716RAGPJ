@@ -1,14 +1,14 @@
 """快照模型（产品手册 5.8）。
 
-快照包含知识库元数据、文档版本引用、分段规则与权限配置；
+快照包含知识库元数据、文档版本引用、分段规则、权限配置与 FAQ；
 向量数据不直接存入快照，回退时通过元数据重建索引。
 """
 
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -55,6 +55,12 @@ class Snapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         # 异步下避免隐式 selectin；需要时用 selectinload / refresh
         lazy="noload",
     )
+    faqs: Mapped[list["SnapshotFAQ"]] = relationship(
+        "SnapshotFAQ",
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+        lazy="noload",
+    )
 
 
 class SnapshotDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -80,3 +86,46 @@ class SnapshotDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     snapshot: Mapped[Snapshot] = relationship("Snapshot", back_populates="documents")
+
+
+class SnapshotFAQ(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """快照-FAQ：记录快照时刻的 FAQ 全量副本，供回退还原。"""
+
+    __tablename__ = "snapshot_faqs"
+
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    faq_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, comment="原始 kb_cached_faqs.id（非外键）"
+    )
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_question: Mapped[str] = mapped_column(String(1000), nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    source_document_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    chunk_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    citations: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    quality_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="document_auto")
+    stale_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reject_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sensitivity_level: Mapped[str] = mapped_column(String(20), nullable=False, default="normal")
+    is_compound: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    split_from_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    source_created_at: Mapped[str | None] = mapped_column(
+        String(40), nullable=True, comment="原 FAQ created_at ISO"
+    )
+    source_updated_at: Mapped[str | None] = mapped_column(
+        String(40), nullable=True, comment="原 FAQ updated_at ISO"
+    )
+
+    snapshot: Mapped[Snapshot] = relationship("Snapshot", back_populates="faqs")

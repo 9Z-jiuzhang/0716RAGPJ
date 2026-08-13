@@ -14,6 +14,7 @@ from .ragas import router as ragas_router
 from .kb_faqs import router as kb_faqs_router
 from .role_caches import router as role_caches_router
 from .roles import router as roles_router
+from .sensitivity import router as sensitivity_router
 from .snapshots import router as snapshots_router
 from .users import router as users_router
 
@@ -32,3 +33,4 @@ api_router.include_router(query_processing_router)
 api_router.include_router(ragas_router)
 api_router.include_router(role_caches_router)
 api_router.include_router(kb_faqs_router)
+api_router.include_router(sensitivity_router)

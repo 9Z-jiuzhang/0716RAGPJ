@@ -9,7 +9,7 @@
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=gap-opt-0721i";
-import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=ask-auth-refresh-0725a";
+import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=ask-done-early-0813u";
 import {
   isLoggedIn,
   getUser,
@@ -658,13 +658,9 @@ function pageChat() {
             <div class="qa-welcome-note">回答将展示引用来源；无法命中时不会编造来源。未登录点赞不计监测；收藏仅存本浏览器。</div>
             <div class="qa-suggestions" id="faqPanel">
               <div class="faq-header">
-                <h4 class="faq-title">热门问题</h4>
                 <button type="button" class="faq-action" id="faqRefreshBtn">换一批</button>
               </div>
-              <div class="faq-list" id="faqList"><div class="faq-loading">正在加载热门问题…</div></div>
-              <div class="faq-more" id="faqMore" hidden>
-                <button type="button" id="faqExpandBtn">展开更多</button>
-              </div>
+              <div class="faq-list" id="faqList"><div class="faq-loading">加载中…</div></div>
             </div>
           </div>
         </div>
@@ -715,6 +711,7 @@ function pageChat() {
   bindHistoryScrollLoad();
   bindScrollToBottom();
   loadChatSidebar();
+  currentFAQSort = "hit";
   loadHotFAQ();
 
   // 从历史打开会话：渲染完成后加载该会话消息（避免路由二次渲染清空）
@@ -1085,14 +1082,25 @@ function bindMsgActions(row) {
   syncFavoriteActionButtons();
 }
 
-function attachAssistantActions(row) {
+function attachAssistantActions(row, { ready = true } = {}) {
   if (!row || !row.classList.contains("assistant")) return;
-  if (row.querySelector(".msg-actions")) {
-    bindMsgActions(row);
-    return;
+  if (!row.querySelector(".msg-actions")) {
+    row.insertAdjacentHTML("beforeend", buildMsgActionsHtml());
   }
-  row.insertAdjacentHTML("beforeend", buildMsgActionsHtml());
   bindMsgActions(row);
+  setAssistantActionsReady(row, ready);
+}
+
+function setAssistantActionsReady(row, ready) {
+  const bar = row?.querySelector(".msg-actions");
+  if (!bar) return;
+  bar.classList.toggle("is-pending", !ready);
+  bar.querySelectorAll('[data-msg-act="up"], [data-msg-act="down"], [data-msg-act="regen"]').forEach((btn) => {
+    btn.disabled = !ready;
+    btn.title = ready
+      ? btn.getAttribute("aria-label") || ""
+      : "回答保存中，稍后可点赞/点踩";
+  });
 }
 
 function applySidebarCollapsed(collapsed) {
@@ -1362,6 +1370,10 @@ async function openChatSession(sessionId) {
 }
 
 /** 开始新对话 */
+let currentFAQSeed = Date.now();
+/** hit=进页/新会话默认热门；random=换一批 */
+let currentFAQSort = "hit";
+
 function startNewChat() {
   if (askAbort) {
     try {
@@ -1395,41 +1407,58 @@ function startNewChat() {
       <div class="qa-welcome-note">回答将展示引用来源、文档名、分段序号与置信提示；无法命中时不会编造来源。</div>
       <div class="qa-suggestions" id="faqPanel">
         <div class="faq-header">
-          <h4 class="faq-title">热门问题</h4>
           <button type="button" class="faq-action" id="faqRefreshBtn">换一批</button>
         </div>
-        <div class="faq-list" id="faqList"><div class="faq-loading">正在加载热门问题…</div></div>
-        <div class="faq-more" id="faqMore" hidden>
-          <button type="button" id="faqExpandBtn">展开更多</button>
-        </div>
+        <div class="faq-list" id="faqList"><div class="faq-loading">加载中…</div></div>
       </div>
     </div>`;
   const input = document.getElementById("questionInput");
   resetComposerHeight();
   input?.focus();
+  currentFAQSort = "hit";
   loadHotFAQ();
 }
 
-let currentFAQPage = 1;
-let currentFAQSeed = Date.now();
+/** 将最多 8 条热门排成 3-2-3；约三行及以上再加宽（仍按内容宽度，不撑满留白）。 */
+function renderHotFaqChips(items) {
+  const list = (items || []).slice(0, 8);
+  // ~22.5rem 约 28 字/行，两行约 56；超过再加宽，避免普通长句误进全宽
+  const WIDE_CHARS = 72;
+  const chipHtml = (item) => {
+    const q = String(item.question || "");
+    const wide = q.length >= WIDE_CHARS;
+    return `<button type="button" class="faq-item${wide ? " is-wide" : ""}" data-faq-q="${escapeHtml(q)}" title="${escapeHtml(q)}">${escapeHtml(q)}</button>`;
+  };
+  const rows = [list.slice(0, 3), list.slice(3, 5), list.slice(5, 8)].filter((row) => row.length);
+  return rows
+    .map((row) => `<div class="faq-row">${row.map(chipHtml).join("")}</div>`)
+    .join("");
+}
 
-/** 加载访客热门 FAQ；点选时带 explicit_faq_click 走秒答 */
-async function loadHotFAQ(page = 1, expand = false) {
+/** 加载访客 FAQ：进页/新会话默认 sort=hit；换一批用 random。固定 8 条。 */
+async function loadHotFAQ(opts = {}) {
   const faqPanel = document.getElementById("faqPanel");
   const faqList = document.getElementById("faqList");
-  const faqMore = document.getElementById("faqMore");
   if (!faqPanel || !faqList) return;
 
+  if (opts.sort === "hit" || opts.sort === "random") {
+    currentFAQSort = opts.sort;
+  }
+  if (opts.seed != null) {
+    currentFAQSeed = opts.seed;
+  }
+
   faqPanel.style.display = "";
-  faqList.innerHTML = `<div class="faq-loading">正在加载热门问题…</div>`;
+  faqList.innerHTML = `<div class="faq-loading">加载中…</div>`;
   try {
-    const limit = expand ? 20 : 8;
     const qs = new URLSearchParams({
-      page: String(page),
-      limit: String(limit),
-      sort: "random",
-      seed: String(currentFAQSeed),
+      page: "1",
+      limit: "8",
+      sort: currentFAQSort === "random" ? "random" : "hit",
     });
+    if (currentFAQSort === "random") {
+      qs.set("seed", String(currentFAQSeed));
+    }
     const data = await api.get(`/faq/list?${qs.toString()}`);
     if (data?.faq_enabled === false) {
       faqPanel.style.display = "none";
@@ -1437,20 +1466,10 @@ async function loadHotFAQ(page = 1, expand = false) {
     }
     const items = data?.items || [];
     if (!items.length) {
-      faqList.innerHTML = `<div class="faq-empty">暂无常见问题，直接提问吧</div>`;
-      if (faqMore) faqMore.hidden = true;
+      faqList.innerHTML = `<div class="faq-empty">暂无推荐，直接提问吧</div>`;
       return;
     }
-    faqList.innerHTML = items
-      .map(
-        (item) => `<button type="button" class="faq-item" data-faq-q="${escapeHtml(item.question)}">
-          <span class="faq-question">${escapeHtml(item.question)}</span>
-          <span class="faq-source">${escapeHtml(item.kb_name || "")}</span>
-        </button>`
-      )
-      .join("");
-    if (faqMore) faqMore.hidden = !data.has_more;
-    currentFAQPage = page;
+    faqList.innerHTML = renderHotFaqChips(items);
     faqList.querySelectorAll(".faq-item").forEach((btn) => {
       btn.addEventListener("click", () => {
         const q = btn.getAttribute("data-faq-q") || "";
@@ -1460,22 +1479,13 @@ async function loadHotFAQ(page = 1, expand = false) {
     document.getElementById("faqRefreshBtn")?.addEventListener(
       "click",
       () => {
-        currentFAQSeed = Date.now();
-        loadHotFAQ(1, false);
-      },
-      { once: true }
-    );
-    document.getElementById("faqExpandBtn")?.addEventListener(
-      "click",
-      () => {
-        loadHotFAQ(1, true);
+        loadHotFAQ({ sort: "random", seed: Date.now() });
       },
       { once: true }
     );
   } catch (err) {
     console.error("FAQ加载失败", err);
-    faqList.innerHTML = `<div class="faq-empty">热门问题加载失败</div>`;
-    if (faqMore) faqMore.hidden = true;
+    faqList.innerHTML = `<div class="faq-empty">加载失败</div>`;
   }
 }
 
@@ -1861,6 +1871,26 @@ function finalizeAbortedAsk(bubble, partialText) {
   attachAssistantActions(bubble.closest(".msg-row"));
 }
 
+/** 与后端 normalize_cache_question 对齐的轻量规范化（精确同题判定）。 */
+function normalizeFaqQuestionClient(question) {
+  let text = String(question || "")
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  text = text.replace(/[?？!！。．.,，；;：:\s]+$/u, "");
+  return text.slice(0, 1000);
+}
+
+/** 当前页热门胶囊中是否有完全同题（复制粘贴场景）。 */
+function matchHotFaqExactQuestion(question) {
+  const target = normalizeFaqQuestionClient(question);
+  if (!target) return false;
+  return Array.from(document.querySelectorAll(".faq-item[data-faq-q]")).some((el) => {
+    return normalizeFaqQuestionClient(el.getAttribute("data-faq-q") || "") === target;
+  });
+}
+
 /** 发送问题并 SSE 流式展示（手册交互流程） */
 async function sendQuestion(presetQuestion, options = {}) {
   if (isAskStreaming) {
@@ -1869,7 +1899,9 @@ async function sendQuestion(presetQuestion, options = {}) {
   }
   const input = document.getElementById("questionInput");
   const question = String(presetQuestion ?? input?.value ?? "").trim();
-  const explicitFaqClick = options.explicit_faq_click === true;
+  // 点选热门，或复制粘贴热门同题：走秒答体验（不闪「思考中」）
+  const explicitFaqClick =
+    options.explicit_faq_click === true || matchHotFaqExactQuestion(question);
   // 空问题拦截
   if (!question) {
     toast("请输入问题", "error");
@@ -1883,17 +1915,35 @@ async function sendQuestion(presetQuestion, options = {}) {
   // 创建助手气泡（思考中占位，再流式写入）
   const bubble = appendMessage("assistant", "");
   initAssistantBubbleShell(bubble);
-  // 显式 FAQ 点选：不展示思考态，等待 cache_hit / chunk
-  if (!explicitFaqClick) {
-    showThinkingPlaceholder(bubble);
-  }
-  askAbort = new AbortController();
-  setAskStreaming(true);
-
+  // 精确同题 / 点选：不立刻展示思考态；普通提问延迟展示，FAQ 命中则永不闪思考
+  let thinkingTimer = null;
   let citationsHtml = "";
   let confidenceTip = "";
   let rawAssistantText = "";
   let cacheHit = false;
+  const armThinking = () => {
+    if (explicitFaqClick) return;
+    if (thinkingTimer != null) {
+      window.clearTimeout(thinkingTimer);
+      thinkingTimer = null;
+    }
+    thinkingTimer = window.setTimeout(() => {
+      if (!cacheHit && !rawAssistantText && bubble.isConnected) {
+        showThinkingPlaceholder(bubble);
+      }
+    }, 220);
+  };
+  askAbort = new AbortController();
+  setAskStreaming(true);
+  armThinking();
+
+  const clearThinkingArmed = () => {
+    if (thinkingTimer != null) {
+      window.clearTimeout(thinkingTimer);
+      thinkingTimer = null;
+    }
+    clearThinkingState(bubble);
+  };
 
   const runAsk = async (sessionId) => {
     citationsHtml = "";
@@ -1901,13 +1951,12 @@ async function sendQuestion(presetQuestion, options = {}) {
     rawAssistantText = "";
     cacheHit = false;
     initAssistantBubbleShell(bubble);
-    if (!explicitFaqClick) {
-      showThinkingPlaceholder(bubble);
-    }
+    armThinking();
     await askStream(
       {
         question,
         session_id: sessionId || undefined,
+        // 复制同题也带上标记，便于审计/观测与点选对齐
         explicit_faq_click: explicitFaqClick,
         // 不传 kb_ids：由后端按访客/登录身份过滤范围
       },
@@ -1916,20 +1965,50 @@ async function sendQuestion(presetQuestion, options = {}) {
         onEvent: (event, data) => {
           // LLM Guard 拒绝：显示固定安全提示，不继续等待回答或引用。
           if (event === "guard_blocked") {
-            clearThinkingState(bubble);
+            clearThinkingArmed();
             bubble.classList.remove("streaming-cursor");
             rawAssistantText = data.message || "该请求未通过安全检查，系统已拒绝处理。";
             setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(rawAssistantText)}</span>`);
             return;
           }
-          // 缓存命中：立即取消思考态，正文仍走 citations/chunk/done
+          // 敏感话题无权：明确提示，不展示思考
+          if (event === "access_denied") {
+            cacheHit = true;
+            clearThinkingArmed();
+            bubble.classList.remove("streaming-cursor");
+            rawAssistantText = data.message || data.reason || "该内容需要更高权限访问";
+            setAssistantStreamHtml(
+              bubble,
+              `<div class="access-denied"><strong>权限不足</strong><p>${escapeHtml(rawAssistantText)}</p></div>`
+            );
+            return;
+          }
+          // 缓存命中：立即取消思考态；FAQ/缓存直答置信度默认满分，不等落库 done
           if (event === "cache_hit") {
             cacheHit = true;
-            clearThinkingState(bubble);
+            clearThinkingArmed();
+            bubble.classList.remove("is-thinking");
+            confidenceTip = formatConfidenceTip({ confidence: "high", confidence_score: 1.0 });
             const tipHost = bubble.closest(".msg-row")?.querySelector(".msg-meta") || null;
             if (tipHost) {
               tipHost.dataset.routeTip = "FAQ 秒答";
               tipHost.setAttribute("title", "FAQ 秒答");
+            }
+            attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
+            return;
+          }
+          // 直答路径提前下发的置信度（先于 persist/done）
+          if (event === "confidence") {
+            confidenceTip = formatConfidenceTip(data);
+            if (cacheHit && rawAssistantText) {
+              clearThinkingArmed();
+              setAssistantStreamHtml(
+                bubble,
+                renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}`, {
+                  forceCollapseReasoning: true,
+                })
+              );
+              attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
             }
             return;
           }
@@ -1959,13 +2038,14 @@ async function sendQuestion(presetQuestion, options = {}) {
           }
           // 增量文本：推理标签由前端分开展示，正文中仅显示最终回答。
           if (event === "chunk") {
-            clearThinkingState(bubble);
+            clearThinkingArmed();
             bubble.classList.add("streaming-cursor");
             rawAssistantText += data.content || data || "";
             setAssistantStreamHtml(bubble, renderAssistantBubbleHtml(rawAssistantText));
             scrollMessagesToBottom();
           }
           // 引用来源：按相关度排序，默认展示 Top-3，其余折叠
+          // FAQ/缓存秒答路径：收到 citations 立即渲染，不等 done（done 前还有落库）
           if (event === "citations") {
             const items = data.items || data.citations || data || [];
             const list = Array.isArray(items) ? items : [];
@@ -1976,10 +2056,20 @@ async function sendQuestion(presetQuestion, options = {}) {
             } else {
               citationsHtml = buildCitationsHtml(list);
             }
+            if (cacheHit && rawAssistantText) {
+              clearThinkingArmed();
+              setAssistantStreamHtml(
+                bubble,
+                renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}`, {
+                  forceCollapseReasoning: true,
+                })
+              );
+              attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
+            }
           }
           // 结束
           if (event === "done") {
-            clearThinkingState(bubble);
+            clearThinkingArmed();
             bubble.classList.remove("streaming-cursor");
             currentSessionId = data.session_id || currentSessionId;
             confidenceTip = formatConfidenceTip(data);
@@ -1993,13 +2083,15 @@ async function sendQuestion(presetQuestion, options = {}) {
             if (row && data.message_id) {
               row.dataset.messageId = data.message_id;
             }
-            attachAssistantActions(row);
+            attachAssistantActions(row, { ready: true });
+            // 收到 done 立刻解锁发送，不等流尾部埋点
+            setAskStreaming(false);
             highlightSidebarSession(currentSessionId);
             loadChatSidebar();
           }
           // 错误
           if (event === "error") {
-            clearThinkingState(bubble);
+            clearThinkingArmed();
             const msg = data.message || data || "问答失败";
             // 身份切换后沿用旧会话时后端返回无权访问：清会话并新建一次
             if (typeof msg === "string" && msg.includes("无权访问") && sessionId) {
@@ -2015,6 +2107,7 @@ async function sendQuestion(presetQuestion, options = {}) {
   try {
     await runAsk(currentSessionId);
   } catch (err) {
+    clearThinkingArmed();
     if (err.name === "AbortError") {
       if (bubble.isConnected) {
         finalizeAbortedAsk(bubble, rawAssistantText);
@@ -2028,6 +2121,7 @@ async function sendQuestion(presetQuestion, options = {}) {
         await runAsk(null);
         return;
       } catch (retryErr) {
+        clearThinkingArmed();
         if (retryErr.name === "AbortError") {
           if (bubble.isConnected) {
             finalizeAbortedAsk(bubble, rawAssistantText);
@@ -2035,16 +2129,15 @@ async function sendQuestion(presetQuestion, options = {}) {
           }
           return;
         }
-        clearThinkingState(bubble);
         setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(retryErr.message || "问答失败")}</span>`);
         return;
       }
     }
-    clearThinkingState(bubble);
     const failMsg =
       err.message === "UNAUTHORIZED" ? "登录已失效，请重新登录后再试" : err.message || "问答失败";
     setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(failMsg)}</span>`);
   } finally {
+    clearThinkingArmed();
     askAbort = null;
     setAskStreaming(false);
   }
@@ -2620,7 +2713,7 @@ async function handleUpload(file, opts = {}) {
     if (!opts.quietToast) toast("上传成功，正在处理…", "success");
     if (!docId) {
       bar.style.width = total > 1 ? `${Math.round((index / total) * 100)}%` : "100%";
-      prog.innerHTML = `<span class="text-success">${prefix}上传成功，已进入预处理/向量化队列</span>`;
+      prog.innerHTML = `<span class="text-success">${prefix}上传成功，已进入预处理 / 向量化；FAQ 将在后台异步生成</span>`;
       return;
     }
     bar.style.width = total > 1 ? `${Math.round(((index - 0.5) / total) * 100)}%` : "35%";

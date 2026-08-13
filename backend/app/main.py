@@ -375,15 +375,47 @@ async def lifespan(_: FastAPI):
     settings.assert_cloud_ready()
     get_langfuse()
     # CI/裸库需先装扩展，再 create_all（否则 gin_trgm_ops 索引会失败）
-    await ensure_postgres_extensions()
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    await ensure_schema_patches()
+    try:
+        await ensure_postgres_extensions()
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        await ensure_schema_patches()
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc).lower()
+        if "password authentication failed" in msg or "invalidpassworderror" in msg:
+            logging.getLogger("app.main").error(
+                "\n"
+                "==================================================\n"
+                "PostgreSQL 密码认证失败！\n"
+                "可能原因：.env 中 POSTGRES_PASSWORD 与数据卷中密码不一致\n"
+                "\n"
+                "解决方案（二选一）：\n"
+                "1. 手动同步密码：\n"
+                "   docker exec <postgres容器> psql -U %s -d %s "
+                "-c \"ALTER USER %s PASSWORD '<新密码>';\"\n"
+                "2. 重置数据库（会丢失数据）：\n"
+                "   docker compose down -v && docker compose up -d\n"
+                "==================================================",
+                settings.POSTGRES_USER,
+                settings.POSTGRES_DB,
+                settings.POSTGRES_USER,
+            )
+        raise
     await seed_identity_data()
     await seed_departments()
     await seed_model_configs()
     await seed_role_cache_configs()
     await seed_query_processing_config()
+    try:
+        from app.services.sensitivity_service import sensitivity_service
+
+        async with SessionLocal() as sens_db:
+            await sensitivity_service.ensure_default_role_permissions(
+                sens_db,
+                tenant_id=settings.FAQ_TENANT_ID,
+            )
+    except Exception:  # noqa: BLE001
+        logging.getLogger("app.main").warning("seed sensitivity role permissions failed", exc_info=True)
     await init_redis()
     try:
         init_chroma()

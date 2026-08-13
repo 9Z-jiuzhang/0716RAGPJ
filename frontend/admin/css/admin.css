@@ -421,11 +421,16 @@ html[data-theme="dark"] .usage-notice {
   background: var(--color-primary-gradient);
   border-radius: 6px 6px 0 0;
   min-height: 4px;
+  min-width: 0;
   position: relative;
   transition: filter var(--duration-micro, 180ms) var(--ease-standard, ease),
     box-shadow var(--duration-micro, 180ms) var(--ease-standard, ease);
   box-shadow: 0 0 14px color-mix(in srgb, var(--color-primary) 40%, transparent);
-  height: var(--bar-h, 4%);
+  /* 高度由 JS 按「最高值基准」写入像素；保留变量作兜底 */
+  height: var(--bar-h, 4px);
+  flex-grow: 1;
+  flex-shrink: 1;
+  align-self: flex-end;
 }
 
 .chart-grid {
@@ -443,7 +448,7 @@ html[data-theme="dark"] .usage-notice {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  height: 140px;
+  height: var(--bar-chart-h, 140px);
   padding: 12px 4px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -488,7 +493,79 @@ html[data-theme="dark"] .usage-notice {
 }
 
 .toolbar .form-control {
+  /* 覆盖全局 form-control width:100%，避免工具栏筛选项被撑成整行竖排 */
+  width: auto;
   max-width: 220px;
+  height: 36px;
+}
+
+.toolbar.faq-toolbar {
+  margin: -2px 0 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--table-divider, var(--color-border));
+  width: 100%;
+}
+
+.toolbar.faq-toolbar [data-faq-kb] {
+  min-width: 200px;
+  max-width: 260px;
+}
+
+.toolbar.faq-toolbar [data-faq-status] {
+  min-width: 128px;
+  width: 140px;
+  max-width: 160px;
+}
+
+.toolbar.faq-toolbar [data-faq-sens-filter] {
+  min-width: 120px;
+  width: 132px;
+  max-width: 150px;
+}
+
+.toolbar.faq-toolbar [data-faq-keyword] {
+  min-width: 180px;
+  flex: 1 1 200px;
+  max-width: 280px;
+}
+
+.toolbar.faq-toolbar [data-faq-source-doc] {
+  min-width: 160px;
+  max-width: 240px;
+}
+
+.toolbar.faq-toolbar .faq-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.faq-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.faq-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--color-primary, #3b82f6) 12%, transparent);
+  color: var(--color-text);
+}
+
+.faq-filter-chip .btn {
+  padding: 0 4px;
+  min-height: auto;
+  height: auto;
+  line-height: 1.2;
 }
 
 .table th.col-builtin,
@@ -581,6 +658,71 @@ html[data-theme="dark"] .usage-notice {
 }
 .table-depts col.depts-col-actions {
   width: 12.5rem;
+}
+
+.dept-intro-body {
+  padding: 4px 2px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  color: var(--color-text);
+}
+
+.dept-edit-form {
+  padding: 4px 2px 8px;
+}
+
+.dept-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(180px, 1.4fr) minmax(120px, 0.7fr);
+  gap: 12px 16px;
+  align-items: end;
+}
+
+.dept-edit-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dept-edit-enabled .dept-edit-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  margin: 0;
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-text);
+}
+
+.dept-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+@media (max-width: 720px) {
+  .dept-edit-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+#roleSensCard select[data-role-level],
+#roleSensCard td select.form-control {
+  text-align: center;
+  text-align-last: center;
+}
+
+.table-roles select[data-role-level] {
+  min-width: 6.5rem;
+  max-width: 100%;
+  text-align: center;
+  text-align-last: center;
+  margin: 0 auto;
 }
 
 .table-depts th,
@@ -1204,6 +1346,58 @@ html[data-theme="light"] .app-shell-admin .sidebar .nav-item.active {
   flex-shrink: 0;
 }
 
+.dash-welcome-clock {
+  flex: 0 0 auto;
+  min-width: 11.5em;
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-sans, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0 20px 0 12px;
+  pointer-events: none;
+  user-select: none;
+  line-height: 1.2;
+  color: var(--color-text);
+}
+
+.dash-welcome-clock .dash-clock-date,
+.dash-welcome-clock .dash-clock-time {
+  display: block;
+  width: 100%;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.dash-welcome-clock .dash-clock-date {
+  font-size: clamp(28px, 3.2vw, 40px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-text);
+}
+
+.dash-welcome-clock .dash-clock-time {
+  margin-top: 6px;
+  font-size: clamp(13px, 1.4vw, 16px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+html[data-theme="light"] .dash-welcome-clock {
+  color: color-mix(in srgb, var(--color-text) 92%, #0f172a);
+}
+
+html[data-theme="light"] .dash-welcome-clock .dash-clock-time {
+  color: color-mix(in srgb, var(--color-text-secondary) 88%, #0f172a);
+}
+
 /* 欢迎区双按钮：形状与主按钮一致，颜色仍由 .btn / .btn-secondary 各自决定 */
 .dash-welcome-actions > .btn {
   height: 40px;
@@ -1445,14 +1639,20 @@ html[data-theme="light"] .dash-welcome p {
   justify-content: flex-end;
 }
 
-/* 柱状图贴底并占满卡片剩余高度，避免等高卡片底部大块留白 */
+/* 柱状图贴底；高度由 --bar-chart-h / 柱像素高度决定，避免 height:auto 导致柱高失真 */
 .dash-chart-body > .bar-chart,
 .monitor-chart-body > .bar-chart {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   width: 100%;
-  height: auto;
-  min-height: 140px;
+  height: var(--bar-chart-h, 140px);
+  min-height: var(--bar-chart-h, 140px);
   box-sizing: border-box;
+}
+
+.dash-chart-body > .bar-chart.bar-chart-labeled,
+.monitor-chart-body > .bar-chart.bar-chart-labeled {
+  height: calc(var(--bar-chart-h, 140px) + 28px);
+  min-height: calc(var(--bar-chart-h, 140px) + 28px);
 }
 
 .monitor-stats-list .monitor-stat-value {
@@ -1498,8 +1698,25 @@ html[data-theme="light"] .dash-welcome p {
   grid-column: span 8;
 }
 
+.dash-bento .dash-chart-card.span-6 {
+  grid-column: span 6;
+}
+
 .dash-bento .dash-chart-card.span-4 {
   grid-column: span 4;
+}
+
+/* 错误卡加宽后副标题尽量单行 */
+.dash-bento .dash-err-card .card-header-text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dash-bento .dash-err-card .card-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .dash-chart-grid {
@@ -1581,18 +1798,63 @@ html[data-theme="light"] .dash-chart-card .chart-range-select {
 }
 
 .bar-chart-labeled {
-  padding-bottom: 22px;
+  padding-bottom: 28px;
+  height: calc(var(--bar-chart-h, 140px) + 28px);
+  min-height: calc(var(--bar-chart-h, 140px) + 28px);
 }
 
 .bar-chart-labeled .bar em {
   position: absolute;
   left: 50%;
-  bottom: -20px;
+  bottom: -22px;
   transform: translateX(-50%);
   font-size: var(--font-size-2xs);
   font-style: normal;
   color: var(--color-text-secondary);
   white-space: nowrap;
+  max-width: 7.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 问题主题分布表：代表问题优先；主题合并为一列 */
+.table-topics {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+
+.table-topics col.topics-col-q {
+  width: 52%;
+}
+.table-topics col.topics-col-themes {
+  width: auto;
+}
+.table-topics col.topics-col-count {
+  width: 5.5rem;
+}
+
+.table-topics th.col-num,
+.table-topics td.col-num {
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  width: 5.5rem;
+}
+
+.table-topics th.col-topic-q,
+.table-topics td.col-topic-q,
+.table-topics th.col-topic-themes,
+.table-topics td.col-topic-themes {
+  max-width: none;
+  width: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-topics td.col-topic-themes {
+  color: var(--color-text-secondary);
 }
 
 .dash-security-metrics {
@@ -1694,6 +1956,24 @@ html[data-theme="dark"] .app-shell-admin .dash-shortcut-grid .dash-shortcut:hove
   .dash-welcome {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .dash-welcome-clock {
+    order: 2;
+    width: 100%;
+    margin-left: 0;
+    align-items: flex-start;
+    text-align: left;
+    padding: 8px 0 0;
+  }
+
+  .dash-welcome-clock .dash-clock-date,
+  .dash-welcome-clock .dash-clock-time {
+    text-align: left;
+  }
+
+  .dash-welcome-actions {
+    order: 3;
   }
 
   .dash-stat-grid,
@@ -1940,13 +2220,22 @@ html[data-theme="light"] .dashboard-hero::after {
   min-height: 0;
   border: var(--glass-border);
   border-radius: var(--radius-card);
-  overflow: hidden;
+  overflow: visible;
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow);
   transition: var(--transition);
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.kb-card.is-menu-open {
+  z-index: 40;
+}
+
+.kb-create-card {
+  overflow: hidden;
 }
 
 .kb-card:hover {
@@ -2022,11 +2311,14 @@ html[data-theme="dark"] .app-shell-admin .kb-create-card:active {
 
 .kb-card-cover {
   position: relative;
-  height: 74px;
-  padding: 15px;
+  min-height: 78px;
+  padding: 16px 16px 14px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  overflow: hidden;
   background: linear-gradient(
     135deg,
     rgba(22, 42, 72, 0.95) 0%,
@@ -2069,21 +2361,54 @@ html[data-theme="dark"] .kb-card:nth-child(3n + 2) .kb-card-cover {
   ) !important;
 }
 
-.kb-card-cover > span:not(.badge) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.55);
-  color: #3a4452;
-  font-size: var(--font-size-lg);
-  font-weight: 600;
+.kb-card-cover-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.kb-card-cover-title {
+  margin: 0;
+  max-width: 100%;
+  color: #f4f7fb;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.kb-card-cover-status {
+  color: color-mix(in srgb, #d7f5e4 88%, #fff);
+  font-size: 12px;
+}
+
+.kb-card-cover-status.is-processing {
+  color: color-mix(in srgb, #ffe2a8 90%, #fff);
+}
+
+html[data-theme="light"] .kb-card-cover-title {
+  color: #1a2740;
+}
+
+html[data-theme="light"] .kb-card-cover-status {
+  color: var(--color-success);
+}
+
+html[data-theme="light"] .kb-card-cover-status.is-processing {
+  color: var(--color-warning);
 }
 
 /* 类型徽章放在封面右上角 */
-.kb-card-cover > .badge {
+.kb-card-cover > .badge,
+.kb-card-cover-badges > .badge {
   flex: 0 0 auto;
   align-self: flex-start;
   margin: 0;
@@ -2093,16 +2418,13 @@ html[data-theme="dark"] .kb-card:nth-child(3n + 2) .kb-card-cover {
   border-radius: 999px;
 }
 
-html[data-theme="dark"] .kb-card-cover > span:not(.badge) {
-  background: rgba(56, 135, 240, 0.18);
-  color: var(--color-text-body, #e6edf7);
-}
-
 .kb-card-body {
   padding: 16px 18px 14px;
   flex: 1;
   display: flex;
   flex-direction: column;
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+  overflow: visible;
 }
 
 .kb-card-body > p {
@@ -2232,14 +2554,127 @@ html[data-theme="dark"] .kb-card-cover > span:not(.badge) {
 }
 
 .kb-card-actions {
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   position: relative;
   z-index: 2;
 }
 
-/* 共享蓝描边胶囊：列表「知识库详情」与详情页「编辑知识库」 */
+.kb-card-more {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.kb-card-more-spacer {
+  width: 32px;
+  height: 32px;
+}
+
+.kb-card-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.kb-card-more-btn:hover,
+.kb-card-more-btn[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.kb-card-more-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  bottom: auto;
+  min-width: 120px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, #94a3b8);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  box-shadow:
+    0 10px 28px rgba(15, 23, 42, 0.16),
+    0 1px 0 rgba(255, 255, 255, 0.65) inset;
+  z-index: 50;
+}
+
+html[data-theme="dark"] .kb-card-more-menu {
+  background: rgba(22, 30, 42, 0.96);
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+html[data-theme="light"] .kb-card-more-menu {
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.kb-card-more-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kb-card-more-item:hover {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+.kb-card-more-item.is-danger {
+  color: var(--color-danger, #c62828);
+}
+
+.kb-card-more-item.is-danger:hover {
+  background: color-mix(in srgb, var(--color-danger, #c62828) 12%, transparent);
+}
+
+.kb-card-cover-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.kb-pin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 88%, #000);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* 共享蓝描边胶囊：列表「知识库管理」与详情页「编辑知识库」 */
 .btn.kb-card-btn {
   flex: 0 0 auto;
   width: auto;
@@ -3052,15 +3487,37 @@ html[data-theme="light"] .kb-upload-file {
   width: 10%;
 }
 .table-docs col.docs-col-name {
-  width: 32.5%;
+  width: 26.5%;
 }
 .table-docs col.docs-col-size,
-.table-docs col.docs-col-num,
+.table-docs col.docs-col-num {
+  width: 7%;
+}
+.table-docs col.docs-col-faq {
+  width: 6%;
+}
+.table-docs col.docs-col-sens {
+  width: 8%;
+}
 .table-docs col.docs-col-status {
-  width: 11%;
+  width: 10%;
 }
 .table-docs col.docs-col-actions {
-  width: 16%;
+  width: 20%;
+}
+
+.table-docs th.col-sens,
+.table-docs td.col-sens {
+  overflow: visible;
+  max-width: none;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.table-docs th.col-actions,
+.table-docs td.col-actions {
+  overflow: visible;
+  max-width: none;
 }
 
 .table-docs th,
@@ -3289,19 +3746,25 @@ html[data-theme="light"] .kb-upload-file {
 }
 
 .table-roles col.roles-col-name {
-  width: 16%;
+  width: 12%;
 }
 .table-roles col.roles-col-code {
-  width: 14%;
+  width: 11%;
 }
 .table-roles col.roles-col-desc {
-  width: 40%;
+  width: 22%;
 }
 .table-roles col.roles-col-builtin {
-  width: 8%;
+  width: 7%;
 }
 .table-roles col.roles-col-num {
   width: 7%;
+}
+.table-roles col.roles-col-sens {
+  width: 11%;
+}
+.table-roles col.roles-col-sens-default {
+  width: 9%;
 }
 .table-roles col.roles-col-actions {
   width: 12.5rem;
@@ -3347,6 +3810,17 @@ html[data-theme="light"] .kb-upload-file {
   width: auto;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.table-roles th.col-sens,
+.table-roles td.col-sens,
+.table-roles th.col-sens-default,
+.table-roles td.col-sens-default {
+  width: auto;
+  max-width: none;
+  white-space: nowrap !important;
+  overflow: visible !important;
   text-align: center;
 }
 
@@ -4150,4 +4624,167 @@ html[data-theme="dark"] .audit-export-page-input:focus {
   outline: 2px solid var(--color-primary, #3b82f6);
   outline-offset: -2px;
   background: color-mix(in srgb, var(--color-primary, #3b82f6) 10%, transparent);
+}
+
+/* ========== 知识库 FAQ 列表：问题/答案加宽可换行，短字段收窄，操作列保持全局约束 ========== */
+.table-kb-faqs {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.table-kb-faqs col.faq-col-check {
+  width: 40px;
+}
+
+.table-kb-faqs col.faq-col-question {
+  width: 26%;
+}
+
+.table-kb-faqs col.faq-col-answer {
+  width: 34%;
+}
+
+.table-kb-faqs col.faq-col-status {
+  width: 88px;
+}
+
+.table-kb-faqs col.faq-col-sens {
+  width: 88px;
+}
+
+.table-kb-faqs col.faq-col-quality {
+  width: 64px;
+}
+
+.table-kb-faqs col.faq-col-hits {
+  width: 56px;
+}
+
+.table-kb-faqs col.faq-col-source {
+  width: 96px;
+}
+
+.table-kb-faqs col.faq-col-actions {
+  width: 148px;
+}
+
+/* FAQ 操作：纵向排列；文案不换行 */
+.table-kb-faqs .table-actions.faq-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+.table-kb-faqs .table-actions.faq-actions .btn {
+  width: auto !important;
+  max-width: 100%;
+  flex: 0 0 auto;
+  white-space: nowrap !important;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+/*
+ * FAQ 操作色：编辑/查看/可拆/撤销走默认白底蓝边；仅删除用红描边区分。
+ */
+html[data-theme="light"] .app-shell-admin .table-kb-faqs .faq-actions .btn.faq-btn-delete,
+html[data-theme="dark"] .app-shell-admin .table-kb-faqs .faq-actions .btn.faq-btn-delete {
+  color: var(--color-danger, #c62828) !important;
+  border-color: var(--color-danger, #c62828) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  background-image: none !important;
+}
+
+html[data-theme="dark"] .app-shell-admin .table-kb-faqs .faq-actions .btn.faq-btn-delete {
+  background: transparent !important;
+  color: #f87171 !important;
+  border-color: #ef4444 !important;
+}
+
+html[data-theme="light"] .app-shell-admin .table-kb-faqs .faq-actions .btn.faq-btn-delete:hover,
+html[data-theme="dark"] .app-shell-admin .table-kb-faqs .faq-actions .btn.faq-btn-delete:hover {
+  background: color-mix(in srgb, var(--color-danger, #c62828) 10%, transparent) !important;
+  border-color: var(--color-danger, #c62828) !important;
+  color: var(--color-danger, #c62828) !important;
+}
+
+/* FAQ 树形：子问缩进跟随父条 */
+.table-kb-faqs tr.faq-row-child {
+  background: color-mix(in srgb, var(--color-primary, #3b82f6) 3%, transparent);
+}
+
+.table-kb-faqs tr.faq-row-child td.col-question {
+  padding-left: 28px;
+}
+
+.table-kb-faqs .faq-tree-mark {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--admin-ink-3, #8892a4);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  user-select: none;
+}
+
+.table-kb-faqs .faq-child-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #0f766e;
+  background: color-mix(in srgb, #14b8a6 14%, transparent);
+  vertical-align: middle;
+}
+
+html[data-theme="dark"] .table-kb-faqs .faq-child-badge {
+  color: #5eead4;
+}
+
+.table-kb-faqs th.col-check,
+.table-kb-faqs td.col-check {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.table-kb-faqs th.col-question,
+.table-kb-faqs td.col-question,
+.table-kb-faqs th.col-answer,
+.table-kb-faqs td.col-answer {
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+  line-height: 1.45;
+}
+
+.table-kb-faqs td.col-answer {
+  color: var(--color-text-secondary, #5b6472);
+}
+
+.table-kb-faqs th.col-status,
+.table-kb-faqs td.col-status,
+.table-kb-faqs th.col-sens,
+.table-kb-faqs td.col-sens,
+.table-kb-faqs th.col-quality,
+.table-kb-faqs td.col-quality,
+.table-kb-faqs th.col-hits,
+.table-kb-faqs td.col-hits,
+.table-kb-faqs th.col-source,
+.table-kb-faqs td.col-source {
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.table-kb-faqs td.col-source {
+  font-size: var(--font-size-xs, 12px);
+  color: var(--color-text-secondary, #5b6472);
 }

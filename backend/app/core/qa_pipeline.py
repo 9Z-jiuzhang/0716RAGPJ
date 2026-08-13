@@ -195,9 +195,9 @@ class QAPipeline:
             if is_guest and not guest_id:
                 guest_id = str(uuid.uuid4())
 
-            # [0] LLM Guard 在创建会话和访问知识库之前执行，恶意请求不会进入 RAG 主链路。
-            with tracker.track("llm_guard"):
-                guard_decision = await llm_guard_service.evaluate(
+            # [0] 本地规则护栏（毫秒级）。完整 LLM Guard 延后到 FAQ 未命中之后，避免秒答被 4s 护栏拖垮。
+            with tracker.track("llm_guard_local"):
+                guard_decision = await llm_guard_service.evaluate_local_gate(
                     db,
                     question=question,
                     user=user,
@@ -349,9 +349,18 @@ class QAPipeline:
 
             scope_fp = ",".join(sorted(str(t.kb_id) for t in targets)) or "empty"
 
-            # [2.5] 知识库 FAQ 主缓存：首问或显式点选热门题可秒答；越权库一律拦截。
+            # 用户最高可访问密级（访客=normal）
+            from app.services.sensitivity_service import sensitivity_service
+
+            user_max_level = await sensitivity_service.resolve_user_max_level(
+                db,
+                user=user,
+                tenant_id=settings.FAQ_TENANT_ID,
+            )
+
+            # [2.5] 知识库 FAQ：规范化后精确同题即秒答（点选与手输相同）；越权库拦截。
             with tracker.track("kb_faq_lookup"):
-                faq_match = await kb_faq_service.check_faq_hit(
+                faq_outcome = await kb_faq_service.check_faq_hit(
                     db,
                     question=question,
                     tenant_id=settings.FAQ_TENANT_ID,
@@ -359,7 +368,11 @@ class QAPipeline:
                     is_explicit_click=bool(getattr(request, "explicit_faq_click", False)),
                     message_count_in_session=int(session.message_count or 0),
                     has_unfinished_context=bool(last_assistant),
+                    user_max_level=user_max_level,
+                    user_id=user.id if user else None,
+                    conversation_id=session.id,
                 )
+            faq_match = faq_outcome.match
             if faq_match is not None:
                 citations = list(faq_match.citations or [])
                 retrieval_meta = {
@@ -368,6 +381,8 @@ class QAPipeline:
                     "authorized_kb_ids": [str(target.kb_id) for target in targets],
                     "cache_hit": True,
                     "source": "kb_faq",
+                    "sensitivity_level": faq_match.sensitivity_level,
+                    "user_max_level": user_max_level,
                     "intent": {
                         "name": guard_decision.intent,
                         "confidence": guard_decision.confidence,
@@ -404,8 +419,47 @@ class QAPipeline:
                     yield ev
                 return
 
+            # FAQ 精确命中但密级不足：明确提示（允许暴露「涉密需权限」）
+            if faq_outcome.denied:
+                await db.commit()
+                yield self._event(
+                    "access_denied",
+                    message="该内容需要更高权限访问",
+                    reason="该内容需要更高权限访问",
+                    user_level=user_max_level,
+                    required_level=faq_outcome.denied_level,
+                    request_id=tracker.request_id,
+                )
+                return
+
+            # [2.6] FAQ 未命中：完整 LLM Guard（含 LLM 意图分类），恶意请求不进入缓存/RAG。
+            with tracker.track("llm_guard"):
+                guard_decision = await llm_guard_service.evaluate(
+                    db,
+                    question=question,
+                    user=user,
+                    guest_id=guest_id,
+                    client_ip=client_ip,
+                )
+            if not guard_decision.allowed:
+                yield self._event(
+                    "guard_blocked",
+                    message=guard_decision.message or "该请求未通过安全检查，系统已拒绝处理。",
+                    intent=guard_decision.intent,
+                    reason_code=guard_decision.reason_code,
+                    request_id=tracker.request_id,
+                )
+                return
+            yield self._event(
+                "intent",
+                intent=guard_decision.intent,
+                confidence=round(guard_decision.confidence, 4),
+                detector=guard_decision.detector,
+            )
+
             cache_req = CacheLookupRequest(
                 request_id=tracker.request_id,
+                tenant_id=settings.FAQ_TENANT_ID,
                 user_id=str(user.id) if user else None,
                 scope_fingerprint=scope_fp,
                 normalized_question=question,
@@ -453,6 +507,40 @@ class QAPipeline:
                     cache_hit.miss_reason,
                 )
 
+            # Singleflight：同题高并发只让一方走完整 LLM；其余等待 L2 回写。
+            acquired_exact_build = await qa_cache_service.try_begin_exact_build(
+                cache_req,
+                redis_client=redis_client,
+            )
+            if not acquired_exact_build:
+                waited = await qa_cache_service.wait_exact_hit(
+                    cache_req,
+                    redis_client=redis_client,
+                    timeout_seconds=30.0,
+                )
+                if waited is not None and waited.answer:
+                    async for ev in self._emit_direct_answer(
+                        db,
+                        session=session,
+                        user=user,
+                        guest_id=guest_id,
+                        is_guest=is_guest,
+                        question=question,
+                        answer_text=waited.answer,
+                        tracker=tracker,
+                        lf_trace=lf_trace,
+                        route=route,
+                        request=request,
+                        citations=list(waited.citations or []),
+                        retrieval_meta={
+                            "cache": waited.model_dump(),
+                            "source": "qa_multilevel_cache",
+                            "singleflight_wait": True,
+                        },
+                    ):
+                        yield ev
+                    return
+
             # [3] 角色缓存精确命中（过渡期只读回退）：权限复核通过后直接返回。
             cache_match = None
             if settings.ROLE_CACHE_READONLY_FALLBACK:
@@ -492,6 +580,12 @@ class QAPipeline:
                 )
                 yield self._event("citations", citations=citations)
                 yield self._event("chunk", content=answer_text)
+                yield self._event(
+                    "confidence",
+                    confidence="high",
+                    confidence_score=1.0,
+                    source="role_cache",
+                )
 
                 with tracker.track("persist"):
                     user_msg_id = uuid.uuid4()
@@ -512,17 +606,6 @@ class QAPipeline:
                         guest_id=guest_id,
                         kb_ids=request.kb_ids,
                     )
-                await qa_cache_service.put_exact(
-                    cache_req,
-                    answer=answer_text,
-                    citations=citations,
-                    redis_client=redis_client,
-                )
-                try:
-                    lf_trace.update(output=answer_text[:500])
-                except Exception:
-                    pass
-                lf.flush()
                 yield self._event(
                     "done",
                     session_id=str(session.id),
@@ -533,6 +616,23 @@ class QAPipeline:
                     confidence_score=1.0,
                     cache_hit=True,
                 )
+                try:
+                    await qa_cache_service.put_exact(
+                        cache_req,
+                        answer=answer_text,
+                        citations=citations,
+                        redis_client=redis_client,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("role cache put_exact failed", exc_info=True)
+                try:
+                    lf_trace.update(output=answer_text[:500])
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    lf.flush()
+                except Exception:  # noqa: BLE001
+                    pass
                 return
 
             # 模型配置快照：普通用户 temperature 默认不覆盖已发布/环境配置
@@ -646,6 +746,16 @@ class QAPipeline:
                         if not retry.empty:
                             retrieval_meta["rewrite_retry"] = "original_query"
                             retrieval = retry
+                    # 密级过滤：无权限分段不进入证据（滤空后走「未找到」，不提示涉密）
+                    kept_hits, sensitivity_dropped = await sensitivity_service.filter_hits_by_sensitivity(
+                        db,
+                        list(retrieval.hits),
+                        user_max_level=user_max_level,
+                    )
+                    if sensitivity_dropped:
+                        retrieval.hits = kept_hits
+                        retrieval_meta["sensitivity_filtered_out"] = sensitivity_dropped
+                        retrieval_meta["user_max_level"] = user_max_level
                     retrieval_meta.update(
                         {
                             "strategy": retrieval.strategy,
@@ -716,6 +826,18 @@ class QAPipeline:
                         )
                         retrieval_meta["neighbor_chunk_ids"] = [h.chunk_id for h in neighbor_hits]
                         retrieval_meta["hit_count"] = len(evidence_hits)
+
+                # 粘性/邻段合并后再滤一次密级，避免绕过
+                evidence_hits, sticky_dropped = await sensitivity_service.filter_hits_by_sensitivity(
+                    db,
+                    evidence_hits,
+                    user_max_level=user_max_level,
+                )
+                if sticky_dropped:
+                    retrieval_meta["sensitivity_filtered_out"] = int(
+                        retrieval_meta.get("sensitivity_filtered_out") or 0
+                    ) + sticky_dropped
+                    retrieval_meta["hit_count"] = len(evidence_hits)
 
                 if not evidence_hits:
                     retrieval_meta["reason"] = "no_relevant_hits"
@@ -819,6 +941,8 @@ class QAPipeline:
                     citations=citations,
                     redis_client=redis_client,
                 )
+            else:
+                await qa_cache_service.release_exact_inflight(cache_req, redis_client=redis_client)
 
             try:
                 lf_trace.update(output=answer_text[:500])
@@ -966,17 +1090,27 @@ class QAPipeline:
         citations: list[dict[str, Any]],
         retrieval_meta: dict[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        """问候/帮助/变换/缓存等不进检索的短路径。"""
+        """问候/帮助/变换/缓存等不进检索的短路径。
+
+        先吐答案与引用，再落库，避免前端等 persist 才看到引用来源。
+        """
         # 完整来源保留在 retrieval_meta.source；strategy 只写短码
         strategy_code = normalize_qa_strategy(
             None,
             source=str(retrieval_meta.get("source") or "route"),
         )
-        yield self._event("citations", citations=citations)
         yield self._event("chunk", content=answer_text)
+        yield self._event("citations", citations=citations)
+        # FAQ/缓存等直答：置信度固定满分，先于落库下发，避免前端干等 done
+        yield self._event(
+            "confidence",
+            confidence="high",
+            confidence_score=1.0,
+            source=str(retrieval_meta.get("source") or "direct"),
+        )
+        user_msg_id = uuid.uuid4()
+        assistant_msg_id = uuid.uuid4()
         with tracker.track("persist"):
-            user_msg_id = uuid.uuid4()
-            assistant_msg_id = uuid.uuid4()
             await self._persist_turn(
                 db,
                 session=session,
@@ -993,6 +1127,18 @@ class QAPipeline:
                 guest_id=guest_id,
                 kb_ids=request.kb_ids,
             )
+        # 先发 done 解锁前端提问；埋点 / Langfuse 后置，避免拖住交互
+        yield self._event(
+            "done",
+            session_id=str(session.id),
+            message_id=str(assistant_msg_id),
+            request_id=tracker.request_id,
+            performance=tracker.to_dict(),
+            confidence="high",
+            confidence_score=1.0,
+            route_intent=route.intent.value if route else None,
+        )
+        try:
             await self._record_analytics_event(
                 db,
                 request_id=tracker.request_id,
@@ -1009,21 +1155,16 @@ class QAPipeline:
                 rewrite_enabled=False,
                 model_snapshot_id=None,
             )
+        except Exception:  # noqa: BLE001
+            logger.warning("direct answer analytics failed", exc_info=True)
         try:
             lf_trace.update(output=answer_text[:500])
         except Exception:  # noqa: BLE001
             pass
-        get_langfuse().flush()
-        yield self._event(
-            "done",
-            session_id=str(session.id),
-            message_id=str(assistant_msg_id),
-            request_id=tracker.request_id,
-            performance=tracker.to_dict(),
-            confidence="high",
-            confidence_score=1.0,
-            route_intent=route.intent.value if route else None,
-        )
+        try:
+            get_langfuse().flush()
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _record_analytics_event(
         self,

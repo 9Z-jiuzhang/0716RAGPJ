@@ -272,8 +272,22 @@ export async function askStream(body, { onEvent, signal, _retried = false } = {}
     buffer += decoder.decode(value, { stream: true });
     const parts = buffer.split("\n\n");
     buffer = parts.pop() || "";
+    let gotTerminal = false;
     for (const part of parts) {
-      parseSseBlock(part, onEvent);
+      const ev = parseSseBlock(part, onEvent);
+      // 收到 done/error 即可结束读流，后台埋点不再卡住「发送」
+      if (ev === "done" || ev === "error" || ev === "guard_blocked" || ev === "access_denied") {
+        gotTerminal = true;
+        break;
+      }
+    }
+    if (gotTerminal) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* ignore */
+      }
+      break;
     }
   }
   if (buffer.trim()) parseSseBlock(buffer, onEvent);
@@ -286,7 +300,7 @@ function parseSseBlock(block, onEvent) {
     if (line.startsWith("event:")) eventName = line.slice(6).trim();
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
   }
-  if (!dataLines.length) return;
+  if (!dataLines.length) return eventName;
   let data = dataLines.join("\n");
   try {
     data = JSON.parse(data);
@@ -294,6 +308,7 @@ function parseSseBlock(block, onEvent) {
     // 保持字符串
   }
   if (typeof onEvent === "function") onEvent(eventName, data);
+  return eventName;
 }
 
 export const api = {

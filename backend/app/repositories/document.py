@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -33,14 +33,20 @@ async def list_documents(
     page_size: int = 20,
     keyword: str | None = None,
 ) -> tuple[list[Document], int]:
+    """列表按密级置顶：极高密 > 机密 > 普通，同档再按创建时间倒序。"""
     filters = [Document.kb_id == kb_id, Document.status != "archived"]
     if keyword:
         filters.append(Document.filename.ilike(f"%{keyword}%"))
     total = await db.scalar(select(func.count()).select_from(Document).where(*filters)) or 0
+    sens_rank = case(
+        (Document.sensitivity_level == "restricted", 2),
+        (Document.sensitivity_level == "confidential", 1),
+        else_=0,
+    )
     stmt = (
         select(Document)
         .where(*filters)
-        .order_by(Document.created_at.desc())
+        .order_by(sens_rank.desc(), Document.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
