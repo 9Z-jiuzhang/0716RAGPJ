@@ -328,9 +328,17 @@ async def preview_segment_source(
     不写向量库、不落库、不修改任何正式文档记录与流水线状态机（无持久化副作用）。
     传入 file(filename+content) 或已上传 doc_id 二选一。
     """
+    from app.core.config import settings
     from app.services import parsers
     from app.services.chunking import split_text
+    from app.services.layout_parser import extract_layout
     from app.utils.exceptions import DocumentError
+
+    def _parse_preview_text(name: str, blob: bytes, ftype: str) -> str:
+        if settings.MULTIMODAL_RAG_ENABLED:
+            serialized, _ = extract_layout(name, blob, ftype, store_asset=None)
+            return serialized
+        return parsers.extract_text(name, blob, ftype)
 
     kb = await doc_repo.get_knowledge_base(db, kb_id)
     if not kb:
@@ -344,14 +352,14 @@ async def preview_segment_source(
         file_type = doc.file_type
         source = (doc.normalized_text or doc.raw_text or "").strip()
         if not source and doc.file_path:
-            raw = parsers.extract_text(doc.filename, storage.download_bytes(doc.file_path), doc.file_type)
+            raw = _parse_preview_text(doc.filename, storage.download_bytes(doc.file_path), doc.file_type)
             source, _stats = normalize_text(raw)
         preview_source = "normalized_text" if doc.normalized_text else "raw_text"
         base_rules = doc.segment_rules
     elif content is not None and filename is not None:
         file_type = _validate_upload(filename, content)
         resolved_filename = filename
-        raw = parsers.extract_text(filename, content, file_type)
+        raw = _parse_preview_text(filename, content, file_type)
         source, _stats = normalize_text(raw)
         preview_source = "normalized_text"
         base_rules = default_rules_for_file_type(file_type)
@@ -651,18 +659,23 @@ async def normalize_document(
         user.id,
         name=f"normalize:{doc.filename}",
     )
+    from app.core.config import settings
     from app.services import parsers
+    from app.services.layout_parser import extract_layout
 
     source = doc.raw_text or doc.normalized_text or ""
     ft = (doc.file_type or "").lower().lstrip(".")
     reextracted = False
-    # PDF CID 乱码：强制从原文件重抽（多模态兜底），避免清洗按钮只整理乱码
+    # 空正文或 PDF CID 乱码：强制从原文件重抽（PDF 走 melo 解析链；其它类型可走版面拆块）
     if doc.file_path and (
         not source
         or (ft == "pdf" and parsers.is_unusable_pdf_text(source))
     ):
         content = storage.download_bytes(doc.file_path)
-        source = parsers.extract_text(doc.filename, content, doc.file_type)
+        if ft == "pdf" or not settings.MULTIMODAL_RAG_ENABLED:
+            source = parsers.extract_text(doc.filename, content, doc.file_type)
+        else:
+            source, _ = extract_layout(doc.filename, content, doc.file_type, store_asset=None)
         doc.raw_text = source
         reextracted = True
         if ft == "pdf":

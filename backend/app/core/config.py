@@ -175,6 +175,21 @@ class Settings(BaseSettings):
     # 留空使用内置「图表/插图中文详述」提示词
     MARKITDOWN_LLM_PROMPT: str = ""
 
+    # ---------- 多模态检索（图/表/HTML）----------
+    # 开启后：版面拆块、表格转 MD/HTML、图片入库+描述、摘要多向量、检索回填完整结构
+    MULTIMODAL_RAG_ENABLED: bool = True
+    # 为表格/图片生成 LLM 摘要并作为向量化文本（Multi-vector：命中摘要→回填原文）
+    MULTIMODAL_SUMMARY_ENABLED: bool = True
+    # 图片描述：优先 VLM；失败则回退 OCR/文件名启发式
+    MULTIMODAL_VLM_ENABLED: bool = True
+    VLM_MODEL: str = "qwen-vl-plus"
+    VLM_BASE_URL: str = ""
+    VLM_API_KEY: str = ""
+    VLM_TIMEOUT_SECONDS: int = 60
+    # 超长表格按行切分时，每个切片前保留表头
+    MULTIMODAL_TABLE_MAX_CHARS: int = 3000
+    MULTIMODAL_SUMMARY_MAX_TOKENS: int = 512
+
     # ---------- 限流 ----------
     RATE_LIMIT_ENABLED: bool = True
 

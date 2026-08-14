@@ -214,18 +214,50 @@ async def _ensure_parsed(db: AsyncSession, doc) -> None:
     if doc.status == DocumentStatus.UPLOADED.value:
         await _parse(db, doc)
     elif doc.status != DocumentStatus.PARSING.value:
-        # 从中间态补解析
+        from app.core.config import settings
+        from app.services.layout_parser import extract_layout
+
         content = storage.download_bytes(doc.file_path)
-        doc.raw_text = parsers.extract_text(doc.filename, content, doc.file_type)
+
+        def _store_asset(name: str, blob: bytes, content_type: str) -> str:
+            return storage.upload_bytes(str(doc.kb_id), name, blob, content_type=content_type)
+
+        if settings.MULTIMODAL_RAG_ENABLED:
+            serialized, _ = extract_layout(
+                doc.filename,
+                content,
+                doc.file_type,
+                kb_id=str(doc.kb_id),
+                store_asset=_store_asset,
+            )
+            doc.raw_text = serialized
+        else:
+            doc.raw_text = parsers.extract_text(doc.filename, content, doc.file_type)
         await db.flush()
 
 
 async def _parse_from_current(db: AsyncSession, doc) -> None:
-    """status 已是 parsing 时执行解析正文。"""
+    """status 已是 parsing 时执行解析正文（支持版面拆块）。"""
+    from app.core.config import settings
+    from app.services.layout_parser import extract_layout
+
     record_metric("parsing", "start")
     content = storage.download_bytes(doc.file_path)
-    text = parsers.extract_text(doc.filename, content, doc.file_type)
-    doc.raw_text = text
+    def _store_asset(name: str, blob: bytes, content_type: str) -> str:
+        return storage.upload_bytes(str(doc.kb_id), name, blob, content_type=content_type)
+
+    if settings.MULTIMODAL_RAG_ENABLED:
+        serialized, _blocks = extract_layout(
+            doc.filename,
+            content,
+            doc.file_type,
+            kb_id=str(doc.kb_id),
+            store_asset=_store_asset,
+        )
+        doc.raw_text = serialized
+    else:
+        doc.raw_text = parsers.extract_text(doc.filename, content, doc.file_type)
+
     # PDF：同步栅格化每页图表入 MinIO，供问答引用展示（失败不阻断入库）
     if (doc.file_type or "").lower().lstrip(".") == "pdf":
         try:
@@ -282,6 +314,8 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
             exc.chunk_count,
         )
         raise
+    # 多模态：为表/图生成摘要元数据（向量用摘要，回填用完整结构）
+    previews = await _enrich_multimodal_previews(doc, previews)
     coverage = content_coverage_ratio(source, [p.content for p in previews])
     if previews:
         # 将覆盖率写入首段元数据，便于排查；不改变正文
@@ -316,6 +350,44 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
     ]
     await doc_repo.replace_chunks(db, doc, chunks)
     record_metric("segment", "ok")
+
+
+async def _enrich_multimodal_previews(doc, previews):
+    """表/图块补充 summary，供多向量检索。"""
+    from app.core.config import settings
+    from app.models.enums import ContentBlockType
+    from app.services.multimodal_enrichment import enrich_chunk_metadata
+
+    if not settings.MULTIMODAL_RAG_ENABLED or not previews:
+        return previews
+    for preview in previews:
+        meta = dict(preview.metadata or {})
+        btype = meta.get("block_type")
+        if btype not in {ContentBlockType.TABLE.value, ContentBlockType.IMAGE.value}:
+            continue
+        image_bytes = None
+        asset = (meta.get("asset_path") or "").strip()
+        if btype == ContentBlockType.IMAGE.value and asset:
+            try:
+                image_bytes = storage.download_bytes(asset)
+            except Exception:
+                logger.debug("load image asset failed path=%s", asset, exc_info=True)
+        enriched = await enrich_chunk_metadata(
+            block_type=btype,
+            parent_content=meta.get("parent_content") or preview.content,
+            structure_html=meta.get("structure_html") or "",
+            structure_md=meta.get("structure_md") or preview.content,
+            asset_path=asset,
+            caption_hint=meta.get("caption") or preview.content,
+            image_bytes=image_bytes,
+            mime_type=meta.get("mime_type") or "",
+        )
+        meta.update(enriched)
+        # PG/全文仍保留完整结构；向量化阶段改用 summary
+        preview.content = meta.get("parent_content") or preview.content
+        preview.char_count = len(preview.content)
+        preview.metadata = meta
+    return previews
 
 
 async def _vectorize(
@@ -354,19 +426,33 @@ async def _vectorize(
     else:
         vector_store.delete_document_vectors(doc.kb_id, doc.id)
     if enabled:
-        vectors = embedding.embed_texts([c.content for c in enabled])
+        # Multi-vector：表/图用摘要文本做 embedding，完整结构放 metadata.parent_content
+        embed_inputs: list[str] = []
+        for c in enabled:
+            meta = c.chunk_metadata or {}
+            if meta.get("is_summary_vector") and (meta.get("summary") or "").strip():
+                embed_inputs.append(str(meta["summary"]).strip())
+            else:
+                embed_inputs.append(c.content)
+        vectors = embedding.embed_texts(embed_inputs)
         vector_store.upsert_chunks(
             doc.kb_id,
             doc.id,
             [
                 {
                     "id": c.id,
-                    "content": c.content,
+                    "content": (
+                        str((c.chunk_metadata or {}).get("summary") or c.content).strip()
+                        if (c.chunk_metadata or {}).get("is_summary_vector")
+                        else c.content
+                    ),
                     "chunk_index": c.chunk_index,
                     "metadata": {
                         **(c.chunk_metadata or {}),
                         "doc_name": doc.filename or "",
                         "filename": doc.filename or "",
+                        # Chroma 侧保留完整回填字段
+                        "parent_content": (c.chunk_metadata or {}).get("parent_content") or c.content,
                     },
                 }
                 for c in enabled
