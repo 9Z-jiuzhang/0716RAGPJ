@@ -426,12 +426,19 @@ Authorization: Bearer <access_token>
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| question | 是 | 1–2000 字符 |
+| question | 是 | 1–2000 字符（`QA_QUESTION_MAX_CHARS`）；访客端输入框有字数提示与 `maxlength` |
 | session_id | 否 | 不传则**始终新建会话**（不按 `X-Guest-Id` 自动复用）；传入则可多轮续聊（含已闲置过期的会话，会重新激活） |
-| kb_ids | 否 | 限定知识库；默认全部可访问范围（与可访问集取交集） |
+| kb_ids | 否 | 限定知识库；默认全部可访问范围（与可访问集取交集）；访客端下拉可选单库 |
 | strategy | 否 | `hybrid`(默认) / `vector` / `fulltext` |
 | top_k | 否 | 默认 5（1–20）；**上下文跟进问**实际检索取 `max(top_k, QA_FOLLOWUP_TOP_K)`（默认 5）；前端引用区默认展开相关度最高的 3 段，其余折叠 |
 | temperature | 否 | 字段保留；**默认不覆盖**已发布/环境模型配置（记兼容意图），仅在模型注册表允许覆盖时生效 |
+| rewrite_enabled | 否 | 是否对本轮启用 Query 改写。**传则覆盖**管理员全局策略；不传则沿用全局（追问场景可能临时开启） |
+
+### 10.0 可检索知识库列表
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/qa/accessible-kbs` | **可选认证** | 返回当前身份可检索且已建索引的知识库 `{items:[{id,name}], total}`；供问答页下拉使用 |
 
 **SSE 事件**：
 
@@ -658,13 +665,14 @@ Authorization: Bearer <access_token>
 1. 前端仅以 [`openapi.json`](./openapi.json) + 本文档字段名为准；扩展模块以本文 + 运行时为准。
 2. 需鉴权接口先测 `401`，再测无权限 `403`。
 3. 知识库列表不得返回未授权库；访客仅见 GUEST 部门库。
-4. `/qa/ask` 覆盖：未登录仅 GUEST 库、登录后授权范围、非法 `kb_ids`、`guard_blocked`。
-5. 上传超大文件 → `413`；不支持格式 → `400` 且 message 明确。
+4. `/qa/ask` 覆盖：未登录仅 GUEST 库、登录后授权范围、非法 `kb_ids`、`guard_blocked`、`rewrite_enabled` 开/关；`GET /qa/accessible-kbs` 仅返回已建索引库。
+5. 上传超大文件 → `413`；不支持格式 → `400` 且 message 明确；txt/md 异常编码应提示另存 UTF-8/GBK 或成功解码 UTF-16。
 6. SSE 至少覆盖 `intent →（可选 route）→ chunk → citations → done`；拦截场景覆盖 `guard_blocked`。
 7. 回退：`confirm=false` 必拒；`true` 后创建 `rollback_rebuild` 向量化任务，可通过 `GET /knowledge-bases/{kb_id}/vectorize-status` 查询进度；重建成功后原子激活新索引，失败则用保护快照补偿库表且不切换版本。
 8. 部门：GUEST 部门不可删除/改 code；员工访问 GUEST 库不应被拒。
 9. 用户：管理员不可删除/禁用同级或更高级用户；不可将他人设为 admin/超管；角色权限配置仅超管可调。
 10. 改密：普通用户成功；`super` 返回 `403`。
+11. Chroma：客户端与服务端均为 0.6.x；错配时向量写入失败（`_type`）。
 
 ---
 
@@ -672,7 +680,8 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| 2.1.8 | 2026-08-13 | FAQ Cache V2.0 一期：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 KB_FAQ / FAQ_PHASE2_ACCEPTANCE |
+| 2.1.9 | 2026-08-13 | FAQ Cache V2.0 一期：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 KB_FAQ / FAQ_PHASE2_ACCEPTANCE |
+| 2.1.8 | 2026-08-06 | 问答页：`rewrite_enabled` 按请求可选、`GET /qa/accessible-kbs`、2000 字提示；上传字节进度；txt/md 编码放宽；契约重生成 |
 | 2.1.7 | 2026-07-31 | 云部署端口统一至 9000–9999（入口 9080）；Compose 自建 Langfuse（9310）；Chroma 宿主机 9800→容器 8000；见 CLOUD_DEPLOY.md |
 | 2.1.6 | 2026-07-27 | 前端 ZYUI-V3.1/V3.2：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、9Z/品牌标）；无 OpenAPI 变更；见 README §2.6 / `OPTIMIZATION_STATUS.md` |
 | 2.1.5 | 2026-07-27 | 反馈率口径修正（按窗口内问答消息对齐，≤100%）；补充 `answerable_events` / `matched_feedback`；首页反馈 KPI；访客端流式中止与列表体验见 README / OPTIMIZATION_STATUS |

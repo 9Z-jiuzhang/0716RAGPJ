@@ -311,11 +311,122 @@ function parseSseBlock(block, onEvent) {
   return eventName;
 }
 
+/**
+ * 带字节进度的 multipart 上传（XHR）。
+ * @param {string} path
+ * @param {FormData} formData
+ * @param {{ onProgress?: (pct: number, loaded: number, total: number) => void, signal?: AbortSignal, _retried?: boolean }} [opts]
+ */
+export async function uploadWithProgress(path, formData, opts = {}) {
+  const { onProgress, signal, _retried = false } = opts;
+
+  const run = () =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}${path}`);
+      xhr.setRequestHeader("X-Request-Id", uuid());
+      xhr.setRequestHeader("X-Guest-Id", getGuestId());
+      const token = getAccessToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      // 不要手动设 Content-Type，让浏览器带 multipart boundary
+
+      const onAbort = () => {
+        try {
+          xhr.abort();
+        } catch {
+          /* ignore */
+        }
+        reject(Object.assign(new Error("已取消上传"), { name: "AbortError" }));
+      };
+      if (signal) {
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      xhr.upload.onprogress = (ev) => {
+        if (!onProgress) return;
+        if (ev.lengthComputable && ev.total > 0) {
+          onProgress(Math.min(100, Math.round((ev.loaded / ev.total) * 100)), ev.loaded, ev.total);
+        } else if (ev.loaded > 0) {
+          // 部分代理不回传 total，给不确定进度提示
+          onProgress(-1, ev.loaded, 0);
+        }
+      };
+
+      xhr.onload = async () => {
+        if (signal) signal.removeEventListener("abort", onAbort);
+        const status = xhr.status;
+        const rawText = xhr.responseText || "";
+        let payload = null;
+        try {
+          payload = rawText ? JSON.parse(rawText) : null;
+        } catch {
+          payload = null;
+        }
+
+        if (status === 401 && !_retried) {
+          const ok = await tryRefresh();
+          if (ok) {
+            try {
+              resolve(await uploadWithProgress(path, formData, { ...opts, _retried: true }));
+            } catch (e) {
+              reject(e);
+            }
+            return;
+          }
+          clearAuth();
+          toast("登录已失效，请重新登录", "error");
+          reject(new Error("UNAUTHORIZED"));
+          return;
+        }
+
+        if (status < 200 || status >= 300) {
+          let message = "";
+          if (payload?.message) message = payload.message;
+          else if (typeof payload?.detail === "string") message = payload.detail;
+          else if (Array.isArray(payload?.detail)) {
+            message = payload.detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
+          } else if (rawText) message = rawText.slice(0, 200);
+          reject(new Error(localizeErrorMessage(message, status)));
+          return;
+        }
+
+        if (payload && typeof payload.code === "number" && payload.code !== 0) {
+          reject(new Error(payload.message || "业务失败"));
+          return;
+        }
+        resolve(payload?.data !== undefined ? payload.data : payload);
+      };
+
+      xhr.onerror = () => {
+        if (signal) signal.removeEventListener("abort", onAbort);
+        reject(new Error("无法连接后端，请确认统一入口（Nginx）与 API 服务已启动"));
+      };
+
+      xhr.onabort = () => {
+        if (signal) signal.removeEventListener("abort", onAbort);
+        reject(Object.assign(new Error("已取消上传"), { name: "AbortError" }));
+      };
+
+      xhr.send(formData);
+    });
+
+  return run();
+}
+
 export const api = {
   get: (path, opts) => apiRequest(path, { ...opts, method: "GET" }),
   post: (path, body, opts) => apiRequest(path, { ...opts, method: "POST", body }),
   put: (path, body, opts) => apiRequest(path, { ...opts, method: "PUT", body }),
   patch: (path, body, opts) => apiRequest(path, { ...opts, method: "PATCH", body }),
   delete: (path, opts) => apiRequest(path, { ...opts, method: "DELETE" }),
-  upload: (path, formData, opts) => apiRequest(path, { ...opts, method: "POST", formData }),
+  upload: (path, formData, opts) => {
+    if (typeof opts?.onProgress === "function") {
+      return uploadWithProgress(path, formData, opts);
+    }
+    return apiRequest(path, { ...opts, method: "POST", formData });
+  },
 };

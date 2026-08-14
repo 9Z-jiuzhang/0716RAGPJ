@@ -655,12 +655,20 @@ class QAPipeline:
             with tracker.track("query_processing"):
                 # 管理员策略按请求读取，修改后无需重启；缓存命中已在此步骤之前直接返回。
                 query_options = await get_query_processing_options(db)
-                # 上下文追问：临时开启改写以补全指代，不改动全局默认开关
-                if (
+                # 问答页可显式覆盖改写开关；未传时沿用全局策略，追问可临时开启。
+                if request.rewrite_enabled is not None:
+                    query_options = QueryProcessingOptions(
+                        rewrite_enabled=bool(request.rewrite_enabled),
+                        expansion_enabled=query_options.expansion_enabled,
+                        expansion_count=query_options.expansion_count,
+                        hyde_enabled=query_options.hyde_enabled,
+                    )
+                elif (
                     route is not None
                     and route.intent == ConversationIntent.CONTEXT_FOLLOWUP_KB
                     and not query_options.rewrite_enabled
                 ):
+                    # 上下文追问：临时开启改写以补全指代，不改动全局默认开关
                     query_options = QueryProcessingOptions(
                         rewrite_enabled=True,
                         expansion_enabled=query_options.expansion_enabled,

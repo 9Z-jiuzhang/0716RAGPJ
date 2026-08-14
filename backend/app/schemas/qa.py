@@ -22,10 +22,19 @@ class CitationSchema(BaseModel):
     source: str | None = Field(default=None, description="命中来源：vector/fulltext/hybrid/sticky")
 
 
+# 用户问题（输入框）硬上限，与前端提示文案保持一致
+QA_QUESTION_MAX_CHARS = 2000
+
+
 class AskRequest(BaseModel):
     """流式问答请求体。"""
 
-    question: str = Field(..., min_length=1, max_length=2000, description="用户问题")
+    question: str = Field(
+        ...,
+        min_length=1,
+        max_length=QA_QUESTION_MAX_CHARS,
+        description=f"用户问题（最长 {QA_QUESTION_MAX_CHARS} 字）",
+    )
     session_id: UUID | None = Field(default=None, description="不传则创建新会话")
     kb_ids: list[UUID] | None = Field(default=None, description="限定检索知识库")
     strategy: Literal["vector", "fulltext", "hybrid"] = Field(default="hybrid", description="检索策略")
@@ -34,6 +43,10 @@ class AskRequest(BaseModel):
     explicit_faq_click: bool = Field(
         default=False,
         description="访客点选热门 FAQ 时为 True，强制允许 FAQ 命中（含多轮会话）",
+    )
+    rewrite_enabled: bool | None = Field(
+        default=None,
+        description="是否对本轮启用 Query 改写；不传则沿用管理员全局策略（追问场景可能临时开启）",
     )
 
 

@@ -9,7 +9,7 @@
  */
 
 import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?v=gap-opt-0721i";
-import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=ask-done-early-0813u";
+import { api, askStream, clearDemoFlags } from "/assets/js/api.js?v=zzy-merge-0814a";
 import {
   isLoggedIn,
   getUser,
@@ -628,6 +628,7 @@ function pageChat() {
 
   // 进入智能对话默认展开历史侧栏
   const sidebarCollapsed = false;
+  const QUESTION_MAX_CHARS = 2000;
   document.getElementById("pageRoot").innerHTML = `
     <div class="qa-layout ${role === "guest" || !isLoggedIn() ? "qa-layout-guest" : ""}${sidebarCollapsed ? "" : " is-sidebar-open"}" id="qaLayout">
       <aside class="qa-sidebar${sidebarCollapsed ? " is-collapsed" : ""}" id="qaSidebar" aria-label="历史对话">
@@ -667,7 +668,20 @@ function pageChat() {
           <button type="button" class="qa-scroll-bottom" id="btnScrollBottom" title="回到底部" aria-label="回到底部" hidden>↓</button>
           <div class="qa-composer" id="qaComposer">
             <div class="qa-composer-resize" id="qaComposerResize" title="拖拽调整高度" role="separator" aria-orientation="horizontal"></div>
-          <textarea class="form-control" id="questionInput" placeholder="请输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+            <div class="qa-composer-options" id="qaComposerOptions">
+              <label class="qa-opt-kb">
+                <span class="qa-opt-label">知识库</span>
+                <select id="qaKbSelect" class="form-control qa-kb-select" title="限定检索范围">
+                  <option value="">全部可访问知识库</option>
+                </select>
+              </label>
+              <label class="qa-opt-rewrite" title="开启后会结合对话历史改写问题，便于多轮追问检索">
+                <input type="checkbox" id="qaRewriteEnabled" />
+                <span>Query 改写</span>
+              </label>
+              <p class="qa-composer-hint" id="qaCharHint">仅支持 ${QUESTION_MAX_CHARS} 字以内的段落回答 · <span id="qaCharCount">0</span>/${QUESTION_MAX_CHARS}</p>
+            </div>
+          <textarea class="form-control" id="questionInput" maxlength="${QUESTION_MAX_CHARS}" placeholder="请输入问题，Enter 发送，Shift+Enter 换行"></textarea>
           <div class="qa-composer-actions">
             <button type="button" class="btn btn-stop-ask" id="btnStop" hidden aria-label="中止回答">中止</button>
             <button type="button" class="btn" id="btnSend">发送</button>
@@ -682,16 +696,22 @@ function pageChat() {
   const input = document.getElementById("questionInput");
   const btn = document.getElementById("btnSend");
   const btnStop = document.getElementById("btnStop");
+  const charCount = document.getElementById("qaCharCount");
+  const updateCharCount = () => {
+    if (charCount) charCount.textContent = String((input?.value || "").length);
+  };
   btn.addEventListener("click", () => sendQuestion());
   btnStop?.addEventListener("click", () => stopAskStream());
   setAskStreaming(isAskStreaming);
   document.querySelectorAll("[data-question]").forEach((item) => {
     item.addEventListener("click", () => {
       input.value = item.getAttribute("data-question") || "";
+      updateCharCount();
       input.focus();
     });
   });
-  // 旧硬编码建议已由 loadHotFAQ 接管；保留空绑定兼容
+  // 旧硬编码建议已由 loadHotFAQ 接管；字数统计在输入时更新
+  input.addEventListener("input", updateCharCount);
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -702,6 +722,7 @@ function pageChat() {
       sendQuestion();
     }
   });
+  updateCharCount();
   bindComposerResize();
   document.getElementById("btnNewChat")?.addEventListener("click", () => startNewChat());
   document.getElementById("btnOpenFavorites")?.addEventListener("click", () => navigate("/favorites"));
@@ -713,6 +734,7 @@ function pageChat() {
   loadChatSidebar();
   currentFAQSort = "hit";
   loadHotFAQ();
+  loadQaComposerOptions();
 
   // 从历史打开会话：渲染完成后加载该会话消息（避免路由二次渲染清空）
   if (pendingOpenSessionId) {
@@ -724,6 +746,46 @@ function pageChat() {
       loadChatSidebar();
     });
   }
+}
+
+/** 加载问答页可选知识库，并恢复本机改写偏好 */
+async function loadQaComposerOptions() {
+  const select = document.getElementById("qaKbSelect");
+  const rewrite = document.getElementById("qaRewriteEnabled");
+  if (rewrite) {
+    try {
+      const saved = localStorage.getItem("qa_rewrite_enabled");
+      // 默认开启改写，便于多轮追问；用户关闭后记住选择
+      rewrite.checked = saved === null ? true : saved === "1";
+    } catch {
+      rewrite.checked = true;
+    }
+    rewrite.addEventListener("change", () => {
+      try {
+        localStorage.setItem("qa_rewrite_enabled", rewrite.checked ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+  if (!select) return;
+  try {
+    const data = await api.get("/qa/accessible-kbs");
+    const items = data?.items || [];
+    const opts = [`<option value="">全部可访问知识库</option>`];
+    for (const kb of items) {
+      opts.push(
+        `<option value="${escapeHtml(kb.id)}">${escapeHtml(kb.name || kb.id)}</option>`
+      );
+    }
+    select.innerHTML = opts.join("");
+    if (!items.length) {
+      select.title = "当前身份暂无可检索知识库（需已建索引）";
+    }
+  } catch {
+    select.innerHTML = `<option value="">全部可访问知识库</option>`;
+  }
+  requestAnimationFrame(() => syncComposerSpace());
 }
 
 /** 同步侧栏占用轨与舞台内输入卡留白（消息+输入同属 stage，整体平移居中） */
@@ -1907,10 +1969,16 @@ async function sendQuestion(presetQuestion, options = {}) {
     toast("请输入问题", "error");
     return;
   }
+  if (question.length > 2000) {
+    toast("问题过长，仅支持 2000 字以内", "error");
+    return;
+  }
   // 展示用户气泡
   appendMessage("user", escapeHtml(question));
   // 清空输入框并恢复默认高度
   if (input) input.value = "";
+  const charCount = document.getElementById("qaCharCount");
+  if (charCount) charCount.textContent = "0";
   resetComposerHeight();
   // 创建助手气泡（思考中占位，再流式写入）
   const bubble = appendMessage("assistant", "");
@@ -1945,6 +2013,11 @@ async function sendQuestion(presetQuestion, options = {}) {
     clearThinkingState(bubble);
   };
 
+  const kbSelect = document.getElementById("qaKbSelect");
+  const kbId = (kbSelect?.value || "").trim();
+  const rewriteEl = document.getElementById("qaRewriteEnabled");
+  const rewriteEnabled = !!rewriteEl?.checked;
+
   const runAsk = async (sessionId) => {
     citationsHtml = "";
     confidenceTip = "";
@@ -1958,7 +2031,8 @@ async function sendQuestion(presetQuestion, options = {}) {
         session_id: sessionId || undefined,
         // 复制同题也带上标记，便于审计/观测与点选对齐
         explicit_faq_click: explicitFaqClick,
-        // 不传 kb_ids：由后端按访客/登录身份过滤范围
+        rewrite_enabled: rewriteEnabled,
+        ...(kbId ? { kb_ids: [kbId] } : {}),
       },
       {
         signal: askAbort.signal,
@@ -2688,7 +2762,7 @@ async function handleUploadFiles(fileList) {
   }
 }
 
-/** 执行上传并轮询文档管道状态（诚实进度） */
+/** 执行上传并轮询文档管道状态（诚实进度：先字节上传，再管道处理） */
 async function handleUpload(file, opts = {}) {
   const kbId = document.getElementById("kbSelect").value;
   if (!kbId) {
@@ -2700,39 +2774,61 @@ async function handleUpload(file, opts = {}) {
   const index = opts.index || 1;
   const total = opts.total || 1;
   const prefix = total > 1 ? `[${index}/${total}] ` : "";
-  prog.textContent = `${prefix}正在上传 ${file.name}…`;
-  bar.style.width = total > 1 ? `${Math.max(8, Math.round(((index - 1) / total) * 100))}%` : "15%";
+  const batchBase = total > 1 ? ((index - 1) / total) * 100 : 0;
+  const batchSpan = total > 1 ? 100 / total : 100;
+  // 单文件：上传阶段占 0–45%，管道处理占 45–100%
+  const uploadShare = 0.45;
+
+  const setBar = (pct) => {
+    if (bar) bar.style.width = `${Math.min(100, Math.max(0, Math.round(pct)))}%`;
+  };
+  const setProg = (htmlOrText, asHtml = false) => {
+    if (!prog) return;
+    if (asHtml) prog.innerHTML = htmlOrText;
+    else prog.textContent = htmlOrText;
+  };
+
+  setProg(`${prefix}正在上传 ${file.name}…`);
+  setBar(batchBase + batchSpan * 0.02);
 
   const fd = new FormData();
   fd.append("file", file);
 
   const busy = new Set(["parsing", "normalizing", "segmenting", "vectorizing", "pending_segment", "uploaded", "pending"]);
   try {
-    const doc = await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd);
+    const doc = await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd, {
+      onProgress: (pct, loaded) => {
+        if (pct >= 0) {
+          setBar(batchBase + batchSpan * uploadShare * (pct / 100));
+          setProg(`${prefix}上传中 ${file.name} · ${pct}%`);
+        } else {
+          const mb = (loaded / (1024 * 1024)).toFixed(1);
+          setProg(`${prefix}上传中 ${file.name} · 已传 ${mb} MB`);
+          setBar(batchBase + batchSpan * uploadShare * 0.5);
+        }
+      },
+    });
     const docId = doc?.id;
     if (!opts.quietToast) toast("上传成功，正在处理…", "success");
     if (!docId) {
-      bar.style.width = total > 1 ? `${Math.round((index / total) * 100)}%` : "100%";
-      prog.innerHTML = `<span class="text-success">${prefix}上传成功，已进入预处理 / 向量化；FAQ 将在后台异步生成</span>`;
+      setBar(batchBase + batchSpan);
+      setProg(
+        `<span class="text-success">${prefix}上传成功，已进入预处理/向量化；FAQ 将在后台异步生成</span>`,
+        true,
+      );
       return;
     }
-    bar.style.width = total > 1 ? `${Math.round(((index - 0.5) / total) * 100)}%` : "35%";
-    prog.textContent = `${prefix}已入库，管道处理中（${doc.status || "…"}）…`;
+    setBar(batchBase + batchSpan * uploadShare);
+    setProg(`${prefix}已入库，管道处理中（${doc.status || "…"}）…`);
     try {
       const finalDoc = await pollUntil(
         async () => {
           const d = await api.get(`/knowledge-bases/${kbId}/documents/${docId}`);
           const st = String(d.status || "");
-          const base = total > 1 ? ((index - 1) / total) * 100 : 0;
-          const span = total > 1 ? 100 / total : 100;
-          const pct =
-            st === "ready" || st === "error"
-              ? base + span
-              : busy.has(st)
-                ? base + span * 0.55
-                : base + span * 0.7;
-          bar.style.width = `${Math.min(100, Math.round(pct))}%`;
-          prog.textContent = `${prefix}处理状态：${st}`;
+          const pipeRatio =
+            st === "ready" || st === "error" ? 1 : busy.has(st) ? 0.55 : 0.75;
+          setBar(batchBase + batchSpan * (uploadShare + (1 - uploadShare) * pipeRatio));
+          setProg(`${prefix}处理状态：${st}`);
           return d;
         },
         {
@@ -2741,20 +2837,29 @@ async function handleUpload(file, opts = {}) {
           shouldStop: (d) => ["ready", "error"].includes(String(d?.status || "")),
         }
       );
-      bar.style.width = total > 1 ? `${Math.round((index / total) * 100)}%` : "100%";
+      setBar(batchBase + batchSpan);
       if (finalDoc.status === "ready") {
-        prog.innerHTML = `<span class="text-success">${prefix}处理完成（ready）· 分段 ${escapeHtml(fmtCount(finalDoc.chunk_count ?? 0))}</span>`;
+        setProg(
+          `<span class="text-success">${prefix}处理完成（ready）· 分段 ${escapeHtml(fmtCount(finalDoc.chunk_count ?? 0))}</span>`,
+          true
+        );
       } else {
-        prog.innerHTML = `<span class="text-danger">${prefix}处理失败：${escapeHtml(finalDoc.error_message || finalDoc.status || "error")}</span>`;
+        setProg(
+          `<span class="text-danger">${prefix}处理失败：${escapeHtml(finalDoc.error_message || finalDoc.status || "error")}</span>`,
+          true
+        );
       }
     } catch (pollErr) {
-      prog.innerHTML = `<span class="text-muted">${prefix}已上传；状态轮询结束：${escapeHtml(pollErr.message || "")}。请稍后在知识库文档列表查看。</span>`;
+      setProg(
+        `<span class="text-muted">${prefix}已上传；状态轮询结束：${escapeHtml(pollErr.message || "")}。请稍后在知识库文档列表查看。</span>`,
+        true
+      );
     }
   } catch (e) {
     if (!opts.quietToast) {
-    bar.style.width = "0%";
-    prog.innerHTML = `<span class="text-danger">上传失败：${escapeHtml(e.message || "未知错误")}</span>`;
-    toast(e.message || "上传失败", "error");
+      setBar(0);
+      setProg(`<span class="text-danger">上传失败：${escapeHtml(e.message || "未知错误")}</span>`, true);
+      toast(e.message || "上传失败", "error");
     }
     throw e;
   }

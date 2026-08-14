@@ -227,14 +227,17 @@ X-Request-Id: <建议>
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| question | string | 是 | 用户问题，1–2000 字 |
+| question | string | 是 | 用户问题，1–2000 字（前端提示「仅支持 2000 字以内」） |
 | session_id | UUID | 否 | 不传则新建会话；多轮请带上一次返回的会话 ID |
 | kb_ids | UUID[] | 否 | 限定检索的知识库；不传则按权限可见范围检索 |
 | strategy | string | 否 | `vector` / `fulltext` / `hybrid`，默认 `hybrid` |
 | top_k | int | 否 | 引用片段数，1–20，默认 5（前端默认展示相关度最高 3 段，其余折叠） |
 | temperature | float | 否 | 生成温度 0–2，默认 0.7 |
+| rewrite_enabled | bool | 否 | 是否对本轮启用 Query 改写；传则覆盖全局策略 |
 
 > **不要用普通 EventSource GET**：本接口是 **POST + body**，请用 OkHttp / HttpURLConnection 读流。
+
+可选：先调 `GET /qa/accessible-kbs`（可选认证）拿到当前可检索知识库列表，供用户勾选后写入 `kb_ids`。
 
 ### 6.3 SSE 事件一览
 

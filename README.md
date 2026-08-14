@@ -153,7 +153,7 @@ FAQ 详情见 docs/KB_FAQ.md。
 | api | 由 `backend/Dockerfile` 构建 | **9081→9081** | FastAPI；生产请勿对公网暴露 |
 | postgres | `postgres:16-alpine` | **9543→9543** | 业务主库（uuid-ossp + pg_trgm） |
 | redis | `redis:7-alpine` | **9637→9637** | 会话热态 / 任务队列 |
-| chroma | `chromadb/chroma:latest` | **9800→8000** | 向量库；镜像容器内固定 8000，宿主机映射 9800 |
+| chroma | `chromadb/chroma:0.6.3` | **9800→8000** | 向量库；**须与 API 内 `chromadb` 0.6.x 客户端对齐**，勿用 `latest`（新版仅 v2 API，写入会报 `_type`） |
 | minio | `minio/minio:latest` | **9900/9901** | 对象存储 API / 控制台 |
 | prometheus | `prom/prometheus:latest` | **9909→9909** | 指标采集 |
 | grafana | `grafana/grafana:latest` | **9300→9300** | 面板（子路径 `/grafana`） |
@@ -265,10 +265,11 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 | vectorizing | `chunking.split_text` 分段 → `embedding.embed_texts`（批大小 `EMBEDDING_BATCH_SIZE=10`，DashScope v3 上限）→ `vector_store.upsert_chunks` 写入 Chroma |
 | ready | 写入 `doc.index_version`；若 KB 无激活索引则设 `current_index_version`；**异步入队 FAQ 生成**（不阻塞 ready） |
 
-- **上传格式**：首期支持 `pdf/doc/docx/txt/md`；`csv/xlsx/pptx` 明确拒绝（契约预留）。
+- **上传格式**：首期支持 `pdf/doc/docx/txt/md`；`csv/xlsx/pptx` 明确拒绝（契约预留）。txt/md 解码支持 UTF-8 / GBK / UTF-16（含 BOM）等常见编码。
 - **索引版本**：`IndexVersion` 记录每次构建；回退/重建通过 `IndexSwitchService` 行锁 + 原子切换 `current_index_version`，历史版本保留可回溯。
 - **禁用分段**：`chunk.is_enabled=false` 的分段不参与检索与引用。
 - **FAQ**：向量化完成后后台生成；管理端文档列表可显示「更新 FAQ 中」等任务状态。
+- **Chroma 兼容**：当前合入分支默认 `chromadb>=1.5` + 镜像 `latest`（决策 D3=C）；cyj 曾固定 0.6.3，若出现 `KeyError: '_type'` 再单独修客户端。
 
 ### 2.5 检索层
 
@@ -285,9 +286,9 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页 KPI（含 FAQ 数）；知识库卡片（封面显示库名、可置顶/删除的更多菜单仅管理员·超管·库管理者可见）；知识库工作台（文档/FAQ/快照）；快照列表含 FAQ 数且回退可还原 FAQ；问答统计、会话分析、审计、监控等。
-- **访客端** `frontend/guest/`：落地页 + 智能问答；欢迎区展示热门 FAQ，点选/同题粘贴可秒答（无思考态）。
-- **共享** `frontend/shared/`：`api.js`、`auth.js`、`router.js`、`brand-mark.js`、主题/动效、公共 CSS、接入指南与 Swagger 静态资源。
+- **访客端** `frontend/guest/`（挂载 `/`）：营销落地页（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、流式中止、**知识库下拉**、**Query 改写开关**、输入上限 **2000 字**提示、引用相关度 Top-3 展开/其余折叠、置信提示）；欢迎区展示**热门 FAQ**，点选/同题粘贴可秒答（无思考态）；对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（含**字节上传进度** + 管道状态轮询，员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页 KPI（含 FAQ 数、7/30 天趋势、错误分桶、近 14 日问答反馈 KPI/趋势）与安全窗口；知识库卡片（封面显示库名、可置顶/删除的更多菜单仅管理员·超管·库管理者可见）；知识库/文档/FAQ/快照工作台（「访问范围」多选部门，含「除访客外全选」；上传列表展示上传百分比；快照含 FAQ 数且回退可还原 FAQ）；用户/角色/部门、大模型与用量、命中率测试、RAGAS、问答统计、会话分析、角色缓存、审计、LLM Guard 拦截、系统监控（健康/Grafana）、API 接入指南。
+- **共享** `frontend/shared/`：`api.js`（含 `upload` 的 `onProgress` 字节进度）、`auth.js`、`router.js`、`brand-mark.js`、`env-particle-field.js`、主题/动效、公共 CSS、接入指南与 Swagger 静态资源。
 
 ### 2.7 可观测性
 
@@ -359,7 +360,7 @@ pytest backend/tests -q
 | 超管 / 种子 | `SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_SYNC_PASSWORD`、`SEED_DEMO_USERS`、`AUTH_REGISTER_ENABLED`、`METRICS_PUBLIC` |
 | PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=9543`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
 | Redis | `REDIS_HOST=redis`、`REDIS_PORT=9637`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
-| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE` |
+| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE`；镜像固定 `chromadb/chroma:0.6.3` |
 | MinIO | `MINIO_ENDPOINT=minio:9900`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET` |
 | LLM | `LLM_PROVIDER=dashscope`、`LLM_API_KEY`、`LLM_MODEL=qwen3.7-plus`、`LLM_BASE_URL`、思考相关开关 |
 | Embedding | `EMBEDDING_PROVIDER=dashscope`、`EMBEDDING_API_KEY`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_BATCH_SIZE` |

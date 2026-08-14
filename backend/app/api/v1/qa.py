@@ -2,6 +2,7 @@
 
 路由：
 - POST /qa/ask          — 流式问答（可选认证，访客可访问公开库）
+- GET  /qa/accessible-kbs — 当前身份可检索知识库（问答页下拉）
 - GET  /qa/sessions      — 本人会话列表（需登录）
 - GET  /qa/sessions/{id} — 会话消息历史（需登录）
 - GET  /qa/admin/sessions — 管理员会话与 Query 预处理分析
@@ -26,6 +27,7 @@ from app.models.identity import User
 from app.models.knowledge_base import KnowledgeBase
 from app.models.qa import QAMessage, QASession
 from app.schemas.common import BaseResponse
+from app.retrieval.scope import resolve_kb_targets
 from app.schemas.qa import AskRequest, FeedbackRequest, RenameSessionRequest
 from app.utils.request_info import extract_client_ip
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -118,6 +120,22 @@ def _normalize_sse_payload(event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         items = data.get("citations") or []
         return event_type, {"items": items, "citations": items}
     return event_type, data
+
+
+@router.get(
+    "/accessible-kbs",
+    response_model=BaseResponse,
+    summary="当前身份可检索的知识库列表",
+)
+async def list_accessible_kbs(
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_current_user),
+    request_id: str = Depends(_request_id),
+) -> BaseResponse:
+    """供问答页知识库下拉框使用；访客仅见 GUEST 部门已建索引的库。"""
+    targets = await resolve_kb_targets(db, user=user, kb_ids=None)
+    items = [{"id": str(t.kb_id), "name": t.name} for t in targets]
+    return BaseResponse(data={"items": items, "total": len(items)}, request_id=request_id)
 
 
 @router.post(

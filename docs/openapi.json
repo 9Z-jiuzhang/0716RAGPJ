@@ -12839,6 +12839,108 @@
         }
       }
     },
+    "/qa/accessible-kbs": {
+      "get": {
+        "summary": "可检索知识库列表",
+        "description": "按当前身份（访客/登录用户）返回已建索引、可用于问答的知识库，供问答页下拉选择。",
+        "tags": [
+          "智能问答"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
     "/qa/ask": {
       "post": {
         "summary": "发送问题（SSE）",
@@ -20742,6 +20844,11 @@
             "minimum": 0,
             "maximum": 2,
             "default": 0.7
+          },
+          "rewrite_enabled": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "是否对本轮启用 Query 改写；不传则沿用管理员全局策略"
           }
         }
       },
