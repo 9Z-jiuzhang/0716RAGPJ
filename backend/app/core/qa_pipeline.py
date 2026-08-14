@@ -552,7 +552,7 @@ class QAPipeline:
                         authorized_kb_ids=[target.kb_id for target in targets],
                     )
             if cache_match is not None:
-                citations = list(cache_match.citations)
+                citations = await self._enrich_citation_images(db, list(cache_match.citations))
                 answer_text = cache_match.answer
                 retrieval_meta = {
                     "original_query": question,
@@ -865,6 +865,7 @@ class QAPipeline:
                         yield self._event("chunk", content=piece)
                 else:
                     citations = [self._hit_to_citation(h) for h in evidence_hits]
+                    citations = await self._enrich_citation_images(db, citations)
                     yield self._event("citations", citations=citations)
 
                     # [6] 组装提示并流式生成（有界并发）
@@ -1107,6 +1108,8 @@ class QAPipeline:
             None,
             source=str(retrieval_meta.get("source") or "route"),
         )
+        )
+        citations = await self._enrich_citation_images(db, list(citations or []))
         yield self._event("chunk", content=answer_text)
         yield self._event("citations", citations=citations)
         # FAQ/缓存等直答：置信度固定满分，先于落库下发，避免前端干等 done
@@ -1442,6 +1445,12 @@ class QAPipeline:
         for i, hit in enumerate(hits, start=1):
             sticky = hit.source == "sticky" or (hit.metadata or {}).get("sticky")
             tag = " | 会话延续" if sticky else ""
+            try:
+                chart_n = int((hit.metadata or {}).get("chart_page_count") or 0)
+            except (TypeError, ValueError):
+                chart_n = 0
+            if chart_n > 0:
+                tag += f" | 含图表{chart_n}页（界面将展示）"
             parts.append(
                 f"[{i}] 文档：{hit.doc_name} | 分段：{hit.chunk_index} | 相关度：{hit.score:.4f}{tag}\n"
                 f"{hit.content.strip()}"
@@ -1463,6 +1472,46 @@ class QAPipeline:
                 pass
         citation["score"] = clamp_display_score(citation.get("score"))
         return citation
+
+    async def _enrich_citation_images(
+        self,
+        db: AsyncSession,
+        citations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """为缺少 images 的 PDF 引用按需栅格化并补全 URL（兼容旧文档）。"""
+        if not citations:
+            return citations
+        from app.repositories import document as doc_repo
+        from app.services.document_charts import ensure_pdf_charts
+
+        cache: dict[str, list[dict[str, Any]]] = {}
+        for citation in citations:
+            doc_id = str(citation.get("doc_id") or "")
+            if doc_id in cache:
+                citation["images"] = cache[doc_id]
+                continue
+            existing = citation.get("images") or []
+            if existing:
+                cache[doc_id] = existing
+                continue
+            images: list[dict[str, Any]] = []
+            try:
+                doc = await doc_repo.get_document_by_id(db, uuid.UUID(doc_id))
+            except (ValueError, TypeError):
+                doc = None
+            if doc is not None and (doc.file_type or "").lower().lstrip(".") == "pdf" and doc.file_path:
+                try:
+                    images = ensure_pdf_charts(
+                        kb_id=doc.kb_id,
+                        doc_id=doc.id,
+                        file_path=doc.file_path,
+                    )
+                except Exception as exc:
+                    logger.warning("ensure_pdf_charts failed doc=%s: %s", doc_id, exc)
+                    images = []
+            cache[doc_id] = images
+            citation["images"] = images
+        return citations
 
     async def _persist_turn(
         self,

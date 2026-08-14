@@ -90,6 +90,8 @@ _FILE_TYPE_DEFAULT_SPLIT_MODE: dict[str, str] = {
     "pdf": SplitMode.PARAGRAPH.value,
     "doc": SplitMode.PARAGRAPH.value,
     "docx": SplitMode.PARAGRAPH.value,
+    "pptx": SplitMode.PARAGRAPH.value,
+    "ppt": SplitMode.PARAGRAPH.value,
 }
 
 

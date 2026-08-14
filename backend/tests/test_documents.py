@@ -105,10 +105,10 @@ def test_upload_rejects_p1_formats_and_oversized(monkeypatch):
     from app.core import config
 
     monkeypatch.setattr(config.settings, "MAX_UPLOAD_BYTES", 10)
-    for name in ("a.csv", "b.xlsx", "c.pptx"):
+    for name in ("a.csv", "b.xlsx"):
         with pytest.raises(UnsupportedFileTypeError):
             _validate_upload(name, b"abc")
-    with pytest.raises(FileTooLargeError):
+    assert _validate_upload("deck.pptx", b"PK") == "pptx"    with pytest.raises(FileTooLargeError):
         _validate_upload("a.txt", b"0123456789012345")
     assert _validate_upload("note.md", b"hello") == "md"
     assert _validate_upload("x.pdf", b"%PDF") == "pdf"
@@ -224,3 +224,82 @@ async def test_segment_preview_requires_file_or_doc_id():
     with patch("app.repositories.document.get_knowledge_base", AsyncMock(return_value=MagicMock())):
         with pytest.raises(DocumentError):
             await preview_segment_source(db, uuid4())
+
+
+def test_convert_md_txt_direct_decode():
+    from app.services.markitdown_export import convert_document_to_markdown, markdown_download_filename
+
+    assert convert_document_to_markdown(filename="a.md", content=b"# Hello\n", file_type="md") == "# Hello"
+    assert convert_document_to_markdown(filename="a.txt", content="中文".encode("utf-8"), file_type="txt") == "中文"
+    assert markdown_download_filename("报告.docx") == "报告.md"
+    with pytest.raises(DocumentError):
+        convert_document_to_markdown(filename="a.md", content=b"   \n", file_type="md")
+
+
+def test_convert_docx_uses_markitdown():
+    from app.services import markitdown_export as mod
+
+    with patch.object(mod, "_convert_with_markitdown", return_value="# From MD") as conv:
+        text = mod.convert_document_to_markdown(
+            filename="x.docx", content=b"PK fake", file_type="docx"
+        )
+    assert text == "# From MD"
+    conv.assert_called_once()
+
+
+def test_markitdown_llm_kwargs_requires_key(monkeypatch):
+    from app.core import config
+    from app.services import markitdown_export as mod
+
+    monkeypatch.setattr(config.settings, "MARKITDOWN_LLM_ENABLED", True)
+    monkeypatch.setattr(config.settings, "LLM_API_KEY", "")
+    monkeypatch.setattr(config.settings, "MARKITDOWN_LLM_API_KEY", "")
+    with pytest.raises(DocumentError):
+        mod._markitdown_llm_kwargs()
+
+
+def test_convert_doc_falls_back_to_parsers():
+    from app.services import markitdown_export as mod
+
+    with (
+        patch.object(mod, "_convert_with_markitdown", side_effect=RuntimeError("no doc support")),
+        patch.object(mod.parsers, "extract_text", return_value="plain body") as ext,
+    ):
+        text = mod.convert_document_to_markdown(filename="old.doc", content=b"ole", file_type="doc")
+    assert text == "plain body"
+    ext.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_export_document_markdown_orchestration():
+    from app.services.document_service import export_document_markdown
+    from app.services.markitdown_export import MarkdownExportResult
+
+    db = AsyncMock()
+    doc = DummyDoc(DocumentStatus.READY.value)
+    doc.filename = "竞品.docx"
+    doc.file_type = "docx"
+    doc.file_path = "kb/obj.docx"
+
+    fake = MarkdownExportResult(text="# ok", download_name="竞品.md")
+    with (
+        patch("app.services.document_service.get_document_detail", AsyncMock(return_value=doc)),
+        patch("app.services.document_service.storage.download_bytes", return_value=b"bytes"),
+        patch(
+            "app.services.markitdown_export.export_document_bundle",
+            return_value=fake,
+        ) as conv,
+    ):
+        result = await export_document_markdown(db, doc.kb_id, doc.id)
+    assert result.text == "# ok"
+    assert result.download_name == "竞品.md"
+    conv.assert_called_once()
+
+
+def test_sanitize_markdown_strips_nuls():
+    from app.services.markitdown_export import sanitize_markdown_text
+
+    dirty = "## Page 1\n\n\x00中文\x00\x03ok"
+    clean = sanitize_markdown_text(dirty)
+    assert "\x00" not in clean
+    assert "ok" in clean

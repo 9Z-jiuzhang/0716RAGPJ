@@ -9828,7 +9828,7 @@
     "/knowledge-bases/{kb_id}/documents/upload": {
       "post": {
         "summary": "上传文档",
-        "description": "multipart 上传（字段名 file）。支持 pdf/doc/docx/txt/md；csv/xlsx/pptx 拒绝。上传后进入解析→分段→向量化流水线。需要 kb:upload。",
+        "description": "multipart 上传（字段名 file）。支持 pdf/doc/docx/pptx/txt/md；csv/xlsx 拒绝。上传后进入解析→分段→向量化流水线。需要 kb:upload。",
         "tags": [
           "文档管理"
         ],
@@ -10999,6 +10999,273 @@
           },
           "404": {
             "description": "资源不存在或不可见",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "kb_id",
+            "in": "path",
+            "required": true,
+            "description": "知识库 UUID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "文档 UUID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/knowledge-bases/{kb_id}/documents/{doc_id}/markdown": {
+      "get": {
+        "summary": "导出文档 Markdown",
+        "description": "按需导出 Markdown。纯文本返回 .md；PDF 返回 zip（md + charts/page-XX.png，相对链接打开图表，并保留图数据/多模态描述）。输出剔除 NUL 控制符。需要 doc:read。",
+        "tags": [
+          "文档管理"
+        ],
+        "responses": {
+          "200": {
+            "description": "Markdown 文件",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Content-Disposition": {
+                "description": "attachment; filename / filename*",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证或 Token 无效/过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权限或用户被禁用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或不可见",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "字段校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "业务码，0 表示成功"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "提示信息"
+                    },
+                    "data": {
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "example": "550e8400-e29b-41d4-a716-446655440000",
+                      "description": "请求追踪 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "上游依赖失败",
             "content": {
               "application/json": {
                 "schema": {

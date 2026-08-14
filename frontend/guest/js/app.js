@@ -27,6 +27,8 @@ import {
   setRememberMe,
   getRememberMe,
   isSuperAdmin,
+  getAccessToken,
+  getGuestId,
 } from "/assets/js/auth.js?v=gap-opt-0721i";
 import { escapeHtml, formatDateTime, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=gap-opt-0721i";
 import { initMotion, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
@@ -1687,6 +1689,44 @@ function renderCitationItemHtml(c) {
   </details>`;
 }
 
+/** 按 doc_id + page 去重，汇总引用中的图表 */
+function collectCitationCharts(citations) {
+  const seen = new Set();
+  const charts = [];
+  for (const c of citations || []) {
+    const docName = c?.doc_name || "文档";
+    for (const img of c?.images || []) {
+      const url = String(img?.url || "").trim();
+      const page = Number(img?.page) || 0;
+      if (!url) continue;
+      const key = `${c?.doc_id || ""}:${page || url}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      charts.push({ url, page, docName });
+    }
+  }
+  return charts;
+}
+
+function renderCitationChartsHtml(citations) {
+  const charts = collectCitationCharts(citations);
+  if (!charts.length) return "";
+  const items = charts
+    .map((ch) => {
+      const pageLabel = ch.page ? `第 ${ch.page} 页` : "图表";
+      const alt = escapeHtml(`${ch.docName} · ${pageLabel}`);
+      return `<figure class="citation-chart-item">
+        <img class="citation-chart-img" data-chart-url="${escapeHtml(ch.url)}" alt="${alt}" loading="lazy" />
+        <figcaption class="citation-chart-caption">${escapeHtml(ch.docName)} · ${escapeHtml(pageLabel)}</figcaption>
+      </figure>`;
+    })
+    .join("");
+  return `<div class="citation-charts">
+    <div class="citation-charts-heading">相关图表（共 ${charts.length} 页）</div>
+    <div class="citation-charts-grid">${items}</div>
+  </div>`;
+}
+
 function buildCitationsHtml(citations) {
   const items = sortCitationsByRelevance(citations);
   if (!items.length) return "";
@@ -1703,7 +1743,46 @@ function buildCitationsHtml(citations) {
     rest.length > 0
       ? `引用来源（共 ${items.length} 段，默认展示相关度最高 ${primary.length} 段）`
       : `引用来源（共 ${items.length} 段，点击展开原文）`;
-  return `<div class="citations"><div class="citation-heading">${hint}</div>${primaryHtml}${restHtml}</div>`;
+  const chartsHtml = renderCitationChartsHtml(items);
+  return `<div class="citations"><div class="citation-heading">${hint}</div>${chartsHtml}${primaryHtml}${restHtml}</div>`;
+}
+
+/** 带鉴权拉取图表 PNG（img 无法自动带 Bearer），写入 blob URL */
+async function hydrateCitationChartImages(root) {
+  if (!root) return;
+  const imgs = root.querySelectorAll("img.citation-chart-img[data-chart-url]");
+  if (!imgs.length) return;
+  await Promise.all(
+    [...imgs].map(async (img) => {
+      if (img.dataset.hydrated === "1") return;
+      const path = img.getAttribute("data-chart-url") || "";
+      if (!path) return;
+      try {
+        const headers = {
+          "X-Guest-Id": getGuestId(),
+          Accept: "image/png,image/*",
+        };
+        const token = getAccessToken();
+        if (token) headers.Authorization = `Bearer ${token}`;
+        const res = await fetch(path.startsWith("/api/") ? path : `/api/v1${path}`, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        img.src = objectUrl;
+        img.dataset.hydrated = "1";
+        img.addEventListener(
+          "load",
+          () => {
+            /* keep blob until page unload; revoke on replace */
+          },
+          { once: true }
+        );
+      } catch {
+        img.classList.add("citation-chart-img--error");
+        img.alt = (img.alt || "图表") + "（加载失败）";
+      }
+    })
+  );
 }
 
 function buildMessageRowFromApi(m) {
@@ -1721,6 +1800,7 @@ function buildMessageRowFromApi(m) {
       row.dataset.rating = rating;
       applyMsgRatingUi(row, rating);
     }
+    void hydrateCitationChartImages(row);
   }
   return row;
 }
@@ -2153,6 +2233,7 @@ async function sendQuestion(presetQuestion, options = {}) {
                 forceCollapseReasoning: true,
               })
             );
+            void hydrateCitationChartImages(bubble);
             const row = bubble.closest(".msg-row");
             if (row && data.message_id) {
               row.dataset.messageId = data.message_id;

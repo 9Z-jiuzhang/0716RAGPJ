@@ -9,6 +9,7 @@
 - PUT  /qa/sessions/{id} — 重命名会话（需登录）
 - DELETE /qa/sessions/{id} — 删除会话（需登录）
 - POST /qa/feedback      — 回答反馈（需登录）
+- GET  /qa/documents/{doc_id}/charts/{filename} — 引用图表 PNG（权限与 /qa/ask 一致）
 """
 
 from __future__ import annotations
@@ -26,11 +27,20 @@ from app.memory.session_store import session_store
 from app.models.identity import User
 from app.models.knowledge_base import KnowledgeBase
 from app.models.qa import QAMessage, QASession
+from app.repositories import document as doc_repo
+from app.retrieval import resolve_kb_targets
 from app.schemas.common import BaseResponse
 from app.retrieval.scope import resolve_kb_targets
 from app.schemas.qa import AskRequest, FeedbackRequest, RenameSessionRequest
+from app.services import storage
+from app.services.document_charts import (
+    chart_object_name,
+    ensure_pdf_charts,
+    parse_chart_filename,
+)
 from app.utils.request_info import extract_client_ip
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
@@ -179,6 +189,49 @@ async def ask_question(
             "X-Accel-Buffering": "no",
             "X-Request-Id": request_id,
         },
+    )
+
+
+@router.get(
+    "/documents/{doc_id}/charts/{filename}",
+    summary="获取问答引用图表",
+    description="返回 PDF 栅格化页 PNG。访问范围与 /qa/ask 知识库可见性一致。",
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def get_qa_document_chart(
+    doc_id: UUID,
+    filename: str,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_current_user),
+) -> Response:
+    page = parse_chart_filename(filename)
+    if page is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效图表文件名")
+
+    doc = await doc_repo.get_document_by_id(db, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
+
+    targets = await resolve_kb_targets(db, user=user)
+    allowed = {t.kb_id for t in targets}
+    if doc.kb_id not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该文档图表")
+
+    object_name = chart_object_name(doc.kb_id, doc.id, page)
+    if not storage.object_exists(object_name):
+        if (doc.file_type or "").lower().lstrip(".") == "pdf" and doc.file_path:
+            try:
+                ensure_pdf_charts(kb_id=doc.kb_id, doc_id=doc.id, file_path=doc.file_path)
+            except Exception as exc:
+                logger.warning("lazy chart generate failed doc=%s: %s", doc_id, exc)
+        if not storage.object_exists(object_name):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图表不存在")
+
+    data = storage.download_bytes(object_name)
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=3600"},
     )
 
 

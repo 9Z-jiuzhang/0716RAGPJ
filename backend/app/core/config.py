@@ -163,6 +163,18 @@ class Settings(BaseSettings):
     CLAMAV_HOST: str = "localhost"
     CLAMAV_PORT: int = 3310
 
+    # ---------- MarkItDown 导出（多模态看图，保留 PDF/PPT 图表信息） ----------
+    # 默认开启；关闭后仍可导出正文，但内嵌图/图表将缺少 LLM 描述。
+    MARKITDOWN_LLM_ENABLED: bool = True
+    # 须为支持 image_url 的多模态模型（如 DashScope qwen-vl-plus / qwen3-vl-plus）
+    MARKITDOWN_LLM_MODEL: str = "qwen-vl-plus"
+    # 留空则复用 LLM_BASE_URL / LLM_API_KEY
+    MARKITDOWN_LLM_BASE_URL: str = ""
+    MARKITDOWN_LLM_API_KEY: str = ""
+    MARKITDOWN_LLM_TIMEOUT_SECONDS: int = 180
+    # 留空使用内置「图表/插图中文详述」提示词
+    MARKITDOWN_LLM_PROMPT: str = ""
+
     # ---------- 限流 ----------
     RATE_LIMIT_ENABLED: bool = True
 

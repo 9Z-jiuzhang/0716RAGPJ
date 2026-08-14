@@ -129,7 +129,26 @@ async def run_resegment_pipeline(
                         user_id or doc.creator_id,
                         name=f"resegment:{doc.filename}",
                     )
-                if not doc.normalized_text:
+                from app.services.parsers import is_unusable_pdf_text
+
+                ft = (doc.file_type or "").lower().lstrip(".")
+                existing = doc.normalized_text or doc.raw_text or ""
+                force_reparse = ft == "pdf" and is_unusable_pdf_text(existing)
+                if force_reparse:
+                    # ready 不能流转到 parsing：原地重抽正文，再走分段/向量化
+                    logger.info("force reparse unusable pdf text doc=%s", doc.id)
+                    content = storage.download_bytes(doc.file_path)
+                    doc.raw_text = parsers.extract_text(doc.filename, content, doc.file_type)
+                    try:
+                        from app.services.document_charts import persist_pdf_chart_pages
+
+                        persist_pdf_chart_pages(kb_id=doc.kb_id, doc_id=doc.id, pdf_bytes=content)
+                    except Exception as exc:
+                        logger.warning("chart persist during reparse failed doc=%s: %s", doc.id, exc)
+                    normalized, _stats = normalize_text(doc.raw_text or "")
+                    doc.normalized_text = normalized
+                    await db.flush()
+                elif not doc.normalized_text:
                     if doc.status == DocumentStatus.UPLOADED.value:
                         await _parse(db, doc)
                     elif doc.status == DocumentStatus.ERROR.value:
@@ -141,6 +160,9 @@ async def run_resegment_pipeline(
                 if doc.status == DocumentStatus.READY.value:
                     apply_status(doc, DocumentStatus.PENDING_SEGMENT.value)
                 elif doc.status == DocumentStatus.PROCESSING.value:
+                    apply_status(doc, DocumentStatus.PENDING_SEGMENT.value)
+                elif doc.status == DocumentStatus.ERROR.value:
+                    # 上次重解析失败后留下的 error：允许继续分段
                     apply_status(doc, DocumentStatus.PENDING_SEGMENT.value)
                 await _segment(db, doc, force=True)
                 # 入口已拍 AUTO_RESEGMENT（或上层已 skip），向量化阶段不再二次快照
@@ -204,6 +226,14 @@ async def _parse_from_current(db: AsyncSession, doc) -> None:
     content = storage.download_bytes(doc.file_path)
     text = parsers.extract_text(doc.filename, content, doc.file_type)
     doc.raw_text = text
+    # PDF：同步栅格化每页图表入 MinIO，供问答引用展示（失败不阻断入库）
+    if (doc.file_type or "").lower().lstrip(".") == "pdf":
+        try:
+            from app.services.document_charts import persist_pdf_chart_pages
+
+            persist_pdf_chart_pages(kb_id=doc.kb_id, doc_id=doc.id, pdf_bytes=content)
+        except Exception as exc:
+            logger.warning("chart persist failed doc=%s: %s", doc.id, exc)
     await db.flush()
     record_metric("parsing", "ok")
 
@@ -258,6 +288,20 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
         meta0 = dict(previews[0].metadata or {})
         meta0["coverage_ratio"] = round(coverage, 4)
         previews[0].metadata = meta0
+    # 图表页数写入各段 metadata（Chroma 仅保留标量），问答引用可直接拼 URL
+    try:
+        from app.services.document_charts import list_chart_pages
+
+        chart_pages = list_chart_pages(doc.kb_id, doc.id)
+        chart_n = len(chart_pages)
+    except Exception as exc:
+        logger.warning("list chart pages failed doc=%s: %s", doc.id, exc)
+        chart_n = 0
+    if chart_n and previews:
+        for p in previews:
+            meta = dict(p.metadata or {})
+            meta["chart_page_count"] = chart_n
+            p.metadata = meta
     chunks = [
         DocumentChunk(
             kb_id=doc.kb_id,

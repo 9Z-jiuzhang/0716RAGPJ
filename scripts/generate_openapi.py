@@ -1666,7 +1666,7 @@ paths[KBD] = {
 paths[f"{KBD}/upload"] = {
     "post": op(
         "上传文档",
-        "multipart 上传（字段名 file）。支持 pdf/doc/docx/txt/md；csv/xlsx/pptx 拒绝。上传后进入解析→分段→向量化流水线。需要 kb:upload。",
+        "multipart 上传（字段名 file）。支持 pdf/doc/docx/pptx/txt/md；csv/xlsx 拒绝。上传后进入解析→分段→向量化流水线。需要 kb:upload。",
         ["文档管理"],
         parameters=[_kb],
         request_body={
@@ -1735,6 +1735,27 @@ paths[f"{KBD}/{{doc_id}}/content"] = {
         ["文档管理"],
         parameters=[_kb, _doc],
         responses={**resp("成功", ref("DocumentContentPreviewResponse")), **err_resps(401, 403, 404, 500)},
+    )
+}
+paths[f"{KBD}/{{doc_id}}/markdown"] = {
+    "get": op(
+        "导出文档 Markdown",
+        "按需导出 Markdown。纯文本返回 .md；PDF 返回 zip（md + charts/page-XX.png，相对链接打开图表，并保留图数据/多模态描述）。输出剔除 NUL 控制符。需要 doc:read。",
+        ["文档管理"],
+        parameters=[_kb, _doc],
+        responses={
+            "200": {
+                "description": "Markdown 文件",
+                "content": {"text/markdown": {"schema": {"type": "string", "format": "binary"}}},
+                "headers": {
+                    "Content-Disposition": {
+                        "description": "attachment; filename / filename*",
+                        "schema": {"type": "string"},
+                    }
+                },
+            },
+            **err_resps(401, 403, 404, 422, 502, 500),
+        },
     )
 }
 paths[f"{KBD}/{{doc_id}}/segment-rules"] = {

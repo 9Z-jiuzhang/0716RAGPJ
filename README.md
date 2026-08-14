@@ -265,7 +265,8 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 | vectorizing | `chunking.split_text` 分段 → `embedding.embed_texts`（批大小 `EMBEDDING_BATCH_SIZE=10`，DashScope v3 上限）→ `vector_store.upsert_chunks` 写入 Chroma |
 | ready | 写入 `doc.index_version`；若 KB 无激活索引则设 `current_index_version`；**异步入队 FAQ 生成**（不阻塞 ready） |
 
-- **上传格式**：首期支持 `pdf/doc/docx/txt/md`；`csv/xlsx/pptx` 明确拒绝（契约预留）。txt/md 解码支持 UTF-8 / GBK / UTF-16（含 BOM）等常见编码。
+- **上传格式**：支持 `pdf/doc/docx/pptx/txt/md`；`csv/xlsx` 明确拒绝（契约预留）。txt/md 解码支持 UTF-8 / GBK / UTF-16（含 BOM）等常见编码。
+- **Markdown 导出**：管理端文档列表「下载 MD」；默认多模态 LLM 看图（`MARKITDOWN_LLM_*`）+ `markitdown-ocr`，保留 PDF/PPTX 图表描述；PDF CID 乱码可走视觉转写兜底。
 - **索引版本**：`IndexVersion` 记录每次构建；回退/重建通过 `IndexSwitchService` 行锁 + 原子切换 `current_index_version`，历史版本保留可回溯。
 - **禁用分段**：`chunk.is_enabled=false` 的分段不参与检索与引用。
 - **FAQ**：向量化完成后后台生成；管理端文档列表可显示「更新 FAQ 中」等任务状态。

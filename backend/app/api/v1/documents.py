@@ -1,9 +1,10 @@
-"""文档管理 API。【对齐 docs/API.md §8】前端交互：管理端文档列表/上传/分段预览页调用本模块。"""
+"""文档管理 API。【对齐 docs/API.md §9】前端交互：管理端文档列表/上传/分段预览页调用本模块。"""
 
 from __future__ import annotations
 
 import logging
 import uuid
+from urllib.parse import quote
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
@@ -24,6 +25,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -64,7 +66,7 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(
         ...,
-        description="multipart 字段名 file；支持 PDF、DOC、DOCX、TXT、MD（Markdown）",
+        description="multipart 字段名 file；支持 PDF、DOC、DOCX、PPTX、TXT、MD（Markdown）",
     ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission("kb:upload")),
@@ -115,6 +117,52 @@ async def get_document_content(
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(data.model_dump())
+
+
+@router.get("/{doc_id}/markdown")
+async def download_document_markdown(
+    kb_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("doc:read")),
+):
+    """导出 Markdown；PDF 含图表时返回 zip（md + charts/*.png 相对链接）。【前端：下载 MD】"""
+    from app.services.markitdown_export import build_markdown_zip
+
+    try:
+        result = await document_service.export_document_markdown(
+            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id")
+        )
+    except DocumentError as exc:
+        _raise_doc_error(exc)
+
+    if result.has_assets:
+        payload = build_markdown_zip(result)
+        zip_name = result.download_name.rsplit(".", 1)[0] + "_markdown.zip"
+        ascii_name = "".join(ch if ord(ch) < 128 else "_" for ch in zip_name) or "document_markdown.zip"
+        disposition = (
+            f"attachment; filename=\"{ascii_name}\"; "
+            f"filename*=UTF-8''{quote(zip_name)}"
+        )
+        return Response(
+            content=payload,
+            media_type="application/zip",
+            headers={"Content-Disposition": disposition},
+        )
+
+    download_name = result.download_name
+    ascii_name = "".join(ch if ord(ch) < 128 else "_" for ch in download_name) or "document.md"
+    if not ascii_name.lower().endswith(".md"):
+        ascii_name = f"{ascii_name}.md"
+    disposition = (
+        f"attachment; filename=\"{ascii_name}\"; "
+        f"filename*=UTF-8''{quote(download_name)}"
+    )
+    return PlainTextResponse(
+        content=result.text,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": disposition},
+    )
 
 
 @router.delete("/{doc_id}")
@@ -261,15 +309,29 @@ async def retry_document(
 async def normalize_document(
     kb_id: str,
     doc_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission("doc:write")),
 ):
-    """文档规范化，返回统计。【前端：规范化按钮】"""
+    """文档规范化，返回统计。【前端：规范化按钮】
+
+    若检测到 PDF CID 乱码并已重抽，会异步触发重分段+向量化。
+    """
     try:
-        result = await document_service.normalize_document(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
+        result, reextracted = await document_service.normalize_document(
+            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user
+        )
     except DocumentError as exc:
         _raise_doc_error(exc)
-    return ok(result.model_dump())
+    if reextracted:
+        background_tasks.add_task(
+            document_pipeline.run_resegment_pipeline,
+            _uuid(doc_id, "doc_id"),
+            user.id,
+        )
+    payload = result.model_dump()
+    payload["reextracted"] = reextracted
+    return ok(payload, message="已重抽并排队重分段" if reextracted else "ok")
 
 
 @router.get("/{doc_id}/chunks")
