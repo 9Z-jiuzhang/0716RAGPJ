@@ -360,6 +360,8 @@ async def _enrich_multimodal_previews(doc, previews):
 
     if not settings.MULTIMODAL_RAG_ENABLED or not previews:
         return previews
+    llm_budget = max(0, int(settings.MULTIMODAL_SUMMARY_MAX_LLM_BLOCKS or 0))
+    llm_used = 0
     for preview in previews:
         meta = dict(preview.metadata or {})
         btype = meta.get("block_type")
@@ -372,6 +374,7 @@ async def _enrich_multimodal_previews(doc, previews):
                 image_bytes = storage.download_bytes(asset)
             except Exception:
                 logger.debug("load image asset failed path=%s", asset, exc_info=True)
+        use_llm = llm_used < llm_budget
         enriched = await enrich_chunk_metadata(
             block_type=btype,
             parent_content=meta.get("parent_content") or preview.content,
@@ -381,12 +384,22 @@ async def _enrich_multimodal_previews(doc, previews):
             caption_hint=meta.get("caption") or preview.content,
             image_bytes=image_bytes,
             mime_type=meta.get("mime_type") or "",
+            use_llm=use_llm,
         )
+        if use_llm:
+            llm_used += 1
         meta.update(enriched)
         # PG/全文仍保留完整结构；向量化阶段改用 summary
         preview.content = meta.get("parent_content") or preview.content
         preview.char_count = len(preview.content)
         preview.metadata = meta
+    if llm_used >= llm_budget and llm_budget > 0:
+        logger.info(
+            "multimodal summary LLM budget exhausted doc=%s used=%s budget=%s",
+            getattr(doc, "id", None),
+            llm_used,
+            llm_budget,
+        )
     return previews
 
 

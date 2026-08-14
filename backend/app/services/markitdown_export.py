@@ -20,13 +20,23 @@ from app.utils.exceptions import DocumentError, UnsupportedFileTypeError
 
 logger = logging.getLogger(__name__)
 
-_TEXT_TYPES = frozenset({DocumentFileType.TXT.value, DocumentFileType.MD.value})
+_TEXT_TYPES = frozenset(
+    {
+        DocumentFileType.TXT.value,
+        DocumentFileType.MD.value,
+        DocumentFileType.HTML.value,
+        DocumentFileType.HTM.value,
+        DocumentFileType.CSV.value,
+    }
+)
 _MARKITDOWN_TYPES = frozenset(
     {
         DocumentFileType.PDF.value,
         DocumentFileType.DOCX.value,
         DocumentFileType.DOC.value,
         DocumentFileType.PPTX.value,
+        DocumentFileType.XLSX.value,
+        DocumentFileType.XLS.value,
     }
 )
 _PAGE_RENDER_TYPES = frozenset({DocumentFileType.PDF.value})
@@ -71,9 +81,35 @@ def export_document_bundle(*, filename: str, content: bytes, file_type: str) -> 
     md_name = f"{stem}.md"
 
     if ft in _TEXT_TYPES:
-        text = sanitize_markdown_text(parsers.extract_text(filename, content, ft))
+        # HTML / CSV：优先走版面拆块（保留表格结构），失败再纯文本
+        if ft in {
+            DocumentFileType.HTML.value,
+            DocumentFileType.HTM.value,
+            DocumentFileType.CSV.value,
+        }:
+            try:
+                from app.services.layout_parser import extract_layout
+
+                serialized, _ = extract_layout(filename, content, ft, store_asset=None)
+                text = sanitize_markdown_text(serialized)
+            except Exception:
+                text = sanitize_markdown_text(parsers.extract_text(filename, content, ft))
+        else:
+            text = sanitize_markdown_text(parsers.extract_text(filename, content, ft))
         if not text:
             raise DocumentError("文本内容为空，无法导出 Markdown", http_status=422)
+        return MarkdownExportResult(text=text, download_name=md_name)
+
+    if ft in {DocumentFileType.XLSX.value, DocumentFileType.XLS.value}:
+        try:
+            from app.services.layout_parser import extract_layout
+
+            serialized, _ = extract_layout(filename, content, ft, store_asset=None)
+            text = sanitize_markdown_text(serialized)
+        except Exception:
+            text = sanitize_markdown_text(parsers.extract_text(filename, content, ft))
+        if not text:
+            raise DocumentError("表格内容为空，无法导出 Markdown", http_status=422)
         return MarkdownExportResult(text=text, download_name=md_name)
 
     if ft not in _MARKITDOWN_TYPES:

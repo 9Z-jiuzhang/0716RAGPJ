@@ -94,6 +94,9 @@ _FILE_TYPE_DEFAULT_SPLIT_MODE: dict[str, str] = {
     "ppt": SplitMode.PARAGRAPH.value,
     "html": SplitMode.PARAGRAPH.value,
     "htm": SplitMode.PARAGRAPH.value,
+    "csv": SplitMode.PARAGRAPH.value,
+    "xlsx": SplitMode.PARAGRAPH.value,
+    "xls": SplitMode.PARAGRAPH.value,
 }
 
 

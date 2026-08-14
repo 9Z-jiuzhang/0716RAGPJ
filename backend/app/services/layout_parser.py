@@ -38,6 +38,14 @@ def extract_layout(
     try:
         if ft in {DocumentFileType.HTML.value, DocumentFileType.HTM.value}:
             blocks = _extract_html(content, store_asset=store_asset, kb_id=kb_id)
+        elif ft in {
+            DocumentFileType.XLSX.value,
+            DocumentFileType.XLS.value,
+            DocumentFileType.CSV.value,
+        }:
+            from app.services.spreadsheet_parser import extract_spreadsheet_blocks
+
+            blocks = extract_spreadsheet_blocks(content, ft)
         elif ft == DocumentFileType.DOCX.value:
             blocks = _extract_docx_layout(content, store_asset=store_asset, kb_id=kb_id)
         elif ft == DocumentFileType.PDF.value:
@@ -145,7 +153,11 @@ def _try_read_pipe_table(lines: list[str], start: int) -> tuple[list[str], list[
 
 
 def _extract_html(content: bytes, *, store_asset=None, kb_id: str | None = None) -> list[ContentBlock]:
-    from bs4 import BeautifulSoup
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        logger.warning("beautifulsoup4 未安装，使用标准库 HTMLParser 解析 HTML")
+        return _extract_html_stdlib(content, store_asset=store_asset)
 
     html = _decode_bytes(content)
     soup = BeautifulSoup(html, "html.parser")
@@ -202,6 +214,124 @@ def _extract_html(content: bytes, *, store_asset=None, kb_id: str | None = None)
         if fallback:
             ordered.append(fallback)
     return ordered
+
+
+def _extract_html_stdlib(content: bytes, *, store_asset=None) -> list[ContentBlock]:
+    """无 bs4 时的 HTML 版面解析（标准库 html.parser）。"""
+    from html.parser import HTMLParser
+
+    class _LayoutHTMLParser(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self.blocks: list[ContentBlock] = []
+            self._text_parts: list[str] = []
+            self._in_script = False
+            self._in_table = 0
+            self._table_html: list[str] = []
+            self._row: list[str] = []
+            self._cell: list[str] = []
+            self._in_cell = False
+            self._matrix: list[list[str]] = []
+            self._capture_cell = False
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            t = tag.lower()
+            if t in {"script", "style", "noscript"}:
+                self._in_script = True
+                return
+            if t == "table":
+                self._flush_text()
+                self._in_table += 1
+                if self._in_table == 1:
+                    self._table_html = ["<table>"]
+                    self._matrix = []
+                return
+            if self._in_table:
+                if t in {"tr"}:
+                    self._row = []
+                elif t in {"td", "th"}:
+                    self._cell = []
+                    self._in_cell = True
+                self._table_html.append(self.get_starttag_text() or f"<{t}>")
+                return
+            if t == "img":
+                self._flush_text()
+                ad = dict(attrs)
+                src = (ad.get("src") or "").strip()
+                alt = (ad.get("alt") or "").strip() or "HTML 内嵌图片"
+                asset = ""
+                mime = "image/png"
+                if src.startswith("data:") and store_asset:
+                    asset, mime = _store_data_uri(src, store_asset)
+                self.blocks.append(
+                    ContentBlock(
+                        block_type=ContentBlockType.IMAGE.value,
+                        content=alt,
+                        caption=alt,
+                        asset_path=asset,
+                        mime_type=mime,
+                    )
+                )
+                return
+            if t in {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "br", "div"}:
+                self._text_parts.append("\n")
+
+        def handle_endtag(self, tag: str) -> None:
+            t = tag.lower()
+            if t in {"script", "style", "noscript"}:
+                self._in_script = False
+                return
+            if self._in_table:
+                self._table_html.append(f"</{t}>")
+                if t in {"td", "th"} and self._in_cell:
+                    self._row.append("".join(self._cell).strip())
+                    self._in_cell = False
+                    self._cell = []
+                elif t == "tr":
+                    if self._row:
+                        self._matrix.append(self._row)
+                    self._row = []
+                elif t == "table":
+                    self._in_table = max(0, self._in_table - 1)
+                    if self._in_table == 0 and self._matrix:
+                        headers = self._matrix[0]
+                        rows = self._matrix[1:] if len(self._matrix) > 1 else []
+                        tb = _table_block(headers, rows)
+                        if tb:
+                            # 覆盖 html 为原始片段
+                            tb.html = "".join(self._table_html)
+                            self.blocks.append(tb)
+                        self._matrix = []
+                        self._table_html = []
+                return
+
+        def handle_data(self, data: str) -> None:
+            if self._in_script:
+                return
+            if self._in_table and self._in_cell:
+                self._cell.append(data)
+                return
+            if not self._in_table:
+                self._text_parts.append(data)
+
+        def _flush_text(self) -> None:
+            text = "".join(self._text_parts)
+            text = re.sub(r"[ \t]+\n", "\n", text)
+            text = re.sub(r"\n{3,}", "\n\n", text).strip()
+            self._text_parts = []
+            tb = _text_block(text)
+            if tb:
+                self.blocks.append(tb)
+
+        def close(self) -> None:
+            self._flush_text()
+            super().close()
+
+    parser = _LayoutHTMLParser()
+    parser.feed(_decode_bytes(content))
+    parser.close()
+    return parser.blocks
+
 
 
 def _store_data_uri(src: str, store_asset) -> tuple[str, str]:

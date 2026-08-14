@@ -107,6 +107,7 @@ async def enrich_chunk_metadata(
     caption_hint: str = "",
     image_bytes: bytes | None = None,
     mime_type: str = "",
+    use_llm: bool = True,
 ) -> dict[str, Any]:
     """为表/图块生成摘要元数据（向量化用 summary，回填用 parent_content）。"""
     meta: dict[str, Any] = {
@@ -118,13 +119,20 @@ async def enrich_chunk_metadata(
         "is_summary_vector": True,
     }
     if block_type == "table":
-        summary = await summarize_table(structure_md or parent_content)
+        src = structure_md or parent_content
+        if use_llm:
+            summary = await summarize_table(src)
+        else:
+            summary = _fallback_summary(src, prefix="表格内容")
     elif block_type == "image":
-        summary = await caption_image(
-            caption_hint=caption_hint or parent_content,
-            image_bytes=image_bytes,
-            mime_type=mime_type or "image/png",
-        )
+        if use_llm:
+            summary = await caption_image(
+                caption_hint=caption_hint or parent_content,
+                image_bytes=image_bytes,
+                mime_type=mime_type or "image/png",
+            )
+        else:
+            summary = (caption_hint or parent_content or "文档内嵌图片").strip() or "文档内嵌图片"
     else:
         summary = parent_content
     meta["summary"] = summary
