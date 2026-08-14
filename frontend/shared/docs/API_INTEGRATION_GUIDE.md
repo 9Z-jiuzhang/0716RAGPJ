@@ -455,3 +455,42 @@ client.newCall(req).execute().use { resp ->
 | 仓库 `docs/CLOUD_DEPLOY.md` | 云端生产部署与安全加固 |
 
 管理端「API 接入指南」页面展示本文内容，并内嵌同源 Swagger（`/assets/vendor/swagger-ui/index.html`）。机器调试也可打开官方 `/docs`（本机默认 `http://localhost:9080/docs`），或导入 `openapi.json`。
+
+---
+
+## 15. 外部开放接口与数据源（API Key）
+
+业务系统可通过 **API Key** 调用开放接口，无需交互式登录。API Key 关联一个启用的服务账号，最终权限仍由该账号的 RBAC、部门范围、知识库授权以及 Client Scope 共同决定。
+
+### 鉴权
+
+```http
+X-API-Key: rag_live_xxxxxxxxx
+```
+
+禁止把 API Key 放在 URL 查询参数中。密钥仅在管理端创建或轮换时显示一次。
+
+### 主要路径
+
+| 能力 | 方法与路径 |
+|------|------------|
+| 知识库列表/详情 | `GET /external/knowledge-bases`、`GET /external/knowledge-bases/{kb_id}` |
+| 文档列表/详情/正文 | `GET /external/knowledge-bases/{kb_id}/documents*` |
+| 文档上传 | `POST /external/knowledge-bases/{kb_id}/documents/upload`（可选 `Idempotency-Key`） |
+| 已授权数据源 | `GET /external/data-sources` 及 namespaces/objects/columns/rows |
+
+### 管理端配置
+
+在管理端「API 接入指南」页签中配置：
+
+1. **数据源**：只读外部数据库连接（URL 加密保存，类型由协议自动识别）
+2. **API 客户端**：Scope、关联服务账号、允许的数据源、限流与轮换
+
+知识库文档工作台提供「从数据库导入」：选择数据源 → 表/字段 → 预览 → 生成 Markdown → 复用现有上传与向量化流水线。
+
+### 重要约束
+
+- 不提供任意 SQL 执行接口，也不接受调用方临时提交数据库 URL
+- 未安装对应驱动时不会伪造成功连接
+- MongoDB / Elasticsearch 等非关系型数据源需独立适配器，当前默认不可用
+- 生产环境须配置 `DATA_SOURCE_ALLOWED_HOSTS` 与独立的 `DATA_SOURCE_ENCRYPTION_KEY` / `EXTERNAL_API_KEY_PEPPER`

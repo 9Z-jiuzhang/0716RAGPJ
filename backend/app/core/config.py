@@ -166,6 +166,24 @@ class Settings(BaseSettings):
     # ---------- 限流 ----------
     RATE_LIMIT_ENABLED: bool = True
 
+    # ---------- 外部数据源（只读接入） ----------
+    DATA_SOURCE_ENCRYPTION_KEY: str = ""
+    DATA_SOURCE_ALLOWED_HOSTS: str = ""
+    DATA_SOURCE_ALLOWED_PORTS: str = ""
+    DATA_SOURCE_CONNECT_TIMEOUT_SECONDS: int = 10
+    DATA_SOURCE_QUERY_TIMEOUT_SECONDS: int = 30
+    DATA_SOURCE_MAX_PREVIEW_ROWS: int = 100
+    DATA_SOURCE_MAX_PAGE_SIZE: int = 500
+    DATA_SOURCE_MAX_IMPORT_ROWS: int = 10000
+    DATA_SOURCE_MAX_IMPORT_BYTES: int = 10 * 1024 * 1024
+    DATA_SOURCE_MAX_POOL_SIZE: int = 5
+    DATA_SOURCE_ALLOW_SQLITE: bool = True
+
+    # ---------- 外部开放 API ----------
+    EXTERNAL_API_KEY_PEPPER: str = ""
+    EXTERNAL_API_DEFAULT_RATE_LIMIT: int = 60
+    EXTERNAL_API_MAX_UPLOAD_BYTES: int = 100 * 1024 * 1024
+
     # ---------- 智能问答与会话记忆（产品手册 5.6） ----------
     QA_CONTEXT_WINDOW: int = 10
     QA_SESSION_TTL_MINUTES: int = 30

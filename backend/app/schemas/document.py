@@ -27,6 +27,8 @@ class DocumentResponse(BaseModel):
         default=None,
         description="FAQ 生成任务状态：queued/running/done/error/skipped；无任务时为空",
     )
+    source_type: str | None = "upload"
+    source_metadata: dict[str, Any] | None = None
 
 
 class DocumentSensitivityUpdate(BaseModel):

@@ -4788,3 +4788,24 @@ html[data-theme="dark"] .table-kb-faqs .faq-child-badge {
   font-size: var(--font-size-xs, 12px);
   color: var(--color-text-secondary, #5b6472);
 }
+
+/* 外部数据源导入弹窗局部样式 */
+.db-import-form .form-label-block,
+.db-import-form label.field {
+  display: block;
+  margin-bottom: 12px;
+}
+.db-import-form .form-label-block span,
+.db-import-form label.field > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+.db-preview {
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+  margin-top: 8px;
+  white-space: pre-wrap;
+}

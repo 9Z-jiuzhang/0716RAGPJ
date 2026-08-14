@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.config import settings
+
 
 @pytest.mark.asyncio
 async def test_change_password_requires_old_and_confirm(client):
@@ -52,14 +54,19 @@ async def test_change_password_requires_old_and_confirm(client):
 
 @pytest.mark.asyncio
 async def test_super_admin_cannot_change_password_via_api(client):
-    login = await client.post("/api/v1/auth/login", json={"username": "super", "password": "Super123!"})
+    super_password = settings.SUPER_ADMIN_PASSWORD
+    login = await client.post("/api/v1/auth/login", json={"username": "super", "password": super_password})
     assert login.status_code == 200
     token = login.json()["data"]["access_token"]
 
     res = await client.post(
         "/api/v1/auth/change-password",
         headers={"Authorization": f"Bearer {token}"},
-        json={"old_password": "Super123!", "new_password": "Super999!", "confirm_password": "Super999!"},
+        json={
+            "old_password": super_password,
+            "new_password": "Super999!",
+            "confirm_password": "Super999!",
+        },
     )
     assert res.status_code == 403
     assert "SUPER_ADMIN_PASSWORD" in res.json()["detail"]

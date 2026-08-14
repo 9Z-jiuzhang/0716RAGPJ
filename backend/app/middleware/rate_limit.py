@@ -19,6 +19,7 @@ _DEFAULT_RULES: list[tuple[str, int, int]] = [
     ("/api/v1/auth/login", 20, 60),
     ("/api/v1/auth/register", 10, 60),
     ("/api/v1/qa/ask", 60, 60),
+    ("/api/v1/external/", 120, 60),
     ("/api/v1/", 300, 60),
 ]
 
@@ -78,6 +79,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _client_key(request: Request) -> str:
+        api_key = request.headers.get("X-API-Key") or ""
+        if api_key:
+            return f"apk:{api_key[:16]}"
         auth = request.headers.get("Authorization") or ""
         if auth.startswith("Bearer ") and len(auth) > 20:
             return f"tok:{auth[7:27]}"

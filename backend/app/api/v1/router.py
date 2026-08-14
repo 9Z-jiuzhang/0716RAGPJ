@@ -4,7 +4,10 @@ from fastapi import APIRouter
 
 from .audit import router as audit_router
 from .auth import router as auth_router
+from .database_sources import router as database_sources_router
 from .departments import router as departments_router
+from .external import router as external_router
+from .external_api_clients import router as external_api_clients_router
 from .hit_tests import router as hit_tests_router
 from .models import router as models_router
 from .monitor import router as monitor_router
@@ -34,3 +37,6 @@ api_router.include_router(ragas_router)
 api_router.include_router(role_caches_router)
 api_router.include_router(kb_faqs_router)
 api_router.include_router(sensitivity_router)
+api_router.include_router(database_sources_router)
+api_router.include_router(external_api_clients_router)
+api_router.include_router(external_router)

@@ -76,6 +76,12 @@ class Document(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         server_default="normal",
         comment="敏感等级 normal/confidential/restricted",
     )
+    source_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="upload", server_default="upload", comment="文档来源类型"
+    )
+    source_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, comment="来源元数据（不含敏感连接信息）"
+    )
 
     knowledge_base: Mapped[KnowledgeBase] = relationship("KnowledgeBase", back_populates="documents")
     chunks: Mapped[list[DocumentChunk]] = relationship(

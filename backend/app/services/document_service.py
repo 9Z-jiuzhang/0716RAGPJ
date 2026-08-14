@@ -84,6 +84,8 @@ def to_document_response(doc: Document) -> DocumentResponse:
         updated_at=doc.updated_at,
         sensitivity_level=getattr(doc, "sensitivity_level", None) or "normal",
         faq_job_status=kb_faq_service.get_doc_faq_job_status(doc.id),
+        source_type=getattr(doc, "source_type", None) or "upload",
+        source_metadata=getattr(doc, "source_metadata", None) or {},
     )
 
 
@@ -131,6 +133,8 @@ async def upload_document(
     filename: str,
     content: bytes,
     user: User,
+    source_type: str = "upload",
+    source_metadata: dict[str, Any] | None = None,
 ) -> Document:
     kb = await doc_repo.get_knowledge_base(db, kb_id)
     if not kb:
@@ -154,6 +158,8 @@ async def upload_document(
         sensitivity_level=normalize_sensitivity_level(
             getattr(kb, "default_sensitivity_level", None)
         ),
+        source_type=source_type or "upload",
+        source_metadata=source_metadata or {},
     )
     db.add(doc)
     await db.flush()
