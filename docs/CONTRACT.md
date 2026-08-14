@@ -28,7 +28,7 @@
 - **可检索库列表**：`GET /qa/accessible-kbs`（可选认证）返回当前身份已建索引的知识库，供问答页下拉。
 - **会话闲置过期**：超过 `QA_SESSION_IDLE_EXPIRE_MINUTES` 未问答 → `status=expired` 并清 Redis；历史列表仍可见；续聊携带 `session_id` 可重新激活。管理员「活跃会话」仅计 `active`。
 - **文件上传**：`multipart/form-data`（字段 `file`），上限 100MB（`413`）。前端支持字节上传进度；txt/md 支持 UTF-8/GBK/UTF-16 等常见编码。
-- **向量库**：Compose 使用 `chromadb/chroma:0.6.3`，与 Python `chromadb` 0.6.x 对齐（勿用 `latest`）。
+- **向量库**：Compose 使用 `chromadb/chroma:1.5.5`，与 Python `chromadb` 1.5.x 对齐（勿用 `latest`）。
 - **访问控制**：知识库可见性以**部门**为主（`GUEST`=访客专用）；一个知识库可关联多个部门（表 `kb_departments`，API 字段 `departments[]`）。角色等级 `super_admin > admin > staff/guest`，仅可管理权限低于自己的用户。管理端日常授权入口为超管「组织与权限」；知识库页「访问范围」为多选（含「除访客外全选」）；部门侧关联知识库为追加写入。
 - **角色权限配置**：`PUT /roles/{id}/permissions` **仅超级管理员**可调用。
 - **改密**：`POST /auth/change-password`；固定超管 `super` 禁止调用，仅可通过 `.env` 的 `SUPER_ADMIN_PASSWORD` 维护。

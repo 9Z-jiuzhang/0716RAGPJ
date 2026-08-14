@@ -105,16 +105,15 @@ services:
 
   # ---------- Chroma 向量库 ----------
   chroma:
-    # 与 API 容器内 chromadb 0.6.x 客户端对齐；勿用 latest（新版仅 v2 API，会触发 KeyError: '_type'）
-    image: chromadb/chroma:0.6.3
+    # 与 API 内 chromadb>=1.5,<2.0 对齐；钉死小版本，勿用 latest（跨大版本会 KeyError: '_type' / 数据不兼容）
+    image: chromadb/chroma:1.5.5
     ports:
       - "9800:8000"
     environment:
-      IS_PERSISTENT: "TRUE"
-      PERSIST_DIRECTORY: /chroma/chroma
       ANONYMIZED_TELEMETRY: "FALSE"
     volumes:
-      - ./data/chroma:/chroma/chroma
+      # Chroma 1.x 官方持久化目录为 /data（0.6.x 曾用 /chroma/chroma）
+      - ./data/chroma:/data
     healthcheck:
       disable: true
     networks:

@@ -661,7 +661,8 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| 2.1.8 | 2026-08-06 | 问答页：`rewrite_enabled` 按请求可选、`GET /qa/accessible-kbs`、2000 字提示；上传字节进度；Chroma 固定 `0.6.3` + txt/md 编码放宽；契约重生成 |
+| 2.1.8 | 2026-08-06 | 问答页：`rewrite_enabled` 按请求可选、`GET /qa/accessible-kbs`、2000 字提示；上传字节进度；Chroma 曾固定 `0.6.3` + txt/md 编码放宽；契约重生成 |
+| 2.1.9 | 2026-08-14 | Chroma 对齐主线：`chromadb>=1.5,<2.0` + 镜像 `chromadb/chroma:1.5.5`（挂载 `/data`）；勿用 `latest` |
 | 2.1.7 | 2026-07-31 | 云部署端口统一至 9000–9999（入口 9080）；Compose 自建 Langfuse（9310）；Chroma 宿主机 9800→容器 8000；见 CLOUD_DEPLOY.md |
 | 2.1.6 | 2026-07-27 | 前端 ZYUI-V3.1/V3.2：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、9Z/品牌标）；无 OpenAPI 变更；见 README §2.6 / `OPTIMIZATION_STATUS.md` |
 | 2.1.5 | 2026-07-27 | 反馈率口径修正（按窗口内问答消息对齐，≤100%）；补充 `answerable_events` / `matched_feedback`；首页反馈 KPI；访客端流式中止与列表体验见 README / OPTIMIZATION_STATUS |

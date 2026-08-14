@@ -149,7 +149,7 @@ nginx 反向代理 (reverse-proxy.conf, 容器 :9080)
 | api | 由 `backend/Dockerfile` 构建 | **9081→9081** | FastAPI；生产请勿对公网暴露 |
 | postgres | `postgres:16-alpine` | **9543→9543** | 业务主库（uuid-ossp + pg_trgm） |
 | redis | `redis:7-alpine` | **9637→9637** | 会话热态 / 任务队列 |
-| chroma | `chromadb/chroma:0.6.3` | **9800→8000** | 向量库；**须与 API 内 `chromadb` 0.6.x 客户端对齐**，勿用 `latest`（新版仅 v2 API，写入会报 `_type`） |
+| chroma | `chromadb/chroma:1.5.5` | **9800→8000** | 向量库；**须与 API 内 `chromadb` 1.5.x 客户端对齐**，勿用 `latest`（跨大版本写入会报 `_type` / 数据不兼容） |
 | minio | `minio/minio:latest` | **9900/9901** | 对象存储 API / 控制台 |
 | prometheus | `prom/prometheus:latest` | **9909→9909** | 指标采集 |
 | grafana | `grafana/grafana:latest` | **9300→9300** | 面板（子路径 `/grafana`） |
@@ -262,7 +262,7 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 - **上传格式**：首期支持 `pdf/doc/docx/txt/md`；`csv/xlsx/pptx` 明确拒绝（契约预留）。txt/md 解码支持 UTF-8 / GBK / UTF-16（含 BOM）等常见编码。
 - **索引版本**：`IndexVersion` 记录每次构建；回退/重建通过 `IndexSwitchService` 行锁 + 原子切换 `current_index_version`，历史版本保留可回溯。
 - **禁用分段**：`chunk.is_enabled=false` 的分段不参与检索与引用。
-- **Chroma 兼容**：Compose 固定 `chromadb/chroma:0.6.3`，`requirements.txt` 为 `chromadb>=0.6.3,<0.7.0`。升级镜像时须同步升级 Python 客户端并重建向量数据，否则会出现 `KeyError: '_type'`。
+- **Chroma 兼容**：Compose 固定 `chromadb/chroma:1.5.5`，`requirements.txt` 为 `chromadb>=1.5,<2.0`。升级镜像时须同步升级 Python 客户端并清空/重建向量数据目录 `data/chroma`，否则会出现 `KeyError: '_type'` 或数据格式不兼容。
 
 ### 2.5 检索层
 
@@ -353,7 +353,7 @@ pytest backend/tests -q
 | 超管 / 种子 | `SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_SYNC_PASSWORD`、`SEED_DEMO_USERS`、`AUTH_REGISTER_ENABLED`、`METRICS_PUBLIC` |
 | PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=9543`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
 | Redis | `REDIS_HOST=redis`、`REDIS_PORT=9637`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
-| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE`；镜像固定 `chromadb/chroma:0.6.3` |
+| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE`；镜像固定 `chromadb/chroma:1.5.5` |
 | MinIO | `MINIO_ENDPOINT=minio:9900`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET` |
 | LLM | `LLM_PROVIDER=dashscope`、`LLM_API_KEY`、`LLM_MODEL=qwen3.7-plus`、`LLM_BASE_URL`、思考相关开关 |
 | Embedding | `EMBEDDING_PROVIDER=dashscope`、`EMBEDDING_API_KEY`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_BATCH_SIZE` |

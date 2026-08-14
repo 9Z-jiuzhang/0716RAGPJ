@@ -26,7 +26,7 @@ Internet → 云负载均衡 (HTTPS)
              └─ /grafana/  → grafana (:9300)
         → Langfuse Web（宿主机 :9310）—— 追踪 UI / Public API
         内网 Docker 网络 kb-network：
-             业务：postgres:9543 / redis:9637 / chroma:8000（镜像 `chromadb/chroma:0.6.3`，宿主机映射 9800） / minio:9900 / prometheus:9909
+             业务：postgres:9543 / redis:9637 / chroma:8000（镜像 `chromadb/chroma:1.5.5`，宿主机映射 9800） / minio:9900 / prometheus:9909
              Langfuse：langfuse-postgres:9544 / langfuse-redis:9638 /
                        langfuse-minio:9910 / langfuse-clickhouse:9812|9000 /
                        langfuse-worker:9330
