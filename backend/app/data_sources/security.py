@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from urllib.parse import urlparse
 
 from app.core.config import settings
 from app.data_sources.exceptions import DataSourceSecurityError

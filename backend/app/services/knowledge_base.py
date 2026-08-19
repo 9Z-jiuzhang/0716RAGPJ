@@ -10,11 +10,11 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.constants import (
     GUEST_DEPARTMENT_CODE,
     normalize_department,
 )
-from app.core.config import settings
 from app.core.exceptions import (
     ConflictException,
     ForbiddenException,
@@ -33,11 +33,11 @@ from app.schemas.enums import KnowledgeBaseStatus, KnowledgeBaseType, Visibility
 from app.schemas.knowledge_base import (
     KBPermissionItem,
     KBPermissionUpdate,
+    KbSensitivitySyncResponse,
     KnowledgeBaseCreate,
     KnowledgeBaseFilter,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
-    KbSensitivitySyncResponse,
     ReVectorizeRequest,
     VectorizeStatusResponse,
 )
@@ -311,9 +311,7 @@ class KnowledgeBaseService:
             try:
                 from app.services.kb_faq_service import kb_faq_service
 
-                await kb_faq_service.invalidate_kb_faq_redis(
-                    tenant_id=settings.FAQ_TENANT_ID, kb_id=kb.id
-                )
+                await kb_faq_service.invalidate_kb_faq_redis(tenant_id=settings.FAQ_TENANT_ID, kb_id=kb.id)
             except Exception:  # noqa: BLE001
                 logger.warning("kb update: FAQ Redis invalidate failed kb=%s", kb.id, exc_info=True)
         can_manage_map = await self._can_manage_map(user, [kb])
@@ -343,15 +341,11 @@ class KnowledgeBaseService:
             chunk_where.append(DocumentChunk.sensitivity_level == "normal")
             faq_where.append(KBCachedFAQ.sensitivity_level == "normal")
 
-        doc_result = await self.db.execute(
-            sa_update(Document).where(*doc_where).values(sensitivity_level=target)
-        )
+        doc_result = await self.db.execute(sa_update(Document).where(*doc_where).values(sensitivity_level=target))
         chunk_result = await self.db.execute(
             sa_update(DocumentChunk).where(*chunk_where).values(sensitivity_level=target)
         )
-        faq_result = await self.db.execute(
-            sa_update(KBCachedFAQ).where(*faq_where).values(sensitivity_level=target)
-        )
+        faq_result = await self.db.execute(sa_update(KBCachedFAQ).where(*faq_where).values(sensitivity_level=target))
         affected = {
             "documents": int(doc_result.rowcount or 0),
             "chunks": int(chunk_result.rowcount or 0),
@@ -682,16 +676,11 @@ class KnowledgeBaseService:
             or 0
         )
         faq_count = (
-            await self.db.scalar(
-                select(func.count()).select_from(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb.id)
-            )
-            or 0
+            await self.db.scalar(select(func.count()).select_from(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb.id)) or 0
         )
         snapshot_count = (
             await self.db.scalar(
-                select(func.count())
-                .select_from(Snapshot)
-                .where(Snapshot.kb_id == kb.id, Snapshot.status == "active")
+                select(func.count()).select_from(Snapshot).where(Snapshot.kb_id == kb.id, Snapshot.status == "active")
             )
             or 0
         )
@@ -741,9 +730,7 @@ class KnowledgeBaseService:
             chunk_size=kb.chunk_size,
             chunk_overlap=kb.chunk_overlap,
             status=status,
-            default_sensitivity_level=normalize_sensitivity_level(
-                getattr(kb, "default_sensitivity_level", None)
-            ),
+            default_sensitivity_level=normalize_sensitivity_level(getattr(kb, "default_sensitivity_level", None)),
             faq_enabled=bool(getattr(kb, "faq_enabled", True)),
             is_pinned=bool(getattr(kb, "is_pinned", False)),
             pinned_at=getattr(kb, "pinned_at", None),

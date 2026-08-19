@@ -6,11 +6,6 @@ import uuid
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from sqlalchemy import case, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.api.helpers import ok, resolve_request_id
 from app.core.config import settings
 from app.core.database import get_db
@@ -22,6 +17,10 @@ from app.retrieval.scope import resolve_kb_targets
 from app.schemas.common import BaseResponse
 from app.services.kb_faq_service import kb_faq_service
 from app.services.sensitivity_service import sensitivity_service
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import case, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["知识库FAQ"])
 
@@ -154,9 +153,7 @@ async def list_hot_faq(
     )
     kb_names = {kb.id: kb.name for kb in enabled_kbs}
     enabled_ids = list(kb_names.keys())
-    user_max = await sensitivity_service.resolve_user_max_level(
-        db, user=user, tenant_id=settings.FAQ_TENANT_ID
-    )
+    user_max = await sensitivity_service.resolve_user_max_level(db, user=user, tenant_id=settings.FAQ_TENANT_ID)
     items = await kb_faq_service.list_hot(
         db,
         tenant_id=settings.FAQ_TENANT_ID,
@@ -216,9 +213,7 @@ async def admin_list_faq(
     if status:
         filters.append(KBCachedFAQ.status == status)
     if sensitivity_level:
-        filters.append(
-            KBCachedFAQ.sensitivity_level == normalize_sensitivity_level(sensitivity_level)
-        )
+        filters.append(KBCachedFAQ.sensitivity_level == normalize_sensitivity_level(sensitivity_level))
     if keyword:
         like = f"%{keyword.strip()}%"
         filters.append(or_(KBCachedFAQ.question.ilike(like), KBCachedFAQ.answer.ilike(like)))
@@ -300,9 +295,7 @@ async def update_faq(
 
         faq.sensitivity_level = normalize_sensitivity_level(patch["sensitivity_level"])
     if "question" in patch and patch["question"]:
-        is_compound, next_status = kb_faq_service.apply_compound_flags(
-            question=faq.question, status=faq.status
-        )
+        is_compound, next_status = kb_faq_service.apply_compound_flags(question=faq.question, status=faq.status)
         faq.is_compound = is_compound
         if "status" not in patch and next_status != faq.status:
             faq.status = next_status
@@ -340,9 +333,7 @@ async def split_faq(
     if faq.status == "disabled":
         raise HTTPException(status_code=400, detail="已停用的 FAQ 不可拆分")
     try:
-        result = await kb_faq_service.split_compound_faq(
-            db, faq=faq, operator_id=operator.id
-        )
+        result = await kb_faq_service.split_compound_faq(db, faq=faq, operator_id=operator.id)
         await db.commit()
     except ValueError as exc:
         await db.rollback()
@@ -394,7 +385,7 @@ async def revoke_split_faq(
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await kb_faq_service.invalidate_kb_faq_redis(tenant_id=settings.FAQ_TENANT_ID, kb_id=faq.kb_id)
-    msg = f"已恢复父条"
+    msg = "已恢复父条"
     if result.get("revoked_count"):
         msg += f"，并停用 {result['revoked_count']} 条子问"
     return ok(result, request_id=request_id, message=msg)
@@ -486,7 +477,11 @@ async def batch_faq(
     return ok({"affected": affected}, request_id=request_id)
 
 
-@router.post("/admin/knowledge-bases/{kb_id}/regenerate-faq", response_model=BaseResponse, summary="触发知识库 FAQ 重生")
+@router.post(
+    "/admin/knowledge-bases/{kb_id}/regenerate-faq",
+    response_model=BaseResponse,
+    summary="触发知识库 FAQ 重生",
+)
 async def trigger_regenerate(
     kb_id: UUID,
     body: RegenerateRequest | None = None,

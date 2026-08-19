@@ -125,8 +125,7 @@ class SnapshotService:
         """捕获知识库元信息、分段规则、权限配置与当前索引版本。"""
         segment_rules = await self._load_kb_segment_rules(kb)
         faq_count = int(
-            await self.db.scalar(select(func.count()).select_from(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb.id))
-            or 0
+            await self.db.scalar(select(func.count()).select_from(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb.id)) or 0
         )
         return {
             "kb": {
@@ -259,11 +258,7 @@ class SnapshotService:
             to_restore = snap_faqs
         else:
             doc_strs = {str(x) for x in document_ids}
-            to_restore = [
-                f
-                for f in snap_faqs
-                if any(str(d) in doc_strs for d in (f.source_document_ids or []))
-            ]
+            to_restore = [f for f in snap_faqs if any(str(d) in doc_strs for d in (f.source_document_ids or []))]
             live_rows = list((await self.db.scalars(select(KBCachedFAQ).where(KBCachedFAQ.kb_id == kb_id))).all())
             norms = {f.normalized_question for f in to_restore}
             for row in live_rows:

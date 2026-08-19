@@ -72,12 +72,9 @@ _SPLIT_PROMPT = """你是企业知识库 FAQ 拆分助手。
 """
 
 _Q_MARK_RE = re.compile(r"[？?]")
-_INTERROG_SLOT_RE = re.compile(
-    r"(怎么|如何|多少|几天|何种|是否|什么情况下|什么时候|标准是什么|通过标准|有几天|怎么请)"
-)
+_INTERROG_SLOT_RE = re.compile(r"(怎么|如何|多少|几天|何种|是否|什么情况下|什么时候|标准是什么|通过标准|有几天|怎么请)")
 _WEAK_COMPOUND_RE = re.compile(
-    r"(分别|以及|同时).{0,48}(怎么|如何|多少|几天|何种|是否)|"
-    r"(怎么|如何).{0,24}(和|与|及|以及).{0,24}(怎么|如何)"
+    r"(分别|以及|同时).{0,48}(怎么|如何|多少|几天|何种|是否)|" r"(怎么|如何).{0,24}(和|与|及|以及).{0,24}(怎么|如何)"
 )
 
 
@@ -493,9 +490,7 @@ class KBFaqService:
                         faq.status = "pending_review"
                     if faq.quality_score < settings.FAQ_QUALITY_THRESHOLD and faq.status != "pending_review":
                         continue
-                    is_compound, status = self.apply_compound_flags(
-                        question=faq.question, status=faq.status
-                    )
+                    is_compound, status = self.apply_compound_flags(question=faq.question, status=faq.status)
                     await self._upsert_faq(
                         db,
                         tenant_id=resolved_tenant,
@@ -1367,10 +1362,7 @@ class KBFaqService:
             except ValueError:
                 continue
         found = {
-            str(r.id): r
-            for r in (
-                await db.scalars(select(KBCachedFAQ).where(KBCachedFAQ.id.in_(id_uuids)))
-            ).all()
+            str(r.id): r for r in (await db.scalars(select(KBCachedFAQ).where(KBCachedFAQ.id.in_(id_uuids)))).all()
         }
         out: list[dict[str, Any]] = []
         for cid in child_ids:
@@ -1411,15 +1403,11 @@ class KBFaqService:
         operator_id: uuid.UUID | None,
     ) -> dict[str, Any]:
         """撤销拆分：恢复父条；勾选子问停用（split_revoked）；未勾选保留。"""
-        if not (
-            parent.status == "disabled" and (parent.stale_reason or "") == "split_parent"
-        ):
+        if not (parent.status == "disabled" and (parent.stale_reason or "") == "split_parent"):
             raise ValueError("仅已拆分的父条可撤销拆分")
 
         children_meta = await self.list_split_children(db, parent=parent)
-        available_map = {
-            c["id"]: c for c in children_meta if c.get("available")
-        }
+        available_map = {c["id"]: c for c in children_meta if c.get("available")}
         selected: list[KBCachedFAQ] = []
         skipped: list[str] = []
         for cid in child_ids:

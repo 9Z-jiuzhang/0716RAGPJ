@@ -31,16 +31,15 @@ def test_similarity_exact_and_near_duplicate() -> None:
 def test_classify_compound_question_tiers() -> None:
     svc = KBFaqService()
     assert svc.classify_compound_question("年假有几天？病假有几天？") == (True, True)
-    assert svc.classify_compound_question(
-        "员工在什么情况下需要进入绩效改进计划（PIP）？PIP的通过标准是什么？"
-    ) == (True, True)
+    assert svc.classify_compound_question("员工在什么情况下需要进入绩效改进计划（PIP）？PIP的通过标准是什么？") == (
+        True,
+        True,
+    )
     is_c, strong = svc.classify_compound_question("年假和病假分别怎么请")
     assert is_c is True and strong is False
     assert svc.classify_compound_question("请问年假怎么请") == (False, False)
     assert svc.classify_compound_question("年假和病假的区别是什么") == (False, False)
-    is_c2, status = svc.apply_compound_flags(
-        question="年假有几天？病假有几天？", status="active"
-    )
+    is_c2, status = svc.apply_compound_flags(question="年假有几天？病假有几天？", status="active")
     assert is_c2 is True and status == "pending_review"
 
 

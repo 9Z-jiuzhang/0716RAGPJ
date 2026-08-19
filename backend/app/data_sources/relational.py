@@ -115,9 +115,7 @@ class RelationalAdapter(DataSourceAdapter):
         except Exception:
             raise DataSourceQueryError("读取对象列表失败") from None
 
-    async def list_columns(
-        self, *, namespace: dict[str, Any] | None, object_name: str
-    ) -> list[dict[str, Any]]:
+    async def list_columns(self, *, namespace: dict[str, Any] | None, object_name: str) -> list[dict[str, Any]]:
         schema = (namespace or {}).get("schema")
 
         def _list() -> list[dict[str, Any]]:

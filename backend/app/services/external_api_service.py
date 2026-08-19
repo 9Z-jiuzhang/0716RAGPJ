@@ -16,7 +16,6 @@ from app.models.base import utcnow
 from app.models.data_source import ExternalApiClient, ExternalApiIdempotencyRecord, ExternalDataSource
 from app.services.api_key_crypto import generate_api_key, hash_api_key, is_expired, verify_api_key
 from app.services.observability import write_audit
-from app.utils.exceptions import DocumentError
 
 VALID_SCOPES = {"kb:read", "document:read", "document:upload", "data_source:read"}
 

@@ -43,6 +43,7 @@ from app.schemas.qa import AskRequest
 from app.services.analytics_events import actor_hash_for, analytics_event_service, question_hash
 from app.services.conversation_router import FALLBACK_LLM_ALLOWED_INTENTS, conversation_router
 from app.services.history_retention import enforce_history_retention
+from app.services.kb_faq_service import kb_faq_service
 from app.services.langfuse_service import get_langfuse
 from app.services.llm import LLMServiceError, llm_service
 from app.services.llm_guard import llm_guard_service
@@ -60,7 +61,6 @@ from app.services.query_processing import (
     _sanitize_rewrite_output as _sanitize_rewrite_output,
 )
 from app.services.role_cache import role_cache_service
-from app.services.kb_faq_service import kb_faq_service
 from app.services.sticky_evidence import (
     augment_followup_query,
     expand_neighbor_hits,
@@ -844,9 +844,9 @@ class QAPipeline:
                     user_max_level=user_max_level,
                 )
                 if sticky_dropped:
-                    retrieval_meta["sensitivity_filtered_out"] = int(
-                        retrieval_meta.get("sensitivity_filtered_out") or 0
-                    ) + sticky_dropped
+                    retrieval_meta["sensitivity_filtered_out"] = (
+                        int(retrieval_meta.get("sensitivity_filtered_out") or 0) + sticky_dropped
+                    )
                     retrieval_meta["hit_count"] = len(evidence_hits)
 
                 if not evidence_hits:

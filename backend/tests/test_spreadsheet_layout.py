@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import io
 
-from openpyxl import Workbook
-
 from app.services.layout_parser import extract_layout
 from app.services.spreadsheet_parser import extract_spreadsheet_blocks
+from openpyxl import Workbook
 
 
 def _xlsx_bytes() -> bytes:
@@ -33,7 +32,7 @@ def test_xlsx_layout_extracts_table():
 
 
 def test_csv_layout_extracts_table():
-    csv = "产品,销量\nA,10\nB,20\n".encode("utf-8")
+    csv = "产品,销量\nA,10\nB,20\n".encode()
     blocks = extract_spreadsheet_blocks(csv, "csv")
     assert any(b.block_type == "table" for b in blocks)
     table = next(b for b in blocks if b.block_type == "table")

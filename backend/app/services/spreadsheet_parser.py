@@ -99,9 +99,7 @@ def _extract_xls_blocks(content: bytes) -> list[ContentBlock]:
     try:
         import xlrd
     except ImportError as exc:
-        raise UnsupportedFileTypeError(
-            "xls(请安装 xlrd，或另存为 .xlsx 后上传)"
-        ) from exc
+        raise UnsupportedFileTypeError("xls(请安装 xlrd，或另存为 .xlsx 后上传)") from exc
     try:
         book = xlrd.open_workbook(file_contents=content)
     except Exception as exc:

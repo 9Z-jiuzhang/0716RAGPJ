@@ -333,7 +333,6 @@ def _extract_html_stdlib(content: bytes, *, store_asset=None) -> list[ContentBlo
     return parser.blocks
 
 
-
 def _store_data_uri(src: str, store_asset) -> tuple[str, str]:
     import base64
 

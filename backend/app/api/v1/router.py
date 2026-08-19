@@ -9,12 +9,12 @@ from .departments import router as departments_router
 from .external import router as external_router
 from .external_api_clients import router as external_api_clients_router
 from .hit_tests import router as hit_tests_router
+from .kb_faqs import router as kb_faqs_router
 from .models import router as models_router
 from .monitor import router as monitor_router
 from .qa import router as qa_router
 from .query_processing import router as query_processing_router
 from .ragas import router as ragas_router
-from .kb_faqs import router as kb_faqs_router
 from .role_caches import router as role_caches_router
 from .roles import router as roles_router
 from .sensitivity import router as sensitivity_router

@@ -66,7 +66,9 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(
         ...,
-        description="multipart 字段名 file；支持 PDF、DOC、DOCX、PPTX、TXT、MD、HTML（.html/.htm）、CSV、Excel（.xlsx/.xls）",
+        description=(
+            "multipart 字段名 file；支持 PDF、DOC、DOCX、PPTX、TXT、MD、" "HTML（.html/.htm）、CSV、Excel（.xlsx/.xls）"
+        ),
     ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission("kb:upload")),
@@ -130,9 +132,7 @@ async def download_document_markdown(
     from app.services.markitdown_export import build_markdown_zip
 
     try:
-        result = await document_service.export_document_markdown(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id")
-        )
+        result = await document_service.export_document_markdown(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
     except DocumentError as exc:
         _raise_doc_error(exc)
 
@@ -140,10 +140,7 @@ async def download_document_markdown(
         payload = build_markdown_zip(result)
         zip_name = result.download_name.rsplit(".", 1)[0] + "_markdown.zip"
         ascii_name = "".join(ch if ord(ch) < 128 else "_" for ch in zip_name) or "document_markdown.zip"
-        disposition = (
-            f"attachment; filename=\"{ascii_name}\"; "
-            f"filename*=UTF-8''{quote(zip_name)}"
-        )
+        disposition = f'attachment; filename="{ascii_name}"; ' f"filename*=UTF-8''{quote(zip_name)}"
         return Response(
             content=payload,
             media_type="application/zip",
@@ -154,10 +151,7 @@ async def download_document_markdown(
     ascii_name = "".join(ch if ord(ch) < 128 else "_" for ch in download_name) or "document.md"
     if not ascii_name.lower().endswith(".md"):
         ascii_name = f"{ascii_name}.md"
-    disposition = (
-        f"attachment; filename=\"{ascii_name}\"; "
-        f"filename*=UTF-8''{quote(download_name)}"
-    )
+    disposition = f'attachment; filename="{ascii_name}"; ' f"filename*=UTF-8''{quote(download_name)}"
     return PlainTextResponse(
         content=result.text,
         media_type="text/markdown; charset=utf-8",
@@ -219,7 +213,10 @@ async def segment_preview_file(
     kb_id: str,
     file: UploadFile | None = File(
         None,
-        description="待预览分段的文档文件，支持 PDF、DOC、DOCX、PPTX、TXT、MD、HTML、CSV、Excel（.xlsx/.xls）；与 doc_id 二选一",
+        description=(
+            "待预览分段的文档文件，支持 PDF、DOC、DOCX、PPTX、TXT、MD、"
+            "HTML、CSV、Excel（.xlsx/.xls）；与 doc_id 二选一"
+        ),
     ),
     doc_id: str | None = Form(None, description="已上传文档 id；与 file 二选一"),
     chunk_size: int | None = Form(None, description="可选覆盖：分段长度"),

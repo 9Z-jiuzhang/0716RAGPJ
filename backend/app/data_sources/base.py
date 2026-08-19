@@ -26,9 +26,7 @@ class DataSourceAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def list_columns(
-        self, *, namespace: dict[str, Any] | None, object_name: str
-    ) -> list[dict[str, Any]]:
+    async def list_columns(self, *, namespace: dict[str, Any] | None, object_name: str) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     @abstractmethod

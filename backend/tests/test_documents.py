@@ -234,7 +234,7 @@ def test_convert_md_txt_direct_decode():
     from app.services.markitdown_export import convert_document_to_markdown, markdown_download_filename
 
     assert convert_document_to_markdown(filename="a.md", content=b"# Hello\n", file_type="md") == "# Hello"
-    assert convert_document_to_markdown(filename="a.txt", content="中文".encode("utf-8"), file_type="txt") == "中文"
+    assert convert_document_to_markdown(filename="a.txt", content="中文".encode(), file_type="txt") == "中文"
     assert markdown_download_filename("报告.docx") == "报告.md"
     with pytest.raises(DocumentError):
         convert_document_to_markdown(filename="a.md", content=b"   \n", file_type="md")
@@ -244,9 +244,7 @@ def test_convert_docx_uses_markitdown():
     from app.services import markitdown_export as mod
 
     with patch.object(mod, "_convert_with_markitdown", return_value="# From MD") as conv:
-        text = mod.convert_document_to_markdown(
-            filename="x.docx", content=b"PK fake", file_type="docx"
-        )
+        text = mod.convert_document_to_markdown(filename="x.docx", content=b"PK fake", file_type="docx")
     assert text == "# From MD"
     conv.assert_called_once()
 

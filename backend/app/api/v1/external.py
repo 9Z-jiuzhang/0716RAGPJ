@@ -6,6 +6,18 @@ import hashlib
 import logging
 import uuid
 
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.dependencies import assert_kb_access
+from app.data_sources.exceptions import DataSourceError
+from app.models import User
+from app.models.data_source import ExternalApiClient
+from app.retrieval.scope import _list_accessible_kbs
+from app.schemas.data_source import ExternalRowsRequest
+from app.schemas.response import ok
+from app.services import data_source_service, document_pipeline, document_service, external_api_service
+from app.services.external_api_service import ExternalApiError
+from app.utils.exceptions import DocumentError
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -18,19 +30,6 @@ from fastapi import (
     status,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.config import settings
-from app.core.database import get_db
-from app.core.dependencies import assert_kb_access
-from app.data_sources.exceptions import DataSourceError
-from app.models import User
-from app.models.data_source import ExternalApiClient
-from app.schemas.data_source import ExternalRowsRequest
-from app.schemas.response import ok
-from app.services import data_source_service, document_pipeline, document_service, external_api_service
-from app.services.external_api_service import ExternalApiError
-from app.utils.exceptions import DocumentError
-from app.retrieval.scope import _list_accessible_kbs
 
 logger = logging.getLogger(__name__)
 
@@ -139,9 +138,7 @@ async def get_doc(
         external_api_service.require_scope(client, "document:read")
         external_api_service.require_user_permission(user, "doc:read")
         await assert_kb_access(db, user, _uuid(kb_id, "kb_id"), "doc:read")
-        doc = await document_service.get_document_detail(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id")
-        )
+        doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
     except (ExternalApiError, DocumentError) as exc:
         _raise_ext(exc)
     return ok(document_service.to_document_response(doc).model_dump())
@@ -159,9 +156,7 @@ async def get_doc_content(
         external_api_service.require_scope(client, "document:read")
         external_api_service.require_user_permission(user, "doc:read")
         await assert_kb_access(db, user, _uuid(kb_id, "kb_id"), "doc:read")
-        data = await document_service.get_document_content_preview(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id")
-        )
+        data = await document_service.get_document_content_preview(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
     except (ExternalApiError, DocumentError) as exc:
         _raise_ext(exc)
     return ok(data.model_dump() if hasattr(data, "model_dump") else data)
@@ -275,9 +270,7 @@ async def ext_objects(
         external_api_service.require_scope(client, "data_source:read")
         external_api_service.require_user_permission(user, "data_source:read")
         external_api_service.assert_data_source_allowed(client, sid)
-        data = await data_source_service.list_objects(
-            db, sid, {"schema": schema} if schema is not None else None
-        )
+        data = await data_source_service.list_objects(db, sid, {"schema": schema} if schema is not None else None)
     except (ExternalApiError, DataSourceError) as exc:
         _raise_ext(exc)
     return ok(data)

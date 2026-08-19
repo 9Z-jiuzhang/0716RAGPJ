@@ -121,11 +121,7 @@ class SnapshotFAQ(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     sensitivity_level: Mapped[str] = mapped_column(String(20), nullable=False, default="normal")
     is_compound: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     split_from_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    source_created_at: Mapped[str | None] = mapped_column(
-        String(40), nullable=True, comment="原 FAQ created_at ISO"
-    )
-    source_updated_at: Mapped[str | None] = mapped_column(
-        String(40), nullable=True, comment="原 FAQ updated_at ISO"
-    )
+    source_created_at: Mapped[str | None] = mapped_column(String(40), nullable=True, comment="原 FAQ created_at ISO")
+    source_updated_at: Mapped[str | None] = mapped_column(String(40), nullable=True, comment="原 FAQ updated_at ISO")
 
     snapshot: Mapped[Snapshot] = relationship("Snapshot", back_populates="faqs")

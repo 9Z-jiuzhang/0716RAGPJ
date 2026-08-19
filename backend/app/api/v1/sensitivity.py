@@ -5,10 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.api.helpers import ok, resolve_request_id
 from app.core.config import settings
 from app.core.database import get_db
@@ -18,6 +14,9 @@ from app.models.sensitivity import SENSITIVITY_LEVEL_META, SENSITIVITY_LEVELS, n
 from app.schemas.common import BaseResponse
 from app.services.sensitivity_service import sensitivity_service
 from app.utils.identity_helpers import is_super_admin_user
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["敏感话题权限"])
 
@@ -79,9 +78,7 @@ async def get_user_override(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
-    row = await sensitivity_service.get_user_override(
-        db, tenant_id=settings.FAQ_TENANT_ID, user_id=user_id
-    )
+    row = await sensitivity_service.get_user_override(db, tenant_id=settings.FAQ_TENANT_ID, user_id=user_id)
     if row is None:
         return ok({"override": None}, request_id=request_id)
     return ok(

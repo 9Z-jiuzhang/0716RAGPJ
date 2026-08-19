@@ -222,7 +222,10 @@ async def ensure_schema_patches() -> None:
         "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ NULL",
         "CREATE INDEX IF NOT EXISTS idx_kb_pinned ON knowledge_bases (is_pinned, pinned_at DESC NULLS LAST)",
-        "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS default_sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal'",
+        (
+            "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS "
+            "default_sensitivity_level VARCHAR(20) NOT NULL DEFAULT 'normal'"
+        ),
         """
         DO $$ BEGIN
           ALTER TABLE knowledge_bases
@@ -367,10 +370,9 @@ async def ensure_schema_patches() -> None:
         """,
         "CREATE INDEX IF NOT EXISTS idx_snapshot_faqs_snapshot ON snapshot_faqs(snapshot_id)",
         "CREATE INDEX IF NOT EXISTS idx_snapshot_faqs_faq ON snapshot_faqs(faq_id)",
-# 外部数据源 / 开放接口：文档来源字段
+        # 外部数据源 / 开放接口：文档来源字段
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) NOT NULL DEFAULT 'upload'",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb",
-
         # Wave1：仅旧默认 rewrite=true 且未开启扩展/HyDE 的单例配置迁到关闭
         """
         UPDATE query_processing_configs

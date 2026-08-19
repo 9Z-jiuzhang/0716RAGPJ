@@ -19,7 +19,10 @@ class UnsupportedFileTypeError(DocumentError):
     def __init__(self, file_type: str):
         # 错误响应同步告知允许范围，避免用户只能反复试错判断支持格式。
         super().__init__(
-            f"不支持的文件格式: {file_type}；当前支持 PDF、DOC、DOCX、PPTX、TXT、MD、HTML（.html/.htm）、CSV、Excel（.xlsx/.xls）",
+            (
+                f"不支持的文件格式: {file_type}；当前支持 PDF、DOC、DOCX、PPTX、TXT、MD、"
+                "HTML（.html/.htm）、CSV、Excel（.xlsx/.xls）"
+            ),
             http_status=400,
         )
 

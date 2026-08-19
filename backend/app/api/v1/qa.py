@@ -28,9 +28,8 @@ from app.models.identity import User
 from app.models.knowledge_base import KnowledgeBase
 from app.models.qa import QAMessage, QASession
 from app.repositories import document as doc_repo
-from app.retrieval import resolve_kb_targets
-from app.schemas.common import BaseResponse
 from app.retrieval.scope import resolve_kb_targets
+from app.schemas.common import BaseResponse
 from app.schemas.qa import AskRequest, FeedbackRequest, RenameSessionRequest
 from app.services import storage
 from app.services.document_charts import (

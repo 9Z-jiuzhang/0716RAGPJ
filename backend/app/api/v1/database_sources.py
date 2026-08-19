@@ -5,9 +5,6 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.data_sources.exceptions import DataSourceError
@@ -20,6 +17,8 @@ from app.schemas.data_source import (
 )
 from app.schemas.response import ok
 from app.services import data_source_service, document_pipeline
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +234,5 @@ async def import_rows(
     except DataSourceError as exc:
         _raise(exc)
     for item in data.get("documents") or []:
-        background_tasks.add_task(
-            document_pipeline.run_upload_pipeline, uuid.UUID(item["id"]), auto_vectorize=True
-        )
+        background_tasks.add_task(document_pipeline.run_upload_pipeline, uuid.UUID(item["id"]), auto_vectorize=True)
     return ok(data, message="imported")

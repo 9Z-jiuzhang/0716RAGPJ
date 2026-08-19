@@ -89,12 +89,7 @@ def table_rows_to_html(headers: list[str], rows: list[list[str]]) -> str:
 
 
 def _escape_html(text: str) -> str:
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 def html_table_to_markdown(table_html: str) -> str:

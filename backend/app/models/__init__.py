@@ -9,12 +9,12 @@ from .guard import GuardBlockedEvent
 from .hit_tests import TestCases, TestQuestions, TestResults, TestRuns
 from .identity import AuditLog, Permission, Role, User
 from .index_version import IndexVersion
+from .kb_faq import FAQAuditLog, KBCachedFAQ
 from .knowledge_base import KBDepartment, KBPermission, KnowledgeBase
 from .model_config import ModelConfig
 from .qa import QAMessage, QASession
 from .query_processing import QueryProcessingConfig
 from .ragas_evaluation import RagasEvaluationItem, RagasEvaluationRun
-from .kb_faq import FAQAuditLog, KBCachedFAQ
 from .role_cache import RoleCacheConfig, RoleCachedQuestion
 from .sensitivity import RoleSensitivityPermission, SensitivityAuditLog, UserSensitivityOverride
 from .snapshot import Snapshot, SnapshotDocument, SnapshotFAQ

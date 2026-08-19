@@ -13,12 +13,12 @@ from app.models import User
 from app.schemas.common import APIResponse, PageResponse
 from app.schemas.knowledge_base import (
     KBPermissionUpdate,
+    KbSensitivitySyncRequest,
+    KbSensitivitySyncResponse,
     KnowledgeBaseCreate,
     KnowledgeBaseFilter,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
-    KbSensitivitySyncRequest,
-    KbSensitivitySyncResponse,
     ReVectorizeRequest,
     VectorizeStatusResponse,
 )

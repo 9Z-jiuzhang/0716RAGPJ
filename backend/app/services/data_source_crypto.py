@@ -20,7 +20,7 @@ def _fernet() -> Fernet:
             digest = hashlib.sha256(raw.encode("utf-8")).digest()
             return Fernet(base64.urlsafe_b64encode(digest))
     # 本地开发回退：由 SECRET_KEY 派生，绝不复用 JWT_SECRET_KEY
-    digest = hashlib.sha256(f"data-source-v1:{settings.SECRET_KEY}".encode("utf-8")).digest()
+    digest = hashlib.sha256(f"data-source-v1:{settings.SECRET_KEY}".encode()).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
 
 

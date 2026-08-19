@@ -113,9 +113,7 @@ def _decode_bytes(content: bytes) -> str:
             return text
 
     # 兜底：选质量最高的一次解码；中文正文足够时放行
-    if best_fallback is not None and (
-        best_score >= 0.45 or _cjk_ratio(best_fallback) >= 0.08
-    ):
+    if best_fallback is not None and (best_score >= 0.45 or _cjk_ratio(best_fallback) >= 0.08):
         return best_fallback
 
     text = content.decode("utf-8", errors="replace")
@@ -294,7 +292,15 @@ def _extract_pdf_via_vision(content: bytes) -> str:
     sections: list[str] = []
     for idx, png in enumerate(pages, start=1):
         try:
-            body = (_llm_describe_png(png, client=client, model=str(model), prompt=_RAG_PDF_VISION_PROMPT) or "").strip()
+            body = (
+                _llm_describe_png(
+                    png,
+                    client=client,
+                    model=str(model),
+                    prompt=_RAG_PDF_VISION_PROMPT,
+                )
+                or ""
+            ).strip()
         except Exception as exc:
             logger.warning("pdf vision page %s failed: %s", idx, exc)
             body = ""

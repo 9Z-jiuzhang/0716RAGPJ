@@ -5,9 +5,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.models import User
@@ -15,6 +12,8 @@ from app.schemas.data_source import ApiClientCreateRequest, ApiClientUpdateReque
 from app.schemas.response import ok
 from app.services import external_api_service
 from app.services.external_api_service import ExternalApiError
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/external-api-clients", tags=["外部API客户端"])
 
@@ -101,9 +100,7 @@ async def rotate_key(
     user: User = Depends(require_permission("external_api:manage")),
 ):
     try:
-        data = await external_api_service.rotate_client_key(
-            db, user=user, client_id=_uuid(client_id, "client_id")
-        )
+        data = await external_api_service.rotate_client_key(db, user=user, client_id=_uuid(client_id, "client_id"))
     except ExternalApiError as exc:
         _raise(exc)
     return ok(data, message="rotated")

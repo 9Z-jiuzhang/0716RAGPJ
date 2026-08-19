@@ -7,13 +7,12 @@ import logging
 from typing import Any
 
 from app.core.config import settings
-from app.services.llm import LLMService, LLMServiceError, llm_service
+from app.services.llm import LLMService, llm_service
 
 logger = logging.getLogger(__name__)
 
 _TABLE_SUMMARY_PROMPT = (
-    "请用中文详细概括下面表格的主题、关键字段与重要数值趋势。"
-    "不要编造表中不存在的信息。只输出摘要正文。"
+    "请用中文详细概括下面表格的主题、关键字段与重要数值趋势。" "不要编造表中不存在的信息。只输出摘要正文。"
 )
 _IMAGE_CAPTION_PROMPT = (
     "请详细描述这张图片的内容。如果是图表，请提取关键数据趋势；"

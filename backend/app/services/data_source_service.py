@@ -19,7 +19,7 @@ from app.data_sources.url_parser import mask_connection_url, parse_connection_ur
 from app.models import User
 from app.models.base import utcnow
 from app.models.data_source import ExternalApiClient, ExternalDataSource
-from app.services import document_pipeline, document_service
+from app.services import document_service
 from app.services.data_source_crypto import decrypt_connection_url, encrypt_connection_url
 from app.services.data_source_markdown import split_markdown_batches
 from app.services.observability import write_audit

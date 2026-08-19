@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.base import utcnow
 from app.models.identity import User
 from app.models.sensitivity import (
     LEVEL_ORDER,
@@ -23,7 +24,6 @@ from app.models.sensitivity import (
     audit_row_dict,
     normalize_sensitivity_level,
 )
-from app.models.base import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -322,11 +322,7 @@ class SensitivityService:
                 continue
         if not chunk_ids:
             return list(hits), 0
-        rows = list(
-            (
-                await db.scalars(select(DocumentChunk).where(DocumentChunk.id.in_(chunk_ids)))
-            ).all()
-        )
+        rows = list((await db.scalars(select(DocumentChunk).where(DocumentChunk.id.in_(chunk_ids)))).all())
         level_by_id = {str(r.id): normalize_sensitivity_level(getattr(r, "sensitivity_level", None)) for r in rows}
         kept = []
         dropped = 0

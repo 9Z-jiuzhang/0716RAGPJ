@@ -14,7 +14,7 @@ from app.services.layout_parser import extract_layout
 
 
 def test_html_layout_extracts_table_and_text():
-    html = """
+    html = b"""
     <html><body>
       <p>intro</p>
       <table>
@@ -24,7 +24,7 @@ def test_html_layout_extracts_table_and_text():
       </table>
       <p>end</p>
     </body></html>
-    """.encode("utf-8")
+    """
     serialized, blocks = extract_layout("demo.html", html, "html")
     assert any(b.block_type == "table" for b in blocks)
     assert any(b.block_type == "text" for b in blocks)
@@ -33,7 +33,7 @@ def test_html_layout_extracts_table_and_text():
 
 
 def test_markdown_pipe_table_becomes_table_block():
-    md = """# Title
+    md = b"""# Title
 
 | Name | Score |
 | --- | --- |
@@ -41,7 +41,7 @@ def test_markdown_pipe_table_becomes_table_block():
 | B | 85 |
 
 Body text.
-""".encode("utf-8")
+"""
     _, blocks = extract_layout("a.md", md, "md")
     types = [b.block_type for b in blocks]
     assert "table" in types

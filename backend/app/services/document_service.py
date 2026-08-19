@@ -20,6 +20,7 @@ from app.models.enums import (
     SnapshotTrigger,
 )
 from app.models.kb_faq import KBCachedFAQ
+from app.models.sensitivity import normalize_sensitivity_level
 from app.repositories import document as doc_repo
 from app.schemas.document import (
     ChunkListResponse,
@@ -47,7 +48,6 @@ from app.services.observability import record_metric, write_audit
 from app.services.parsers import detect_file_type
 from app.services.security_scan import validate_encoding_safe, virus_scan_placeholder
 from app.services.snapshot_hooks import take_auto_snapshot
-from app.models.sensitivity import normalize_sensitivity_level
 from app.utils.exceptions import (
     DocumentError,
     DocumentNotFoundError,
@@ -155,9 +155,7 @@ async def upload_document(
         creator_id=user.id,
         segment_rules=rules,
         content_hash=hashlib.sha256(content).hexdigest(),
-        sensitivity_level=normalize_sensitivity_level(
-            getattr(kb, "default_sensitivity_level", None)
-        ),
+        sensitivity_level=normalize_sensitivity_level(getattr(kb, "default_sensitivity_level", None)),
         source_type=source_type or "upload",
         source_metadata=source_metadata or {},
     )
@@ -403,9 +401,7 @@ async def get_document_detail(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.U
     return doc
 
 
-async def export_document_markdown(
-    db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID
-):
+async def export_document_markdown(db: AsyncSession, kb_id: uuid.UUID, doc_id: uuid.UUID):
     """从 MinIO 原文件导出 Markdown（PDF 可附带 charts PNG，返回 MarkdownExportResult）。"""
     import asyncio
 
@@ -535,11 +531,7 @@ async def update_document_sensitivity(
     if sens == "restricted" and not is_platform_admin_user(user):
         raise DocumentError("仅管理员可将文档密级设为极高密", http_status=403)
     doc.sensitivity_level = sens
-    await db.execute(
-        sa_update(DocumentChunk)
-        .where(DocumentChunk.document_id == doc_id)
-        .values(sensitivity_level=sens)
-    )
+    await db.execute(sa_update(DocumentChunk).where(DocumentChunk.document_id == doc_id).values(sensitivity_level=sens))
 
     # 联动：凡引用该文档的 FAQ，按全部来源文档重算最高密级
     related_faqs = list(
@@ -563,18 +555,11 @@ async def update_document_sensitivity(
                     continue
         level_by_doc: dict[str, str] = {str(doc_id): sens}
         if all_source_ids:
-            other_docs = list(
-                (await db.scalars(select(Document).where(Document.id.in_(list(all_source_ids))))).all()
-            )
+            other_docs = list((await db.scalars(select(Document).where(Document.id.in_(list(all_source_ids))))).all())
             for d in other_docs:
-                level_by_doc[str(d.id)] = normalize_sensitivity_level(
-                    getattr(d, "sensitivity_level", None)
-                )
+                level_by_doc[str(d.id)] = normalize_sensitivity_level(getattr(d, "sensitivity_level", None))
         for faq in related_faqs:
-            levels = [
-                level_by_doc.get(str(sid), "normal")
-                for sid in (faq.source_document_ids or [])
-            ]
+            levels = [level_by_doc.get(str(sid), "normal") for sid in (faq.source_document_ids or [])]
             if not levels:
                 continue
             resolved = max(
@@ -667,10 +652,7 @@ async def normalize_document(
     ft = (doc.file_type or "").lower().lstrip(".")
     reextracted = False
     # 空正文或 PDF CID 乱码：强制从原文件重抽（PDF 走 melo 解析链；其它类型可走版面拆块）
-    if doc.file_path and (
-        not source
-        or (ft == "pdf" and parsers.is_unusable_pdf_text(source))
-    ):
+    if doc.file_path and (not source or (ft == "pdf" and parsers.is_unusable_pdf_text(source))):
         content = storage.download_bytes(doc.file_path)
         if ft == "pdf" or not settings.MULTIMODAL_RAG_ENABLED:
             source = parsers.extract_text(doc.filename, content, doc.file_type)

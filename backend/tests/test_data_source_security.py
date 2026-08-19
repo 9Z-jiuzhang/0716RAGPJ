@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.data_sources.exceptions import UnsupportedConnectorError
 from app.data_sources.registry import get_connector_capabilities, resolve_adapter
 from app.data_sources.url_parser import mask_connection_url, parse_connection_url

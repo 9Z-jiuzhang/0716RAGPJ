@@ -259,9 +259,7 @@ def _split_layout_aware(
                     "table_part": pi,
                     "table_parts": len(pieces),
                 }
-                out.append(
-                    ChunkPreview(chunk_index=idx, content=piece, char_count=len(piece), metadata=meta)
-                )
+                out.append(ChunkPreview(chunk_index=idx, content=piece, char_count=len(piece), metadata=meta))
                 idx += 1
             continue
         if btype == ContentBlockType.IMAGE.value:

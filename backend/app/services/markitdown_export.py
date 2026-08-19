@@ -334,8 +334,8 @@ def _markitdown_llm_kwargs() -> dict:
         )
 
     base_url = (
-        settings.MARKITDOWN_LLM_BASE_URL or settings.LLM_BASE_URL or "https://api.openai.com/v1"
-    ).strip().rstrip("/")
+        (settings.MARKITDOWN_LLM_BASE_URL or settings.LLM_BASE_URL or "https://api.openai.com/v1").strip().rstrip("/")
+    )
     model = (settings.MARKITDOWN_LLM_MODEL or "").strip() or "qwen-vl-plus"
     prompt = (settings.MARKITDOWN_LLM_PROMPT or "").strip() or _DEFAULT_CHART_PROMPT
     timeout = max(30, int(settings.MARKITDOWN_LLM_TIMEOUT_SECONDS or 180))

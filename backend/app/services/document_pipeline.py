@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import SessionLocal
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.models import DocumentChunk
 from app.models.enums import DocumentStatus, SnapshotTrigger
 from app.models.sensitivity import normalize_sensitivity_level
@@ -243,6 +243,7 @@ async def _parse_from_current(db: AsyncSession, doc) -> None:
 
     record_metric("parsing", "start")
     content = storage.download_bytes(doc.file_path)
+
     def _store_asset(name: str, blob: bytes, content_type: str) -> str:
         return storage.upload_bytes(str(doc.kb_id), name, blob, content_type=content_type)
 
