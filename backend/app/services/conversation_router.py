@@ -217,9 +217,26 @@ class ConversationRouter:
         if t == "expand":
             return f"在不新增事实的前提下，将上一回答展开表述如下：\n\n{text}"
         # shorten / summarize
-        sentences = re.split(r"(?<=[。！？.!?])\s*", text)
-        sentences = [s.strip() for s in sentences if s.strip()]
-        short = "。".join(sentences[:3])
+        # 编号列表中的“1.”、“2.”不是句号。优先以列表项为单位截取，既保留编号也避免截断条目正文。
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        number_item_re = re.compile(r"^(?:[-*•]\s+|(?:\d+|[一二三四五六七八九十]+)[.、)]\s*)")
+        numbered_indexes = [idx for idx, line in enumerate(lines) if number_item_re.match(line)]
+        if len(numbered_indexes) >= 2:
+            # 保留列表前的简短引导语，并仅返回前三个完整列表项。
+            first_index = numbered_indexes[0]
+            prefix = lines[:first_index]
+            selected = lines[numbered_indexes[0] : numbered_indexes[3]]
+            short = "\n".join([*prefix, *selected]).strip()
+        else:
+            # 英文句号只有在前一字符不是数字、后一段以大写英文或中文起始时才视为句末。
+            # 这样“1. 上班时间”不会被错误拆成“1.”和“上班时间”。
+            sentences = re.split(
+                r"(?<=[。！？!?])\s*|(?<!\d)(?<=[.])(?=\s+(?:[A-Z\u4e00-\u9fff]))",
+                text,
+            )
+            sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
+            # 分句结果已保留原有标点，不能再额外拼接句号，以免出现“。。”。
+            short = "\n".join(sentences[:3])
         if short and not short.endswith(("。", "！", "？", ".", "!", "?")):
             short += "。"
         return f"简要版（仅基于上一回答）：\n\n{short or text[:300]}"

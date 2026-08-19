@@ -219,7 +219,7 @@ async def segment_preview_file(
     kb_id: str,
     file: UploadFile | None = File(
         None,
-        description="待预览分段的文档文件，支持 PDF、DOC、DOCX、TXT、MD；与 doc_id 二选一",
+        description="待预览分段的文档文件，支持 PDF、DOC、DOCX、PPTX、TXT、MD、HTML、CSV、Excel（.xlsx/.xls）；与 doc_id 二选一",
     ),
     doc_id: str | None = Form(None, description="已上传文档 id；与 file 二选一"),
     chunk_size: int | None = Form(None, description="可选覆盖：分段长度"),

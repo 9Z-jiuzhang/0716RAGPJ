@@ -131,6 +131,8 @@ async def test_delete_cascades_vector_and_storage():
         patch("app.services.document_service.storage") as st,
         patch("app.services.document_service.write_audit", AsyncMock()),
         patch("app.services.document_service.record_metric"),
+        # 删除文档会同步清理引用该文档的 FAQ；单元测试无需连接真实数据库。
+        patch("app.services.kb_faq_service.kb_faq_service.prune_by_document", AsyncMock()),
     ):
         await delete_document(db, doc.kb_id, doc.id, user)
         vs.delete_document_vectors.assert_called_once_with(doc.kb_id, doc.id)

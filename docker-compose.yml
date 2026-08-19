@@ -43,7 +43,7 @@ services:
     build:
       context: .
       dockerfile: docker/web/Dockerfile
-    image: ${COMPOSE_PROJECT_NAME:-kb}-web:local
+    # 开发环境仅使用 build 产物，不声明 image，避免 compose 将本地镜像名误当作远端镜像拉取。
     restart: unless-stopped
     # 仅供统一入口反代；默认不映射到宿主机
     expose:
@@ -118,17 +118,18 @@ services:
   # ---------- Chroma 向量库 ----------
   chroma:
     # 固定 1.5.5，并与 API 的 chromadb>=1.5,<2.0 对齐，避免 latest 跨版本升级造成数据不兼容。
+    # Chroma 1.x 的官方持久化目录为 /data，不能继续使用 0.x 的 /chroma/chroma。
     # 官方镜像容器内固定监听 8000，宿主机映射为 9800。
     image: chromadb/chroma:1.5.5
     ports:
       - "9800:8000"
     environment:
-      IS_PERSISTENT: "TRUE"
-      PERSIST_DIRECTORY: /chroma/chroma
+      # 显式声明 1.x 持久化目录，使容器重建后仍从宿主机数据目录恢复向量索引。
+      CHROMA_PERSIST_PATH: /data
       ANONYMIZED_TELEMETRY: "FALSE"
       CHROMA_SERVER_HOST: "0.0.0.0"
     volumes:
-      - ./data/chroma:/chroma/chroma
+      - ./data/chroma:/data
     healthcheck:
       disable: true
     networks:

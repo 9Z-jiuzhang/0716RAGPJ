@@ -270,7 +270,7 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 - **索引版本**：`IndexVersion` 记录每次构建；回退/重建通过 `IndexSwitchService` 行锁 + 原子切换 `current_index_version`，历史版本保留可回溯。
 - **禁用分段**：`chunk.is_enabled=false` 的分段不参与检索与引用。
 - **FAQ**：向量化完成后后台生成；管理端文档列表可显示「更新 FAQ 中」等任务状态。
-- **Chroma 兼容**：当前版本固定 `chromadb/chroma:1.5.5`，并与 Python 客户端 `chromadb>=1.5,<2.0` 对齐；升级镜像前需同步验证客户端并重建向量数据，避免 `_type` 与数据格式不兼容。
+- **Chroma 兼容**：当前版本固定 `chromadb/chroma:1.5.5`，并与 Python 客户端 `chromadb>=1.5,<2.0` 对齐；Chroma 1.x 向量数据持久化到容器 `/data`（映射宿主机 `./data/chroma`）。升级镜像前需同步验证客户端并重建向量数据，避免 `_type` 与数据格式不兼容。
 
 ### 2.5 检索层
 

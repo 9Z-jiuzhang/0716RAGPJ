@@ -45,6 +45,23 @@ def test_conversation_router_transform_uses_last_answer() -> None:
         transform_type="shorten",
     )
     assert "简要版" in out
+
+
+def test_conversation_router_shorten_keeps_numbered_items_intact() -> None:
+    """简略上一回答时，数字编号后的英文句点不能被误判为句号。"""
+    answer = (
+        "违规行为包括：\n"
+        "1. 上班时间观看视频、直播；\n"
+        "2. 访问非法网站；\n"
+        "3. 泄露公司账号信息；\n"
+        "4. 擅自安装未经授权的软件。"
+    )
+    out = conversation_router.transform_answer(last_answer=answer, transform_type="shorten")
+    assert "1. 上班时间观看视频、直播；" in out
+    assert "2. 访问非法网站；" in out
+    assert "3. 泄露公司账号信息；" in out
+    assert "1。" not in out
+    assert "4. 擅自安装未经授权的软件。" not in out
     assert "第四条" not in out or "第一条" in out
 
 
