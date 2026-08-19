@@ -171,6 +171,10 @@ async def test_scheduler_failure_does_not_skip_other_role_or_history_jobs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """单个角色的文档分析失败后，其他角色及历史分析仍必须继续执行。"""
+    # 生产环境默认关闭角色缓存写入，避免在过渡期自动生成数据。
+    # 本用例专门验证“启用写入”时的调度容错逻辑，因此必须显式开启，
+    # 防止 CI 与本地默认配置差异导致测试没有进入待验证的任务分支。
+    monkeypatch.setattr("app.services.role_cache.settings.ROLE_CACHE_WRITE_ENABLED", True)
     first_role_id, second_role_id = uuid4(), uuid4()
     configs = [
         SimpleNamespace(
