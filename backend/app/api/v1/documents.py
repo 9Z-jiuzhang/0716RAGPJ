@@ -66,12 +66,12 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(
         ...,
-        description="multipart 字段名 file；支持 PDF、DOC、DOCX、PPTX、TXT、MD（Markdown）",
+        description="multipart 字段名 file；支持 PDF、DOC、DOCX、PPTX、TXT、MD、HTML（.html/.htm）、CSV、Excel（.xlsx/.xls）",
     ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission("kb:upload")),
 ):
-    """上传 PDF、DOC、DOCX、TXT 或 Markdown，并触发解析、清洗、分段和向量化流水线。"""
+    """上传 PDF、DOC、DOCX、PPTX、TXT、Markdown、HTML 或 Excel/CSV，并触发解析、清洗、分段和向量化流水线。"""
     content = await file.read()
     filename = file.filename or "unnamed"
     try:

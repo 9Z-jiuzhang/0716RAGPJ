@@ -189,6 +189,8 @@ class Settings(BaseSettings):
     # 超长表格按行切分时，每个切片前保留表头
     MULTIMODAL_TABLE_MAX_CHARS: int = 3000
     MULTIMODAL_SUMMARY_MAX_TOKENS: int = 512
+    # 单文档内最多对多少个表/图块调用 LLM/VLM 摘要；超出用截断回退，避免大 HTML 拖垮流水线并挤占问答
+    MULTIMODAL_SUMMARY_MAX_LLM_BLOCKS: int = 8
 
     # ---------- 限流 ----------
     RATE_LIMIT_ENABLED: bool = True

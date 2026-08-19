@@ -949,7 +949,13 @@ class KBFaqService:
                 }
             )
         prompt = _GENERATION_PROMPT.format(count=count)
+        from app.services.model_concurrency import model_concurrency_gate
+
         for attempt in range(2):
+            acquired = await model_concurrency_gate.acquire()
+            if not acquired:
+                logger.warning("FAQ LLM skipped: model concurrency gate busy doc=%s", doc.id)
+                return []
             try:
                 raw = await llm_service.chat(
                     [
@@ -972,6 +978,8 @@ class KBFaqService:
                 logger.error("FAQ LLM failed attempt=%s: %s", attempt + 1, exc)
             except Exception as exc:  # noqa: BLE001
                 logger.error("FAQ generate failed attempt=%s: %s", attempt + 1, exc)
+            finally:
+                model_concurrency_gate.release()
         return []
 
     def _parse_and_validate(self, raw: str, materials: list[dict[str, Any]]) -> list[_DraftFAQ]:

@@ -50,7 +50,7 @@ class DocumentStatus(str, Enum):
 
 
 class DocumentFileType(str, Enum):
-    """文档文件类型。csv/xlsx 为预留枚举，上传接口拒绝；pptx 已开放。"""
+    """文档文件类型。xlsx/csv/xls 已开放上传（表格多模态检索）。"""
 
     PDF = "pdf"
     DOCX = "docx"
@@ -61,6 +61,7 @@ class DocumentFileType(str, Enum):
     HTM = "htm"
     CSV = "csv"
     XLSX = "xlsx"
+    XLS = "xls"
     PPTX = "pptx"
 
 
@@ -82,7 +83,7 @@ class SplitMode(str, Enum):
     MARKDOWN = "markdown"
 
 
-# 上传首期允许（含 HTML，支撑图/表/HTML 检索改造）
+# 上传允许：含 HTML 与 Excel/CSV 表格
 UPLOAD_ALLOWED_TYPES = frozenset(
     {
         DocumentFileType.PDF,
@@ -93,10 +94,13 @@ UPLOAD_ALLOWED_TYPES = frozenset(
         DocumentFileType.PPTX,
         DocumentFileType.HTML,
         DocumentFileType.HTM,
+        DocumentFileType.CSV,
+        DocumentFileType.XLSX,
+        DocumentFileType.XLS,
     }
 )
-# 数据库枚举预留，上传直接拒绝
-UPLOAD_REJECTED_TYPES = frozenset({DocumentFileType.CSV, DocumentFileType.XLSX})
+# 预留拒绝集（当前为空；保留符号供校验逻辑引用）
+UPLOAD_REJECTED_TYPES = frozenset()
 
 DEFAULT_SEPARATORS = ["\n\n", "\n", "。", ".", " "]
 DEFAULT_CHUNK_SIZE = 500

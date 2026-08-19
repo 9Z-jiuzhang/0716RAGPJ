@@ -22,6 +22,14 @@ def extract_text(filename: str, content: bytes, file_type: str) -> str:
             return _decode_bytes(content)
         if ft in {DocumentFileType.HTML.value, DocumentFileType.HTM.value}:
             return _extract_html_text(content)
+        if ft in {
+            DocumentFileType.XLSX.value,
+            DocumentFileType.XLS.value,
+            DocumentFileType.CSV.value,
+        }:
+            from app.services.spreadsheet_parser import spreadsheet_to_plain_text
+
+            return spreadsheet_to_plain_text(content, ft)
         if ft == DocumentFileType.PDF.value:
             return _extract_pdf(content)
         if ft == DocumentFileType.DOCX.value:
@@ -48,9 +56,9 @@ def _extract_html_text(content: bytes) -> str:
             tag.decompose()
         return soup.get_text("\n", strip=True)
     except Exception:
-        # 去标签粗抽
         text = _decode_bytes(content)
-        return re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", text)
+        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
 
 
 def _decode_bytes(content: bytes) -> str:

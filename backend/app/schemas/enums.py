@@ -36,8 +36,11 @@ class FileType(str, Enum):
     DOCX = "docx"
     TXT = "txt"
     MD = "md"
+    HTML = "html"
+    HTM = "htm"
     CSV = "csv"
     XLSX = "xlsx"
+    XLS = "xls"
     PPTX = "pptx"
 
 

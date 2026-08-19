@@ -101,14 +101,16 @@ def test_error_can_retry_to_parsing():
     assert doc.error_message is None
 
 
-def test_upload_rejects_p1_formats_and_oversized(monkeypatch):
+def test_upload_rejects_unknown_and_oversized(monkeypatch):
     from app.core import config
 
     monkeypatch.setattr(config.settings, "MAX_UPLOAD_BYTES", 10)
-    for name in ("a.csv", "b.xlsx"):
-        with pytest.raises(UnsupportedFileTypeError):
-            _validate_upload(name, b"abc")
-    assert _validate_upload("deck.pptx", b"PK") == "pptx"    with pytest.raises(FileTooLargeError):
+    with pytest.raises(UnsupportedFileTypeError):
+        _validate_upload("a.exe", b"abc")
+    assert _validate_upload("demo.xlsx", b"PK") == "xlsx"
+    assert _validate_upload("demo.csv", b"a,b\n1,2\n") == "csv"
+    assert _validate_upload("deck.pptx", b"PK") == "pptx"
+    with pytest.raises(FileTooLargeError):
         _validate_upload("a.txt", b"0123456789012345")
     assert _validate_upload("note.md", b"hello") == "md"
     assert _validate_upload("x.pdf", b"%PDF") == "pdf"

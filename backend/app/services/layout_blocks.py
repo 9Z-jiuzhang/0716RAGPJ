@@ -98,10 +98,13 @@ def _escape_html(text: str) -> str:
 
 
 def html_table_to_markdown(table_html: str) -> str:
-    """简单 HTML <table> → Markdown（无 BeautifulSoup 时的兜底）。"""
+    """简单 HTML <table> → Markdown。"""
     try:
         from bs4 import BeautifulSoup
+    except ImportError:
+        return re.sub(r"<[^>]+>", " ", table_html).strip()
 
+    try:
         soup = BeautifulSoup(table_html, "html.parser")
         table = soup.find("table")
         if not table:
@@ -115,7 +118,6 @@ def html_table_to_markdown(table_html: str) -> str:
             return ""
         headers = matrix[0]
         body = matrix[1:] if len(matrix) > 1 else []
-        # 若首行全是 th，已作为表头
         thead = table.find("thead")
         if thead:
             hdr = [c.get_text(" ", strip=True) for c in thead.find_all(["th", "td"])]

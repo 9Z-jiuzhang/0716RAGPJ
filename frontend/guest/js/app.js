@@ -2726,7 +2726,7 @@ async function pageUpload() {
   document.getElementById("pageRoot").innerHTML = `
     <header class="page-head">
       <div class="page-head-text">
-        <p class="page-desc">当前身份：${getRoleLabel()}${getDepartment() ? ` · 部门 ${getDepartment()}` : ""}。支持 PDF、Word、TXT、Markdown。</p>
+        <p class="page-desc">当前身份：${getRoleLabel()}${getDepartment() ? ` · 部门 ${getDepartment()}` : ""}。支持 PDF、Word、TXT、Markdown、HTML、CSV、Excel。</p>
       </div>
     </header>
     <div class="page-grid upload-page-grid">
@@ -2749,10 +2749,25 @@ async function pageUpload() {
         </select>
       </div>
       <div class="upload-drop" id="dropZone">
-        <span class="upload-drop-copy-idle">点击或拖拽 PDF、Word（DOC/DOCX）、TXT、Markdown（MD）文件到此处（支持多选）</span>
+        <span class="upload-drop-copy-idle">点击或拖拽 PDF、Word（DOC/DOCX）、TXT、Markdown（MD）、HTML、CSV、Excel（xlsx/xls）文件到此处（支持多选）</span>
         <span class="upload-drop-copy-active">松手即可上传</span>
     </div>
-      <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,text/markdown,application/pdf" />
+      <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.doc,.docx,.txt,.md,.html,.htm,.csv,.xlsx,.xls,text/markdown,text/html,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <div class="card" style="margin-top:16px;box-shadow:none">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h3 class="card-title">当前知识库文档</h3>
+            <p class="card-sub" id="uploadDocListSub">切换知识库或上传后自动刷新</p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshUploadDocs">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>文件名</th><th>类型</th><th>状态</th><th>分段</th><th>上传时间</th></tr></thead>
+            <tbody id="uploadDocListBody"><tr><td colspan="5" class="text-muted">加载中…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
     </div>
     <div class="card upload-progress-panel span-4">
       <div class="card-header"><div class="card-header-text"><h3 class="card-title">处理进度</h3></div></div>
@@ -2762,7 +2777,7 @@ async function pageUpload() {
             <div id="uploadBar" style="height:100%;width:0;background:var(--color-primary);transition:width .2s"></div>
           </div>
       <div class="meta-list" style="margin-top:16px">
-        <div class="meta-row"><span class="meta-label">文件类型</span><span class="meta-value">PDF / Word / TXT / MD</span></div>
+        <div class="meta-row"><span class="meta-label">文件类型</span><span class="meta-value">PDF / Word / TXT / MD / HTML / CSV / Excel</span></div>
         <div class="meta-row"><span class="meta-label">权限说明</span><span class="meta-value">员工限本部门或授权库</span></div>
         <div class="meta-row"><span class="meta-label">批量上传</span><span class="meta-value">支持一次选择多个文件</span></div>
       </div>
@@ -2772,6 +2787,57 @@ async function pageUpload() {
 
   const drop = document.getElementById("dropZone");
   const fileInput = document.getElementById("fileInput");
+  const kbSelect = document.getElementById("kbSelect");
+  const refreshDocsBtn = document.getElementById("btnRefreshUploadDocs");
+
+  const GUEST_UPLOAD_EXTS = new Set([".pdf", ".doc", ".docx", ".txt", ".md", ".html", ".htm", ".csv", ".xlsx", ".xls"]);
+  const extOf = (name) => {
+    const n = String(name || "").toLowerCase();
+    const i = n.lastIndexOf(".");
+    return i >= 0 ? n.slice(i) : "";
+  };
+
+  const renderUploadDocList = async () => {
+    const body = document.getElementById("uploadDocListBody");
+    const sub = document.getElementById("uploadDocListSub");
+    const kbId = kbSelect?.value || "";
+    if (!body) return;
+    if (!kbId) {
+      body.innerHTML = `<tr><td colspan="5" class="text-muted">请先选择知识库</td></tr>`;
+      return;
+    }
+    body.innerHTML = `<tr><td colspan="5" class="text-muted">加载中…</td></tr>`;
+    try {
+      const data = await api.get(`/knowledge-bases/${kbId}/documents?page=1&page_size=20`);
+      const items = data.items || [];
+      const total = Number(data.total ?? items.length) || 0;
+      if (sub) sub.textContent = `共 ${total} 份 · 显示最近 ${items.length} 份`;
+      if (!items.length) {
+        body.innerHTML = `<tr><td colspan="5" class="text-muted">暂无文档</td></tr>`;
+        return;
+      }
+      body.innerHTML = items
+        .map((d) => {
+          const st = String(d.status || "");
+          const faqJob = String(d.faq_job_status || "").toLowerCase();
+          const label =
+            st === "ready" && (faqJob === "queued" || faqJob === "running")
+              ? "更新FAQ中"
+              : st || "-";
+          return `<tr>
+            <td>${escapeHtml(d.filename || d.name || "-")}</td>
+            <td>${escapeHtml(d.file_type || "-")}</td>
+            <td>${escapeHtml(label)}</td>
+            <td>${escapeHtml(fmtCount(d.chunk_count ?? 0))}</td>
+            <td>${escapeHtml(formatDateTime(d.created_at) || "-")}</td>
+          </tr>`;
+        })
+        .join("");
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="5" class="text-danger">${escapeHtml(e.message || "加载失败")}</td></tr>`;
+    }
+  };
+
   let dragDepth = 0;
   const setDragActive = (on) => drop.classList.toggle("dragover", on);
   drop.onclick = () => fileInput.click();
@@ -2801,12 +2867,43 @@ async function pageUpload() {
       fileInput.value = "";
     }
   };
+  kbSelect?.addEventListener("change", () => {
+    renderUploadDocList();
+  });
+  refreshDocsBtn?.addEventListener("click", () => {
+    renderUploadDocList();
+  });
+
+  // 暴露给上传完成后刷新列表
+  window.__refreshGuestUploadDocs = renderUploadDocList;
+  // 过滤非法扩展名（含 HTML）
+  window.__guestUploadExtOk = (name) => GUEST_UPLOAD_EXTS.has(extOf(name));
+
+  await renderUploadDocList();
 }
 
 /** 批量上传：逐个调用既有单文件接口，并汇总进度 */
 async function handleUploadFiles(fileList) {
-  const files = Array.from(fileList || []).filter(Boolean);
-  if (!files.length) return toast("请选择文件", "error");
+  const all = Array.from(fileList || []).filter(Boolean);
+  if (!all.length) return toast("请选择文件", "error");
+
+  const extOk =
+    typeof window.__guestUploadExtOk === "function"
+      ? window.__guestUploadExtOk
+      : (name) => {
+          const n = String(name || "").toLowerCase();
+          return [".pdf", ".doc", ".docx", ".txt", ".md", ".html", ".htm", ".csv", ".xlsx", ".xls"].some((ext) => n.endsWith(ext));
+        };
+  const files = [];
+  const skipped = [];
+  for (const file of all) {
+    if (extOk(file.name)) files.push(file);
+    else skipped.push(file.name);
+  }
+  if (skipped.length) {
+    toast(`已跳过不支持的格式：${skipped.slice(0, 3).join("、")}${skipped.length > 3 ? "…" : ""}`, "error");
+  }
+  if (!files.length) return toast("没有可上传的文件（支持 PDF/Word/TXT/MD/HTML/CSV/Excel）", "error");
 
   const prog = document.getElementById("uploadProgress");
   const bar = document.getElementById("uploadBar");
@@ -2824,6 +2921,14 @@ async function handleUploadFiles(fileList) {
         prog.innerHTML = `<span class="text-danger">第 ${i + 1}/${files.length} 个失败：${escapeHtml(e.message || "未知错误")}</span>`;
       }
     }
+  }
+
+  try {
+    if (typeof window.__refreshGuestUploadDocs === "function") {
+      await window.__refreshGuestUploadDocs();
+    }
+  } catch {
+    /* ignore */
   }
 
   if (files.length === 1) return;
@@ -2875,7 +2980,16 @@ async function handleUpload(file, opts = {}) {
   const fd = new FormData();
   fd.append("file", file);
 
-  const busy = new Set(["parsing", "normalizing", "segmenting", "vectorizing", "pending_segment", "uploaded", "pending"]);
+  const busy = new Set([
+    "parsing",
+    "processing",
+    "normalizing",
+    "segmenting",
+    "vectorizing",
+    "pending_segment",
+    "uploaded",
+    "pending",
+  ]);
   try {
     const doc = await api.upload(`/knowledge-bases/${kbId}/documents/upload`, fd, {
       onProgress: (pct, loaded) => {
@@ -2889,6 +3003,14 @@ async function handleUpload(file, opts = {}) {
         }
       },
     });
+    // 入库后立刻刷新列表，避免离开进度区后误以为文件丢失
+    try {
+      if (typeof window.__refreshGuestUploadDocs === "function") {
+        await window.__refreshGuestUploadDocs();
+      }
+    } catch {
+      /* ignore */
+    }
     const docId = doc?.id;
     if (!opts.quietToast) toast("上传成功，正在处理…", "success");
     if (!docId) {
@@ -2921,7 +3043,7 @@ async function handleUpload(file, opts = {}) {
       setBar(batchBase + batchSpan);
       if (finalDoc.status === "ready") {
         setProg(
-          `<span class="text-success">${prefix}处理完成（ready）· 分段 ${escapeHtml(fmtCount(finalDoc.chunk_count ?? 0))}</span>`,
+          `<span class="text-success">${prefix}处理完成（ready）· 分段 ${escapeHtml(fmtCount(finalDoc.chunk_count ?? 0))}。可去智能问答提问；大文档请稍等向量化完成后再问。</span>`,
           true
         );
       } else {
@@ -2929,6 +3051,13 @@ async function handleUpload(file, opts = {}) {
           `<span class="text-danger">${prefix}处理失败：${escapeHtml(finalDoc.error_message || finalDoc.status || "error")}</span>`,
           true
         );
+      }
+      try {
+        if (typeof window.__refreshGuestUploadDocs === "function") {
+          await window.__refreshGuestUploadDocs();
+        }
+      } catch {
+        /* ignore */
       }
     } catch (pollErr) {
       setProg(

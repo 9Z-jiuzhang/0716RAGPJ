@@ -4116,7 +4116,7 @@ async function pageDocuments(kbId, opts = {}) {
   /** @type {AbortController | null} */
   let uploadAbort = null;
 
-  const UPLOAD_EXTS = new Set([".pdf", ".doc", ".docx", ".pptx", ".txt", ".md", ".html", ".htm"]);
+  const UPLOAD_EXTS = new Set([".pdf", ".doc", ".docx", ".pptx", ".txt", ".md", ".html", ".htm", ".csv", ".xlsx", ".xls"]);
   const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
   const MAX_BATCH_FILES = 100;
 
@@ -4132,7 +4132,7 @@ async function pageDocuments(kbId, opts = {}) {
           <span class="kb-dropzone-copy-active">释放鼠标开始批量上传</span>
         </p>
         <ul class="kb-dropzone-meta">
-          <li>支持格式：PDF、DOC、DOCX、PPTX、TXT、MD</li>
+          <li>支持格式：PDF、DOC、DOCX、PPTX、TXT、MD、HTML、CSV、Excel</li>
           <li>单文件最大：100MB · 支持文件夹递归扫描</li>
           <li>一次可批量上传多个文件（逐个上传）</li>
         </ul>
@@ -5131,7 +5131,7 @@ async function pageDocuments(kbId, opts = {}) {
       ).length;
 
       const docActions = canUpload
-        ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.pptx,.txt,.md,.html,.htm,text/markdown,text/html,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+        ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.pptx,.txt,.md,.html,.htm,.csv,.xlsx,.xls,text/markdown,text/html,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
                  <input type="file" id="adminFolder" class="hidden" webkitdirectory directory multiple />
                  <button class="btn btn-sm" id="btnAdminUpload">选择文件</button>
                  <button class="btn btn-secondary btn-sm" id="btnAdminUploadFolder">选择文件夹</button>`
@@ -5140,7 +5140,7 @@ async function pageDocuments(kbId, opts = {}) {
       mountEl().innerHTML = `
       ${pageHead({
         title: "文档管理",
-        desc: "支持 PDF、Word（DOC/DOCX）、PPTX、TXT、Markdown；可拖拽文件/文件夹。上传后解析与向量化；FAQ 后台异步生成；「下载 MD」会对图表做多模态看图描述。",
+        desc: "支持 PDF、Word（DOC/DOCX）、PPTX、TXT、Markdown、HTML、CSV、Excel（xlsx/xls）；可拖拽文件/文件夹。上传后解析与向量化；FAQ 后台异步生成；「下载 MD」会对图表做多模态看图描述。",
         actions: docActions,
       })}
       ${
