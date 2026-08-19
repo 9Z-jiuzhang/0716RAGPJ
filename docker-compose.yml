@@ -16,6 +16,16 @@ services:
       - "9081:9081"
     env_file:
       - .env
+    environment:
+      # PostgreSQL 容器内部固定监听 9543；不能继承旧 .env 中可能残留的 5432，
+      # 否则 API 会在依赖服务健康后仍因连接错误而反复重启。
+      POSTGRES_PORT: "9543"
+      # MinIO 容器内部固定监听 9900；宿主机端口与容器端口相同。
+      # 覆盖旧 .env 中的 minio:9000，避免上传、下载和健康检测连接错误。
+      MINIO_ENDPOINT: "minio:9900"
+      # Redis 容器内部固定监听 9637，覆盖旧 .env 中常见的默认端口 6379。
+      # 会话、限流与 FAQ 热缓存均依赖该连接，端口错误会使服务退化运行。
+      REDIS_PORT: "9637"
     volumes:
       - ./backend/app:/app/app
       - ./backend/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
@@ -55,7 +65,8 @@ services:
     volumes:
       - ./frontend:/usr/share/nginx/html
       - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./docker/web/docker-entrypoint.sh:/docker-entrypoint-web.sh:ro
+      # 不挂载宿主机启动脚本：Windows 工作区可能将脚本转换为 CRLF，
+      # Alpine /bin/sh 会因此报“illegal option”并退出。镜像构建阶段已统一为 LF。
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9082/assets/js/router.js"]
       interval: 20s
