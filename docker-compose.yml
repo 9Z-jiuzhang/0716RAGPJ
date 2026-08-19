@@ -117,9 +117,9 @@ services:
 
   # ---------- Chroma 向量库 ----------
   chroma:
-    # 需与 API 的 chromadb>=1.0 匹配；官方镜像容器内固定监听 8000，宿主机映射为 9800
-    # 若出现 KeyError: '_type'，再单独对齐客户端与镜像版本（决策 D3=C）
-    image: chromadb/chroma:latest
+    # 固定 1.5.5，并与 API 的 chromadb>=1.5,<2.0 对齐，避免 latest 跨版本升级造成数据不兼容。
+    # 官方镜像容器内固定监听 8000，宿主机映射为 9800。
+    image: chromadb/chroma:1.5.5
     ports:
       - "9800:8000"
     environment:

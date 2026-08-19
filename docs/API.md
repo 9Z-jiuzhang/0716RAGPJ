@@ -715,7 +715,7 @@ Authorization: Bearer <access_token>
 8. 部门：GUEST 部门不可删除/改 code；员工访问 GUEST 库不应被拒。
 9. 用户：管理员不可删除/禁用同级或更高级用户；不可将他人设为 admin/超管；角色权限配置仅超管可调。
 10. 改密：普通用户成功；`super` 返回 `403`。
-11. Chroma：客户端与服务端均为 0.6.x；错配时向量写入失败（`_type`）。
+11. Chroma：Compose 固定 `chromadb/chroma:1.5.5`，Python 客户端为 `chromadb>=1.5,<2.0`；升级时必须同步验证并重建向量数据，避免 `_type` 或数据格式错配。
 
 ---
 
@@ -724,6 +724,7 @@ Authorization: Bearer <access_token>
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | 2.1.9 | 2026-08-13 | FAQ Cache V2.0 一期：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 KB_FAQ / FAQ_PHASE2_ACCEPTANCE |
+| 2.1.10 | 2026-08-14 | Chroma 固定至 1.5.5，Python 客户端保持 `>=1.5,<2.0`，避免使用 `latest` 造成跨版本数据不兼容。 |
 | 2.1.8 | 2026-08-06 | 问答页：`rewrite_enabled` 按请求可选、`GET /qa/accessible-kbs`、2000 字提示；上传字节进度；txt/md 编码放宽；契约重生成 |
 | 2.1.7 | 2026-07-31 | 云部署端口统一至 9000–9999（入口 9080）；Compose 自建 Langfuse（9310）；Chroma 宿主机 9800→容器 8000；见 CLOUD_DEPLOY.md |
 | 2.1.6 | 2026-07-27 | 前端 ZYUI-V3.1/V3.2：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、9Z/品牌标）；无 OpenAPI 变更；见 README §2.6 / `OPTIMIZATION_STATUS.md` |
