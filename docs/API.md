@@ -459,7 +459,7 @@ Authorization: Bearer <access_token>
 
 典型顺序：`intent` →（可选 `route`）→（可选 `query_processing` / `cache_hit`）→ `chunk*` → `citations` → `done`；被拦截时为 `guard_blocked`。
 
-> **知识库 FAQ** 精确命中时走短路径秒答（`retrieval_meta` / 元数据含 `source=kb_faq`）；多级缓存 L1–L4 由功能开关控制；角色缓存过渡期仍可发 `cache_hit`。详见 `docs/KB_FAQ.md`。
+> **知识库 FAQ** 精确命中时走短路径秒答（`retrieval_meta` / 元数据含 `source=kb_faq`）；多级缓存 L1–L4 由功能开关控制；角色缓存过渡期仍可发 `cache_hit`。接口与行为见下文 [12.1](#121-知识库-faq摘要)。
 
 **引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky` 会话延续）；可选 `images[]`（`page`、`url`），为 PDF 入库栅格化图表页，URL 形如 `/api/v1/qa/documents/{doc_id}/charts/page-XX.png`（权限与 `/qa/ask` 一致）。向量相关度一般为 `1 - cosine_distance`。
 
@@ -556,18 +556,18 @@ Authorization: Bearer <access_token>
 
 ## 12.1 知识库 FAQ（摘要）
 
-完整说明见 [`KB_FAQ.md`](KB_FAQ.md)。
+库级 FAQ 缓存（表 `kb_cached_faqs`，唯一键 `kb_id + normalized_question`）：文档 `ready` 后**异步**生成，不阻塞向量化完成。问答侧对规范化后的**精确同题**短路秒答（跳过 Embedding / 检索 / 生成）；完整 LLM Guard 在 FAQ **未命中**后执行。未命中则进入多级 QA 缓存 → 角色缓存只读回退 → 完整 RAG。生成去重用 `FAQ_SIMILARITY_THRESHOLD`（不用于问答语义命中）。配置项见 `.env.example`（`FAQ_*`、`ROLE_CACHE_*`）。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/faq/list` | 访客热门（可选登录；密级过滤） |
 | GET | `/admin/faq/list` | 管理列表（`kb_id` 等） |
-| PUT | `/admin/faq/{id}` | 编辑 |
+| PUT | `/admin/faq/{id}` | 编辑（会失效该库 FAQ Redis） |
 | POST | `/admin/faq/batch` | 批量（含密级） |
-| POST | `/knowledge-bases/{kb_id}/faq/toggle` | 库级开关 |
+| POST | `/knowledge-bases/{kb_id}/faq/toggle` | 库级开关 `faq_enabled` |
 | POST | `/admin/knowledge-bases/{kb_id}/regenerate-faq` | 重生 |
 
-知识库更新可含 `is_pinned` / `faq_enabled`；列表响应含 `can_manage`、`faq_count` 等。
+知识库更新可含 `is_pinned` / `faq_enabled`；列表响应含 `can_manage`、`faq_count` 等。快照含 `snapshot_faqs`；回退可还原 FAQ。默认上限：每文档 25 / 每库 500（可配）。
 
 ---
 
@@ -723,15 +723,15 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| 2.1.9 | 2026-08-13 | FAQ Cache V2.0 一期：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 KB_FAQ / FAQ_PHASE2_ACCEPTANCE |
+| 2.1.9 | 2026-08-13 | FAQ 知识库缓存：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 §12.1 |
 | 2.1.10 | 2026-08-14 | Chroma 固定至 1.5.5，Python 客户端保持 `>=1.5,<2.0`，避免使用 `latest` 造成跨版本数据不兼容。 |
 | 2.1.8 | 2026-08-06 | 问答页：`rewrite_enabled` 按请求可选、`GET /qa/accessible-kbs`、2000 字提示；上传字节进度；txt/md 编码放宽；契约重生成 |
 | 2.1.7 | 2026-07-31 | 云部署端口统一至 9000–9999（入口 9080）；Compose 自建 Langfuse（9310）；Chroma 宿主机 9800→容器 8000；见 CLOUD_DEPLOY.md |
-| 2.1.6 | 2026-07-27 | 前端 ZYUI-V3.1/V3.2：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、9Z/品牌标）；无 OpenAPI 变更；见 README §2.6 / `OPTIMIZATION_STATUS.md` |
-| 2.1.5 | 2026-07-27 | 反馈率口径修正（按窗口内问答消息对齐，≤100%）；补充 `answerable_events` / `matched_feedback`；首页反馈 KPI；访客端流式中止与列表体验见 README / OPTIMIZATION_STATUS |
+| 2.1.6 | 2026-07-27 | 前端：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、品牌标）；无 OpenAPI 变更；见 README §2.6 |
+| 2.1.5 | 2026-07-27 | 反馈率口径修正（按窗口内问答消息对齐，≤100%）；补充 `answerable_events` / `matched_feedback`；首页反馈 KPI；访客端流式中止与列表体验见 README |
 | 2.1.4 | 2026-07-25 | 知识库多部门访问：`departments[]` + `kb_departments`；部门侧关联改为追加/局部解除；管理端访问范围多选与「除访客外全选」 |
 | 2.1.3 | 2026-07-25 | Ask/`QA_DEFAULT_TOP_K` 默认 5；访客端引用区按相关度展开 Top-3、其余折叠；命中测试 TopK 仍默认 3 |
-| 2.1.2 | 2026-07-25 | 六维优化落地说明：SSE `route`、模型发布/版本/回滚、命中测试 TopK 默认 3、监控分析反馈/主题 API；见 `OPTIMIZATION_STATUS.md` |
+| 2.1.2 | 2026-07-25 | SSE `route`、模型发布/版本/回滚、命中测试 TopK 默认 3、监控分析反馈/主题 API；开关见 `.env.example` |
 | 2.1.1 | 2026-07-23 | 补充审计批量删除 `POST /audit/logs/batch-delete`；注明 KB ACL 仅 API、管理端入口已下线 |
 | 2.1.0 | 2026-07-22 | 补充管理员会话分析 `/qa/admin/sessions*`；核对监控统计字段与登录文案 |
 | 2.1.0 | 2026-07-22 | `/monitor/stats` 补充 30 天趋势与 48h 错误分桶；登录失败文案对齐「用户名或密码错误」 |

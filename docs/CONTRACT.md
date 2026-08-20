@@ -9,7 +9,6 @@
 | [`openapi.json`](./openapi.json) | 机器可读契约（OpenAPI 3.0.3）。由脚本生成，请勿手工直接编辑 |
 | [`API.md`](./API.md) | 中文接口文档（逐接口详解，与契约同步） |
 | [`API_INTEGRATION_GUIDE.md`](./API_INTEGRATION_GUIDE.md) | 第三方 / 移动端接入指南（功能解说与示例） |
-| [`OPTIMIZATION_STATUS.md`](./OPTIMIZATION_STATUS.md) | 六维核查优化落地状态与开关说明 |
 | [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md) | 云端 / 生产部署与安全加固 |
 | [`CONTRACT.md`](./CONTRACT.md) | 本文件：契约使用与变更流程 |
 | [`../scripts/generate_openapi.py`](../scripts/generate_openapi.py) | 契约生成脚本（契约的**代码来源**） |

@@ -269,7 +269,7 @@ data: {"content":"……"}
 4. 收到 `guard_blocked` / `error` → 展示 message，结束流  
 5. `route` / `intent` 等流水线事件可忽略或用于轻提示，不必写入回答正文
 
-> 六维优化开关与模块状态见 [`OPTIMIZATION_STATUS.md`](./OPTIMIZATION_STATUS.md)。
+> 功能开关默认见仓库根目录 `.env.example`「功能开关」段与 `backend/app/core/config.py`。问答链路总览见仓库 `README.md` §1.3 / §2.5。
 
 ### 6.4 会话与访客说明
 
@@ -448,11 +448,10 @@ client.newCall(req).execute().use { resp ->
 | 文档 | 用途 |
 |------|------|
 | 本文 `API_INTEGRATION_GUIDE.md` | 第三方 / 移动端接入指南（功能解说向） |
-| 仓库 `docs/API.md` | 全量接口字段与约束 |
-| 仓库 `docs/OPTIMIZATION_STATUS.md` | 六维优化与近期产品变更落地状态 |
+| 仓库 `docs/API.md` | 全量接口字段与约束（含 FAQ §12.1） |
+| 仓库 `docs/CLOUD_DEPLOY.md` | 云端生产部署与安全加固 |
 | 运行时 [`/openapi.json`](/openapi.json) | 机器可读契约，可导入 Postman / 代码生成 |
 | 仓库 `docs/CONTRACT.md` | 契约变更流程 |
-| 仓库 `docs/CLOUD_DEPLOY.md` | 云端生产部署与安全加固 |
 
 管理端「API 接入指南」页面展示本文内容，并内嵌同源 Swagger（`/assets/vendor/swagger-ui/index.html`）。机器调试也可打开官方 `/docs`（本机默认 `http://localhost:9080/docs`），或导入 `openapi.json`。
 

@@ -69,3 +69,6 @@ alembic.ini.local
 # 本机导出的部署镜像包（体积大，勿提交）
 ragpj-docker-images.tar
 *.docker-images.tar
+
+# 本地演示用技术架构参考（不入库）
+TECH_ARCHITECTURE.md
