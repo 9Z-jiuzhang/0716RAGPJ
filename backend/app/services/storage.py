@@ -12,6 +12,10 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+class StorageUnavailable(Exception):
+    """对象存储暂时不可读（网络中断或服务不可用）。"""
+
+
 @lru_cache
 def get_minio_client():
     from minio import Minio
@@ -96,9 +100,13 @@ def delete_object(object_name: str) -> None:
 
 
 def download_bytes(object_name: str) -> bytes:
-    response = get_minio_client().get_object(settings.MINIO_BUCKET, object_name)
     try:
-        return response.read()
-    finally:
-        response.close()
-        response.release_conn()
+        response = get_minio_client().get_object(settings.MINIO_BUCKET, object_name)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+    except (ConnectionError, TimeoutError, OSError) as exc:
+        logger.warning("MinIO 下载不可用 %s: %s", object_name, exc)
+        raise StorageUnavailable(str(exc)) from exc

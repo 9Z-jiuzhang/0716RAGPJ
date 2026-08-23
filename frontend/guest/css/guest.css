@@ -3667,6 +3667,59 @@ html[data-theme="light"] .msg-pipeline-reasoning {
   margin: 8px 0 12px;
 }
 
+.citation-charts-fold {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+html[data-theme="light"] .citation-charts-fold {
+  background: rgba(255, 255, 255, 0.65);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.citation-charts-summary {
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-muted, var(--color-text));
+  list-style: none;
+  user-select: none;
+}
+
+.citation-charts-summary::-webkit-details-marker {
+  display: none;
+}
+
+.citation-charts-summary::before {
+  content: "▸ ";
+  opacity: 0.7;
+}
+
+.citation-charts-fold[open] .citation-charts-summary::before {
+  content: "▾ ";
+}
+
+.citation-charts-body {
+  margin-top: 8px;
+}
+
+.citation-charts-fallback {
+  margin: 6px 0 10px;
+}
+
+.citation-charts-scroll-btn {
+  font-size: var(--font-size-xs);
+  color: var(--color-primary, #3b82f6);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .citation-charts-heading {
   font-size: var(--font-size-xs);
   font-weight: 600;
@@ -3688,6 +3741,35 @@ html[data-theme="light"] .msg-pipeline-reasoning {
   background: rgba(0, 0, 0, 0.18);
 }
 
+.citation-chart-thumb {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  position: relative;
+}
+
+.citation-chart-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted, #94a3b8);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.citation-chart-thumb.is-loaded .citation-chart-placeholder {
+  display: none;
+}
+
+.citation-chart-thumb.is-error .citation-chart-placeholder {
+  color: #f87171;
+}
+
 html[data-theme="light"] .citation-chart-item {
   background: rgba(255, 255, 255, 0.85);
   border-color: rgba(15, 23, 42, 0.08);
@@ -3701,7 +3783,11 @@ html[data-theme="light"] .citation-chart-item {
   object-fit: contain;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.04);
-  min-height: 72px;
+  min-height: 0;
+}
+
+.citation-chart-thumb:not(.is-loaded) .citation-chart-img {
+  display: none;
 }
 
 .citation-chart-img--error {
@@ -3715,6 +3801,67 @@ html[data-theme="light"] .citation-chart-item {
   line-height: 1.35;
   color: var(--color-text-muted, rgba(255, 255, 255, 0.65));
   word-break: break-word;
+}
+
+.citation-table-preview {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.citation-table-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.citation-table-preview th,
+.citation-table-preview td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 4px 6px;
+}
+
+.suggested-questions {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  max-width: min(75%, 720px);
+}
+
+.msg-row.assistant > .suggested-questions {
+  margin-top: 4px;
+}
+
+.suggested-questions-label {
+  font-size: 11px;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.65));
+  margin-bottom: 6px;
+}
+
+.suggested-questions-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.suggested-question-chip {
+  border: 1px solid rgba(56, 135, 240, 0.35);
+  background: rgba(56, 135, 240, 0.12);
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  max-width: 100%;
+  text-align: left;
+}
+
+.suggested-question-chip:hover {
+  background: rgba(56, 135, 240, 0.22);
 }
 
 .citation-item {

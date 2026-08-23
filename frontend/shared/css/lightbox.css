@@ -1,0 +1,118 @@
+/* 引用图表 Lightbox（主题变量来自 variables.css） */
+
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-lightbox[hidden] {
+  display: none !important;
+}
+
+.image-lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--color-bg-deep, #121a28) 72%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.image-lightbox-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(96vw, 1200px);
+  max-height: 92vh;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.image-lightbox-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.image-lightbox-img {
+  display: block;
+  max-width: 100%;
+  max-height: min(85vh, 820px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--radius, 8px);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.image-lightbox-counter {
+  font-size: var(--font-size-xs, 12px);
+  color: var(--color-text-muted, #94a3b8);
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-bg-deep, #121a28) 55%, transparent);
+  color: var(--color-text, #fff);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.image-lightbox-nav {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-bg-deep, #121a28) 55%, transparent);
+  color: var(--color-text, #fff);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.image-lightbox-nav[hidden] {
+  display: none;
+}
+
+.image-lightbox.is-loading .image-lightbox-img {
+  opacity: 0.45;
+}
+
+body.image-lightbox-open {
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .image-lightbox-panel {
+    width: 100vw;
+    max-height: 100vh;
+    padding: 8px;
+  }
+
+  .image-lightbox-img {
+    max-height: 78vh;
+  }
+
+  .image-lightbox-nav {
+    width: 34px;
+    height: 34px;
+  }
+}

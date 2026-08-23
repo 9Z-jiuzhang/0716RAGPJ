@@ -44,6 +44,10 @@ _OUT_OF_SCOPE = re.compile(
     r"(帮我写代码|炒股|恋爱|算命|生成图片|下载电影|写小说|游戏攻略|写诗|作诗|讲笑话|" r"恋爱文案|情书|星座运势)",
     re.IGNORECASE,
 )
+_VAGUE_KB_QUERY = re.compile(
+    r"(那个|这个|啥|什么|哪种|哪家).{0,24}(政策|规定|制度|流程|方案|计划|补贴|扶持).{0,12}(怎么样|如何|咋样|怎样|到底)",
+    re.IGNORECASE,
+)
 
 # 未命中时允许 LLM 参考答案的意图白名单（开关开启时仍生效）
 FALLBACK_LLM_ALLOWED_INTENTS = frozenset(
@@ -80,6 +84,7 @@ class ConversationRouter:
         has_last_answer: bool,
         history_turns: int = 0,
         observe_only: bool = False,
+        clarify_enabled: bool = True,
     ) -> ConversationRouteDecision:
         text = (question or "").strip()
         if not text:
@@ -128,6 +133,15 @@ class ConversationRouter:
                 reason_code="oos_rule",
                 classifier_version=self.version,
             )
+        if clarify_enabled and _VAGUE_KB_QUERY.search(text):
+            return ConversationRouteDecision(
+                intent=ConversationIntent.CLARIFICATION,
+                confidence=0.88,
+                should_clarify=True,
+                should_retrieve=False,
+                reason_code="vague_kb_query",
+                classifier_version=self.version,
+            )
         if _TRANSFORM.search(text) and has_last_answer:
             return ConversationRouteDecision(
                 intent=ConversationIntent.PREVIOUS_ANSWER_TRANSFORM,
@@ -138,13 +152,14 @@ class ConversationRouter:
                 classifier_version=self.version,
             )
         if _TRANSFORM.search(text) and not has_last_answer:
-            return ConversationRouteDecision(
-                intent=ConversationIntent.CLARIFICATION,
-                confidence=0.9,
-                should_clarify=True,
-                reason_code="transform_without_context",
-                classifier_version=self.version,
-            )
+            if clarify_enabled:
+                return ConversationRouteDecision(
+                    intent=ConversationIntent.CLARIFICATION,
+                    confidence=0.9,
+                    should_clarify=True,
+                    reason_code="transform_without_context",
+                    classifier_version=self.version,
+                )
         if history_turns > 0 and _FOLLOWUP.search(text):
             return ConversationRouteDecision(
                 intent=ConversationIntent.CONTEXT_FOLLOWUP_KB,
@@ -195,6 +210,12 @@ class ConversationRouter:
             return "该请求超出企业知识库助手的能力范围。请提出与企业知识库相关的问题。"
         if decision.intent == ConversationIntent.CLARIFICATION and decision.reason_code == "transform_without_context":
             return "当前会话还没有可变换的上一回答。请先提出一个知识库问题，或说明您希望改写的具体内容。"
+        if decision.intent == ConversationIntent.CLARIFICATION and decision.reason_code == "vague_kb_query":
+            return (
+                "您的问题指向不够具体，难以在知识库中准确检索。"
+                "请补充政策/制度名称、关注的时间范围或业务场景（例如国家扶持、地方补贴或企业内部制度），"
+                "我再为您检索作答。"
+            )
         return None
 
     def transform_answer(self, *, last_answer: str, transform_type: str | None) -> str:

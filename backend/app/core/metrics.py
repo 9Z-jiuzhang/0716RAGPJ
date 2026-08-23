@@ -142,6 +142,26 @@ suggested_questions_click_total = Counter(
     "suggested_questions_click_total",
     "User clicks on suggested question chips (API)",
 )
+total_chart_refs_total = Counter(
+    "total_chart_refs_total",
+    "Chart refs attached to citations on ask path (lazy load metadata)",
+)
+chart_ref_dedup_skipped_total = Counter(
+    "chart_ref_dedup_skipped_total",
+    "Chart refs skipped by per-citation or cross-citation dedup",
+)
+chart_lazy_hydrate_total = Counter(
+    "chart_lazy_hydrate_total",
+    "Frontend lazy chart image hydrations (API)",
+)
+chart_lazy_hydrate_failed_total = Counter(
+    "chart_lazy_hydrate_failed_total",
+    "Frontend lazy chart image hydration failures (API)",
+)
+lightbox_open_total = Counter(
+    "lightbox_open_total",
+    "Citation chart lightbox opens (API)",
+)
 clarify_triggered_total = Counter(
     "clarify_triggered_total",
     "Clarification反问 triggered (multi-topic low confidence)",

@@ -31,6 +31,7 @@ from app.memory.models import ContextMessage
 from app.memory.session_store import SessionAccessError, session_store
 from app.memory.session_store_v2 import session_store_v2
 from app.models.identity import User
+from app.models.document import DocumentChunk
 from app.models.qa import QAMessage, QASession
 from app.retrieval import hybrid_retriever, resolve_kb_targets
 from app.retrieval.types import RetrievalHit, RetrievalStrategy
@@ -275,6 +276,7 @@ class QAPipeline:
                         question=question,
                         has_last_answer=bool(last_assistant),
                         history_turns=history_turns,
+                        clarify_enabled=bool(settings.CLARIFY_ENABLED),
                     )
                 yield self._event(
                     "route",
@@ -288,9 +290,17 @@ class QAPipeline:
                     classifier_version=route.classifier_version,
                 )
 
-                # 非知识库模板路径
+                # 非知识库模板路径（澄清反问 / 问候 / 帮助等）
                 template = conversation_router.template_reply(route)
                 if template and not route.should_retrieve and not route.should_use_last_answer:
+                    if (
+                        settings.CLARIFY_ENABLED
+                        and route.should_clarify
+                        and route.intent == ConversationIntent.CLARIFICATION
+                    ):
+                        from app.core.metrics import clarify_triggered_total
+
+                        clarify_triggered_total.inc()
                     async for ev in self._emit_direct_answer(
                         db,
                         session=session,
@@ -501,7 +511,9 @@ class QAPipeline:
                     await record_shadow_hit(redis_client, question)
                     cache_match = None
             if cache_match is not None:
-                citations = await self._enrich_citation_images(db, list(cache_match.citations))
+                from app.services.chart_citation import attach_chart_refs_to_citations
+
+                citations = attach_chart_refs_to_citations(list(cache_match.citations))
                 answer_text = cache_match.answer
                 retrieval_meta = {
                     "original_query": question,
@@ -880,6 +892,8 @@ class QAPipeline:
                     )
                     retrieval_meta["hit_count"] = len(evidence_hits)
 
+                evidence_hits = await self._hydrate_hits_chunk_metadata(db, evidence_hits)
+
                 if not evidence_hits:
                     retrieval_meta["reason"] = "no_relevant_hits"
                     yield self._event("citations", citations=[])
@@ -898,7 +912,9 @@ class QAPipeline:
                         yield self._event("chunk", content=piece)
                 else:
                     citations = self._citations_from_hits(evidence_hits)
-                    citations = await self._enrich_citation_images(db, citations)
+                    from app.services.chart_citation import attach_chart_refs_to_citations
+
+                    citations = attach_chart_refs_to_citations(citations)
                     yield self._event("citations", citations=citations)
 
                     # [6] 组装提示并流式生成（有界并发）
@@ -1016,6 +1032,14 @@ class QAPipeline:
                 confidence=conf_level,
                 confidence_score=conf_score,
             )
+            for tail in self._tail_sse_events(
+                question=question,
+                answer=answer_text,
+                citations=citations,
+            ):
+                event_name = str(tail.get("event") or "message")
+                payload = {k: v for k, v in tail.items() if k != "event"}
+                yield self._event(event_name, **payload)
 
         except SessionAccessError as exc:
             yield self._event("error", message=str(exc), request_id=tracker.request_id)
@@ -1152,7 +1176,10 @@ class QAPipeline:
             None,
             source=str(retrieval_meta.get("source") or "route"),
         )
-        citations = await self._enrich_citation_images(db, list(citations or []))
+        citations = list(citations or [])
+        from app.services.chart_citation import attach_chart_refs_to_citations
+
+        citations = attach_chart_refs_to_citations(citations)
         yield self._event("chunk", content=answer_text)
         yield self._event("citations", citations=citations)
         # FAQ/缓存等直答：置信度固定满分，先于落库下发，避免前端干等 done
@@ -1192,6 +1219,14 @@ class QAPipeline:
             confidence_score=1.0,
             route_intent=route.intent.value if route else None,
         )
+        for tail in self._tail_sse_events(
+            question=question,
+            answer=answer_text,
+            citations=citations,
+        ):
+            event_name = str(tail.get("event") or "message")
+            payload = {k: v for k, v in tail.items() if k != "event"}
+            yield self._event(event_name, **payload)
         try:
             await self._record_analytics_event(
                 db,
@@ -1452,6 +1487,56 @@ class QAPipeline:
         return messages
 
     @staticmethod
+    def _tail_sse_events(
+        *,
+        question: str,
+        answer: str,
+        citations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        from app.core.metrics import suggested_questions_total
+        from app.services.suggested_questions import build_suggested_questions
+
+        questions = build_suggested_questions(
+            question=question,
+            answer=answer,
+            citations=citations,
+        )
+        if not questions:
+            return []
+        suggested_questions_total.inc()
+        return [{"event": "suggested_questions", "questions": questions}]
+
+    async def _hydrate_hits_chunk_metadata(
+        self,
+        db: AsyncSession,
+        hits: list[RetrievalHit],
+    ) -> list[RetrievalHit]:
+        """合并 PG chunk_metadata，补全 asset / 表结构等引用字段。"""
+        if not hits:
+            return hits
+        ids: list[uuid.UUID] = []
+        for hit in hits:
+            try:
+                ids.append(uuid.UUID(str(hit.chunk_id)))
+            except (ValueError, TypeError):
+                continue
+        if not ids:
+            return hits
+        ids = ids[:200]
+        rows = (
+            await db.scalars(select(DocumentChunk).where(DocumentChunk.id.in_(ids)))
+        ).all()
+        meta_map = {str(row.id): dict(row.chunk_metadata or {}) for row in rows}
+        for hit in hits:
+            stored = meta_map.get(str(hit.chunk_id))
+            if not stored:
+                continue
+            merged = dict(stored)
+            merged.update(hit.metadata or {})
+            hit.metadata = merged
+        return hits
+
+    @staticmethod
     def _rag_system_prompt() -> str:
         prompt = _RAG_SYSTEM_PROMPT
         if settings.INLINE_CITATION_ENABLED:
@@ -1536,8 +1621,21 @@ class QAPipeline:
         citation["score"] = clamp_display_score(citation.get("score"))
         # 多模态：引文展示完整表/图结构，而非仅摘要
         citation["content"] = evidence_content_from_metadata(hit.content, hit.metadata)
-        if (hit.metadata or {}).get("block_type"):
-            citation["block_type"] = hit.metadata.get("block_type")
+        meta = hit.metadata or {}
+        for key in (
+            "block_type",
+            "block_id",
+            "asset_path",
+            "structure_html",
+            "sheet_name",
+            "source_type",
+            "columns",
+            "rows",
+            "page",
+            "pages",
+        ):
+            if meta.get(key) is not None:
+                citation[key] = meta.get(key)
         from app.services.chart_citation import citation_safe_citation
 
         return citation_safe_citation(citation)
@@ -1551,12 +1649,45 @@ class QAPipeline:
         if not citations:
             return citations
         from app.repositories import document as doc_repo
+        from app.services.asset_citation import (
+            asset_citation_enabled,
+            citation_asset_image,
+            merge_citation_images,
+        )
         from app.services.chart_citation import citation_safe_citation, max_citation_chart_pages
         from app.services.document_charts import ensure_pdf_charts, pages_for_citation_metadata
 
         max_pages = max_citation_chart_pages()
         doc_cache: dict[str, Any] = {}
         for citation in citations:
+            asset_images: list[dict[str, Any]] = []
+            if asset_citation_enabled():
+                block_type = str(citation.get("block_type") or "").lower()
+                block_id = str(citation.get("block_id") or "").strip()
+                asset_path = str(citation.get("asset_path") or "").strip()
+                if block_type == "image" and block_id and asset_path:
+                    asset_images.append(
+                        citation_asset_image(
+                            doc_id=str(citation.get("doc_id") or ""),
+                            asset_id=block_id,
+                            mime_type=str(citation.get("mime_type") or ""),
+                            caption=str(citation.get("caption") or ""),
+                        )
+                    )
+
+            existing = list(citation.get("images") or [])
+            if asset_images:
+                citation["images"] = merge_citation_images(
+                    citation,
+                    page_images=existing,
+                    asset_images=asset_images,
+                )
+            if len(citation.get("images") or []) > max_pages:
+                citation["images"] = list(citation["images"])[:max_pages]
+            if citation.get("images"):
+                citation.update(citation_safe_citation(citation))
+                continue
+
             existing = list(citation.get("images") or [])
             if len(existing) > max_pages:
                 existing = existing[:max_pages]

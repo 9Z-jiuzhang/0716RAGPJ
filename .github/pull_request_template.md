@@ -12,4 +12,4 @@
 
 ## 文档同 PR
 
-- [ ] 本 PR 涉及模块的 `docs/API.md` / `RUNBOOK` / `README` 已同步
+- [ ] 本 PR 涉及模块的 `docs/API.md` / `README.md` / `.env.example` 已同步（版本与 `APP_VERSION` 一致）

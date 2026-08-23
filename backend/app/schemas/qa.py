@@ -112,3 +112,9 @@ class FeedbackRequest(BaseModel):
     message_id: UUID = Field(description="被评价的助手消息 ID")
     rating: Literal["useful", "useless"] | None = Field(description="有用/无用；传 null 取消反馈并从统计表删除")
     comment: str | None = Field(default=None, max_length=500, description="可选评论")
+
+
+class ChartUiEventRequest(BaseModel):
+    """引用图表 UI 埋点（P2 lazy hydrate / lightbox）。"""
+
+    action: Literal["hydrate", "hydrate_failed", "lightbox_open"] = Field(description="事件类型")

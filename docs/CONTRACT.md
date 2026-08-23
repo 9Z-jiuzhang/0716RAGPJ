@@ -11,8 +11,6 @@
 | [`KB_FAQ.md`](./KB_FAQ.md) | 知识库 FAQ 产品说明 |
 | [`API_INTEGRATION_GUIDE.md`](./API_INTEGRATION_GUIDE.md) | 第三方 / 移动端接入指南 |
 | [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md) | 云端 / 生产部署与安全加固 |
-| [`RUNBOOK.md`](./RUNBOOK.md) | 运维 Runbook（发版、shadow、监控） |
-| [`DEV_STATUS.md`](./DEV_STATUS.md) | 开发/发布状态（文档对齐基准） |
 | [`CONTRACT.md`](./CONTRACT.md) | 本文件：契约使用与变更流程 |
 | [`../scripts/generate_openapi.py`](../scripts/generate_openapi.py) | 契约生成脚本（契约的**代码来源**） |
 
@@ -26,7 +24,7 @@
 - **认证**：`Authorization: Bearer <access_token>`（JWT）。标注为 `public` 或含可选 `BearerAuth`（如 `/qa/ask`、`/qa/accessible-kbs`）的接口允许匿名/可选认证。
 - **统一响应**：除 SSE、CSV 导出、Prometheus `/metrics` 外，JSON 接口统一包装为 `{code, message, data, request_id}`。
 - **分页**：`data` 为 `{items, total, page, page_size}`；查询参数 `page`（默认 1），`page_size`（默认 20，部门列表 50、会话消息 50、Guard 事件 50，上限 100）。
-- **SSE**：`POST /qa/ask` 返回 `text/event-stream`。常见事件：`intent` / `guard_blocked` / `route` / `query_processing` / `cache_hit` / `chunk` / `citations` / `done` / `error`。不传 `session_id` 始终新建会话；`X-Guest-Id` 仅标识归属，不自动复用旧会话。`AskRequest.top_k` 默认 **5**；`AskRequest.rewrite_enabled` 可选覆盖全局 Query 改写；`temperature` 默认不覆盖已发布模型配置。前端引用区默认展开相关度最高的 3 段，其余折叠。问题最长 **2000** 字。
+- **SSE**：`POST /qa/ask` 返回 `text/event-stream`。常见事件：`intent` / `guard_blocked` / `route` / `query_processing` / `cache_hit` / `chunk` / `citations` / `done` /（可选）`suggested_questions` / `error`。不传 `session_id` 始终新建会话；`X-Guest-Id` 仅标识归属，不自动复用旧会话。`AskRequest.top_k` 默认 **5**；`AskRequest.rewrite_enabled` 可选覆盖全局 Query 改写；`temperature` 默认不覆盖已发布模型配置。前端引用区默认展开相关度最高的 3 段，其余折叠；图表经 `chart_refs` 懒加载（ask 路径 `images=[]`）。问题最长 **2000** 字。
 - **可检索库列表**：`GET /qa/accessible-kbs`（可选认证）返回当前身份已建索引的知识库，供问答页下拉。
 - **会话闲置过期**：超过 `QA_SESSION_IDLE_EXPIRE_MINUTES` 未问答 → `status=expired` 并清 Redis；历史列表仍可见；续聊携带 `session_id` 可重新激活。管理员「活跃会话」仅计 `active`。
 - **文件上传**：`multipart/form-data`（字段 `file`），上限 100MB（`413`）。前端支持字节上传进度；txt/md 支持 UTF-8/GBK/UTF-16 等常见编码。
@@ -63,6 +61,6 @@ python scripts/generate_openapi.py
 
 ## 版本
 
-- 契约版本：**2.1.12**，与仓库 `APP_VERSION` 及 [`DEV_STATUS.md`](./DEV_STATUS.md) 保持同步。
-- 文档修订：**2026-08-23**（Chroma 1.5.5、图表按需栅格化、RUNBOOK/DEV_STATUS 索引）。
+- 契约版本：**2.1.13**，与仓库 `APP_VERSION`（`backend/app/core/config.py`、`.env.example`）及 [`API.md`](./API.md) §20 保持同步。
+- 文档修订：**2026-08-23**（2.1.13 chart_refs / P2 UI、`suggested_questions` SSE 尾事件）。
 - 历史修订见 `API.md` §20 变更记录。

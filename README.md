@@ -2,7 +2,7 @@
 
 基于大语言模型（LLM）的企业级智能知识库平台。提供文档上传与自动向量化、混合检索（向量 + 全文 + RRF 融合）、多轮流式问答、RBAC + 部门驱动的访问控制、命中率评测、快照与回退、以及 Prometheus/Grafana/Langfuse 全链路可观测能力。
 
-- **应用版本**：`APP_VERSION=2.1.12`（配置默认；2.1.13 开发中，见 [`docs/DEV_STATUS.md`](docs/DEV_STATUS.md)）
+- **应用版本**：`APP_VERSION=2.1.13`（权威来源：`backend/app/core/config.py`、`.env.example`）
 - **技术栈**：FastAPI（异步）· PostgreSQL（pg_trgm + tsvector）· Chroma（向量库）· Redis（会话热态）· MinIO（对象存储）· 原生 ES Module 前端 · Docker Compose 编排
 - **统一入口（本机 Docker 默认）**：`http://localhost:9080`（Nginx 反向代理；容器与宿主机均为 9080）
 - **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml` + `docker-compose.langfuse.yml`）
@@ -136,7 +136,7 @@ nginx 反向代理 (reverse-proxy.conf, 容器 :9080)
   └─[落库] 写入 QAMessage（含 citations），更新会话与 Redis 记忆
      │
      ▼
-  SSE 事件：intent →（可选 query_processing / cache_hit）→ chunk* → citations → done
+  SSE 事件：intent →（可选 query_processing / cache_hit）→ chunk* → citations → done →（可选 suggested_questions）
             安全拒绝时 guard_blocked；出错时 error
 
 闲置超过 `QA_SESSION_IDLE_EXPIRE_MINUTES` 的会话由后台扫描标为 `expired` 并清理 Redis；历史仍可查看，续聊可重新激活。
@@ -282,15 +282,15 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 问答流水线在检索前经 **业务路由**（问候/帮助/越界模板、上一答案变换）与 **多级缓存**（L1 进程内 / L2 Redis 精确 / L3 语义门控 / L4 检索缓存，均受功能开关控制；默认见 `.env.example`）。知识库 FAQ（精确 → 语义）见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md) 与 [`docs/API.md`](docs/API.md) §12.1。
 
-检索命中后的 **citations.images**：仅挂与命中片段相关的 PDF 页（分段元数据 `page`；layout 图/表块优先块级 `page`），**不会**把整本 PDF 缩略图塞进「相关图表」。前端文案为「PDF 第 N 页」；`GET /qa/accessible-kbs` 下发 `max_charts` 控制展示上限。旧文档无页码元数据时不展示图表，需重解析/重分段后才有精确页。回滚开关：`CHART_CITATION_USE_LEGACY_LOGIC=true`（见 `docs/RUNBOOK.md`）。
+检索命中后的 **citations.chart_refs**（P1）：仅含懒加载元数据（`kind=page` 或 `kind=asset`，**无 URL**）；`images` 在 ask 路径恒为 `[]`（向后兼容）。前端 P2：引用区「相关图表」默认折叠，展开后按需 `GET /qa/documents/{id}/charts/page-NN.png` 或 `GET /qa/documents/{id}/assets/{asset_id}`；lightbox 大图与 UI 埋点 `POST /qa/chart-ui/event`；消息行从 DOM 移除时回收 blob URL。对象存储不可用时图表/asset 接口返回 **503**（`StorageUnavailable`）。`GET /qa/accessible-kbs` 下发 `max_charts` 控制展示上限。旧文档无页码元数据时不展示图表，需重解析/重分段。回滚：`CHART_CITATION_USE_LEGACY_LOGIC=true`（恢复旧 citations.images 逻辑）。
 
-**图表性能**：`ensure_pdf_charts(pages=[…])` **只栅格化缺失页**（非整本）；`GET /qa/documents/{id}/charts/page-NN.png` 懒加载同样只补该页；`CHART_RASTERIZE_ZOOM` 默认 1.5；栅格化在线程池执行不阻塞 event loop。单图 **asset** 引用仍属 2.1.13 F 模块（当前为整页 PNG）。
+**图表与 asset**：整页 PNG `GET /qa/documents/{id}/charts/page-NN.png`；PDF 内嵌图 `GET /qa/documents/{id}/assets/{asset_id}`（鉴权同 `/qa/ask`，禁止 presigned）。`ASSET_CITATION_ENABLED` 控制引用区 `kind=asset`。
 
 ### 2.6 前端
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **访客端** `frontend/guest/`（挂载 `/`）：营销落地页（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、流式中止、**知识库下拉**、**Query 改写开关**、输入上限 **2000 字**提示、引用相关度 Top-3 展开/其余折叠、**相关图表仅展示命中相关页**、置信提示）；欢迎区展示**热门 FAQ**，点选/同题粘贴可秒答（无思考态）；对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（含**字节上传进度** + 管道状态轮询，员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
+- **访客端** `frontend/guest/`（挂载 `/`）：营销落地页（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、流式中止、**知识库下拉**、**Query 改写开关**、输入上限 **2000 字**提示、引用相关度 Top-3 展开/其余折叠、**相关图表折叠 + 懒加载 + lightbox**、内联 `[N]` 与侧栏联动、推荐追问 chips、`done` 后 SSE `suggested_questions`、置信提示）；欢迎区展示**热门 FAQ**，点选/同题粘贴可秒答（无思考态）；对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（含**字节上传进度** + 管道状态轮询，员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
 - **管理端** `frontend/admin/`（挂载 `/admin/`）：首页 KPI（含 FAQ 数、7/30 天趋势、错误分桶、近 14 日问答反馈 KPI/趋势）与安全窗口；知识库卡片（封面显示库名、可置顶/删除的更多菜单仅管理员·超管·库管理者可见）；知识库/文档/FAQ/快照工作台（「访问范围」多选部门，含「除访客外全选」；上传列表展示上传百分比；FAQ 可标过时待审；快照含 FAQ 数且回退可还原 FAQ）；用户/角色/部门、大模型与用量、命中率测试、RAGAS、问答统计、会话分析、角色缓存、审计、LLM Guard 拦截、系统监控（健康/Grafana）、API 接入指南。
 - **共享** `frontend/shared/`：`api.js`（含 `upload` 的 `onProgress` 字节进度）、`auth.js`、`router.js`、`brand-mark.js`、`env-particle-field.js`、主题/动效、公共 CSS、接入指南与 Swagger 静态资源。
 
@@ -360,7 +360,7 @@ pytest backend/tests -q
 
 | 分组 | 关键变量（默认） |
 |------|------------------|
-| 应用 | `APP_NAME`、`APP_VERSION=2.1.12`、`DEBUG=false`、`DEPLOYMENT_MODE=local\|cloud`、`PUBLIC_BASE_URL`、`SECRET_KEY` |
+| 应用 | `APP_NAME`、`APP_VERSION=2.1.13`、`DEBUG=false`、`DEPLOYMENT_MODE=local\|cloud`、`PUBLIC_BASE_URL`、`SECRET_KEY` |
 | 超管 / 种子 | `SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_SYNC_PASSWORD`、`SEED_DEMO_USERS`、`AUTH_REGISTER_ENABLED`、`METRICS_PUBLIC` |
 | PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=9543`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
 | Redis | `REDIS_HOST=redis`、`REDIS_PORT=9637`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
@@ -372,7 +372,7 @@ pytest backend/tests -q
 | Langfuse | `LANGFUSE_HOST`（默认 `http://langfuse-web:9310`）、公钥/密钥、自建 `LANGFUSE_NEXTAUTH_*` / `LANGFUSE_*_PASSWORD` / `INIT_*`（见 `.env.example`） |
 | JWT / CORS | `JWT_SECRET_KEY`、`ACCESS_TOKEN_EXPIRE_MINUTES=30`、`CORS_ORIGINS`、`CORS_ALLOW_CREDENTIALS` |
 | 问答 / Guard | `QA_*`、`MAX_CITATION_CHART_PAGES`、`CHART_CITATION_USE_LEGACY_LOGIC`、`CHART_RASTERIZE_ZOOM`、`LLM_GUARD_*`、`ROLE_CACHE_*`（含 shadow）、`RAGAS_*` |
-| 2.1.13 开关（已入 env，功能分批上线） | `MARKDOWN_RENDER_ENABLED`、`INLINE_CITATION_ENABLED`、`ASSET_CITATION_ENABLED`、`SUGGESTED_QUESTIONS_ENABLED`、`CLARIFY_ENABLED`、`CITE_VALIDATION_ENFORCE`、`FULLTEXT_ANALYZER_BACKEND` — 见 `docs/RUNBOOK.md` |
+| 2.1.13 开关 | `MARKDOWN_RENDER_ENABLED`、`INLINE_CITATION_ENABLED`、`ASSET_CITATION_ENABLED`、`SUGGESTED_QUESTIONS_ENABLED`、`CLARIFY_ENABLED`（prod 默认 false）、`CITE_VALIDATION_ENFORCE`（默认 false 仅观测）、`FULLTEXT_ANALYZER_BACKEND`（`zh_jieba`=CJK 查询插空格，**非** jieba 库）— 见 `.env.example` 与 [`docs/API.md`](docs/API.md) §10 |
 
 > **安全提示**：模型 API Key 通过 `ModelConfig.api_key_env`（环境变量**名**）引用，**不落库、不在接口明文返回**。
 
@@ -417,7 +417,7 @@ pytest backend/tests -q
 | `export_role_cache_shadow_hits.py` | `backend/app/scripts/` | 导出角色缓存 shadow 命中频次（ZSET） |
 | `backfill_l2_from_shadow.py` | `backend/app/scripts/` | shadow 窗口结束后将高频题写入 L2（短 TTL） |
 
-发版与 shadow 试跑步骤见 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)。Golden 结构测试：`pytest backend/tests/test_golden_queries.py`。本地联调语料（`testdoc/`、`testdata/`）及依赖它们的灌数脚本不入库。
+发版前建议：`pytest backend/tests/test_golden_queries.py`（结构 Golden）；`docker compose ps` 与端口速查见上文。角色缓存 shadow 导出脚本见表内 `export_role_cache_shadow_hits.py`。本地联调语料（`testdoc/`、`testdata/`）及依赖它们的灌数脚本不入库。
 
 **Windows 端口速查**：
 
@@ -440,8 +440,6 @@ docker compose ps
 | [`docs/KB_FAQ.md`](docs/KB_FAQ.md) | 知识库 FAQ 产品说明（精确/语义命中、校验、配置） |
 | [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md) | 第三方 / Android 等接入指南 |
 | [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
-| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | 发版、shadow、图表性能、2.1.13 开关与监控 |
-| [`docs/DEV_STATUS.md`](docs/DEV_STATUS.md) | 开发/发布状态（文档对齐基准） |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | OpenAPI 契约变更流程 |
 | 运行时 Swagger（官方） | http://localhost:9080/docs |
 | 管理端嵌入 Swagger | http://localhost:9080/assets/vendor/swagger-ui/index.html |
@@ -483,8 +481,6 @@ docker compose ps
 │   ├── KB_FAQ.md                 # FAQ 产品说明
 │   ├── API_INTEGRATION_GUIDE.md  # 第三方接入指南
 │   ├── CLOUD_DEPLOY.md           # 云端部署指南
-│   ├── RUNBOOK.md                # 运维 Runbook
-│   ├── DEV_STATUS.md             # 开发/发布状态
 │   └── CONTRACT.md               # 契约说明
 ├── scripts/                      # 契约生成 / 种子与运维脚本
 ├── docker-compose.yml            # 本机开发编排
@@ -501,8 +497,8 @@ docker compose ps
 - **分支**：主开发 `develop`，稳定发布 `main`。
 - **提交**：Conventional Commits。
 - **CI**：`.github/workflows/ci.yml` 强制 `ruff` / `black` / `pytest` 通过。
-- **契约与文档同步（上传 / 发分支前必做）**：功能变更须同步 README、`docs/DEV_STATUS.md` 与 `docs/` 正式说明；接口变更更新 `docs/API.md`，视需要重跑 `scripts/generate_openapi.py` 及 `frontend/shared/docs/` 副本。
-- **勿提交**：.env、本地数据卷、含密钥的临时文件；**过程稿 / 结项清单 / 临时方案**（如 docs/*_PLAN.md、docs/*_ACCEPTANCE.md，已在 .gitignore）— 产品行为以 README.md、docs/API.md、docs/KB_FAQ.md 等正式文档为准。
+- **契约与文档同步（上传 / 发分支前必做）**：功能变更须同步 `README.md`、`docs/API.md`、`docs/KB_FAQ.md`、`.env.example`；接口变更视需要重跑 `scripts/generate_openapi.py` 并同步 `frontend/shared/docs/` 副本。版本号以 `backend/app/core/config.py` 的 `APP_VERSION` 为准。
+- **勿提交**：`.env`、本地数据卷、含密钥的临时文件；**过程稿 / 结项清单 / 临时方案**（如 `docs/*_PLAN.md`、`docs/*_ACCEPTANCE.md`，已在 `.gitignore`）；**本地运维稿** `docs/DEV_STATUS.md`、`docs/RUNBOOK.md`（已在 `.gitignore`，仅本机迭代用）。产品行为以 `README.md`、`docs/API.md`、`docs/KB_FAQ.md` 为准。
 
 ## 许可证
 

@@ -61,11 +61,13 @@ def test_citation_safe_strips_debug_fields() -> None:
         "chart_page_count": 99,
         "page_range": "1-5",
         "images": [{"page": 1, "url": "/u"}],
+        "chart_refs": [{"kind": "page", "page": 1}],
     }
     safe = citation_safe_citation(raw)
     assert "chart_page_count" not in safe
     assert "page_range" not in safe
     assert safe["images"] == raw["images"]
+    assert safe["chart_refs"] == raw["chart_refs"]
 
 
 def test_citation_images_for_pages_bounds() -> None:

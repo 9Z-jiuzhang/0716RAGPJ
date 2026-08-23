@@ -158,6 +158,8 @@ async def delete_role(
     db: AsyncSession = Depends(get_db),
     request_id: str = Depends(resolve_request_id),
 ) -> BaseResponse:
+    if not is_super_admin(operator):
+        raise HTTPException(status_code=403, detail="仅超级管理员可删除角色")
     role = await db.get(Role, uuid.UUID(role_id))
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")

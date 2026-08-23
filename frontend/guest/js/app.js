@@ -36,6 +36,11 @@ import { initMotion, formatStatNumber } from "/assets/js/motion.js?v=stat-num-07
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721i";
 import { mountEnvParticleField } from "/assets/js/env-particle-field.js?v=landing-particle-0727i";
 import { getBrandMarkSvg, resolveBrandMarkSvg } from "/assets/js/brand-mark.js?v=brand-mark-0727a";
+import {
+  buildCitationChartsHtml,
+  wireCitationChartInteractions,
+} from "/assets/js/citation-charts.js?v=chart-p2c";
+import { imageLightbox } from "/assets/js/lightbox.js?v=chart-p2c";
 
 clearDemoFlags();
 initTheme();
@@ -801,6 +806,9 @@ async function loadQaComposerOptions() {
     }
     if (typeof data?.inline_citation_enabled === "boolean") {
       qaInlineCitationEnabled = data.inline_citation_enabled;
+    }
+    if (typeof data?.suggested_questions_enabled === "boolean") {
+      qaSuggestedQuestionsEnabled = data.suggested_questions_enabled;
     }
     const opts = [`<option value="">全部可访问知识库</option>`];
     for (const kb of items) {
@@ -1714,9 +1722,16 @@ function renderCitationItemHtml(c) {
   const chunkIndex = escapeHtml(c.chunk_index);
   const scoreLabel = formatRetrievalRelevance(c.score);
   const idAttr = citeIdx > 0 ? ` id="citation-${citeIdx}" data-citation-index="${citeIdx}"` : "";
+  const sheetMeta =
+    c.sheet_name ? ` · 表 ${escapeHtml(String(c.sheet_name))}` : "";
+  const tablePreview =
+    c.block_type === "table" && c.structure_html
+      ? `<div class="citation-table-preview">${c.structure_html}</div>`
+      : "";
   return `<details class="citation-item"${idAttr}>
-    <summary class="citation-meta">${citeLabel}${docName} · 分段 #${chunkIndex} · 检索相关度 ${scoreLabel}</summary>
+    <summary class="citation-meta">${citeLabel}${docName}${sheetMeta} · 分段 #${chunkIndex} · 检索相关度 ${scoreLabel}</summary>
     <div class="citation-content">${escapeHtml(c.content || "")}</div>
+    ${tablePreview}
   </details>`;
 }
 
@@ -1726,6 +1741,8 @@ let qaMaxCitationCharts = 8;
 let qaMarkdownRenderEnabled = true;
 /** 内联 [N] 引用（GET /qa/accessible-kbs.inline_citation_enabled） */
 let qaInlineCitationEnabled = true;
+/** 推荐追问（GET /qa/accessible-kbs.suggested_questions_enabled） */
+let qaSuggestedQuestionsEnabled = true;
 
 function attachInlineCitationHandlers(root) {
   if (!root || !qaInlineCitationEnabled) return;
@@ -1747,50 +1764,23 @@ function attachInlineCitationHandlers(root) {
   });
 }
 
+function recordChartUiEvent(action) {
+  void api.post("/qa/chart-ui/event", { action }).catch(() => {});
+}
+
 function finalizeAssistantBubbleContent(bubble) {
   if (!bubble) return;
   attachInlineCitationHandlers(bubble);
-  void hydrateCitationChartImages(bubble);
-}
-
-function collectCitationCharts(citations) {
-  const seen = new Set();
-  const charts = [];
-  for (const c of citations || []) {
-    const docName = c?.doc_name || "文档";
-    for (const img of c?.images || []) {
-      const url = String(img?.url || "").trim();
-      const page = Number(img?.page) || 0;
-      if (!url) continue;
-      const key = `${c?.doc_id || ""}:${page || url}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      charts.push({ url, page, docName });
-      if (charts.length >= qaMaxCitationCharts) {
-        return charts;
-      }
-    }
-  }
-  return charts;
+  wireCitationChartInteractions(bubble, {
+    lightbox: imageLightbox,
+    onHydrate: () => recordChartUiEvent("hydrate"),
+    onHydrateFailed: () => recordChartUiEvent("hydrate_failed"),
+    onLightboxOpen: () => recordChartUiEvent("lightbox_open"),
+  });
 }
 
 function renderCitationChartsHtml(citations) {
-  const charts = collectCitationCharts(citations);
-  if (!charts.length) return "";
-  const items = charts
-    .map((ch) => {
-      const pageLabel = ch.page ? `PDF 第 ${ch.page} 页` : "图表";
-      const alt = escapeHtml(`${ch.docName} · ${pageLabel}`);
-      return `<figure class="citation-chart-item">
-        <img class="citation-chart-img" data-chart-url="${escapeHtml(ch.url)}" alt="${alt}" loading="lazy" />
-        <figcaption class="citation-chart-caption">${escapeHtml(ch.docName)} · ${escapeHtml(pageLabel)}</figcaption>
-      </figure>`;
-    })
-    .join("");
-  return `<div class="citation-charts">
-    <div class="citation-charts-heading">相关图表（共 ${charts.length} 页）</div>
-    <div class="citation-charts-grid">${items}</div>
-  </div>`;
+  return buildCitationChartsHtml(citations, qaMaxCitationCharts, escapeHtml);
 }
 
 function buildCitationsHtml(citations) {
@@ -1818,42 +1808,50 @@ function buildCitationsHtml(citations) {
   return `<div class="citations"><div class="citation-heading">${hint}</div>${chartsHtml}${primaryHtml}${restHtml}</div>`;
 }
 
-/** 带鉴权拉取图表 PNG（img 无法自动带 Bearer），写入 blob URL */
-async function hydrateCitationChartImages(root) {
-  if (!root) return;
-  const imgs = root.querySelectorAll("img.citation-chart-img[data-chart-url]");
-  if (!imgs.length) return;
-  await Promise.all(
-    [...imgs].map(async (img) => {
-      if (img.dataset.hydrated === "1") return;
-      const path = img.getAttribute("data-chart-url") || "";
-      if (!path) return;
-      try {
-        const headers = {
-          "X-Guest-Id": getGuestId(),
-          Accept: "image/png,image/*",
-        };
-        const token = getAccessToken();
-        if (token) headers.Authorization = `Bearer ${token}`;
-        const res = await fetch(path.startsWith("/api/") ? path : `/api/v1${path}`, { headers });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        img.src = objectUrl;
-        img.dataset.hydrated = "1";
-        img.addEventListener(
-          "load",
-          () => {
-            /* keep blob until page unload; revoke on replace */
-          },
-          { once: true }
-        );
-      } catch {
-        img.classList.add("citation-chart-img--error");
-        img.alt = (img.alt || "图表") + "（加载失败）";
-      }
+function buildSuggestedQuestionsHtml(questions) {
+  if (!qaSuggestedQuestionsEnabled || !questions?.length) return "";
+  const chips = questions
+    .map((q, idx) => {
+      const text = String(q || "").trim();
+      if (!text) return "";
+      return `<button type="button" class="suggested-question-chip" data-suggest-idx="${idx}">${escapeHtml(text)}</button>`;
     })
-  );
+    .filter(Boolean)
+    .join("");
+  if (!chips) return "";
+  return `<div class="suggested-questions" aria-label="推荐追问">
+    <div class="suggested-questions-label">你可能还想问</div>
+    <div class="suggested-questions-chips">${chips}</div>
+  </div>`;
+}
+
+function attachSuggestedQuestionHandlers(root) {
+  if (!root || !qaSuggestedQuestionsEnabled) return;
+  root.querySelectorAll(".suggested-question-chip").forEach((btn) => {
+    if (btn.dataset.suggestBound === "1") return;
+    btn.dataset.suggestBound = "1";
+    btn.addEventListener("click", () => {
+      const cleaned = (btn.textContent || "").trim();
+      if (!cleaned) return;
+      btn.closest(".suggested-questions")?.remove();
+      void api.post("/qa/suggested-questions/click", {}).catch(() => {});
+      sendQuestion(cleaned);
+    });
+  });
+}
+
+function mountSuggestedQuestions(row, questions) {
+  if (!row || !questions?.length) return;
+  row.querySelectorAll(".suggested-questions").forEach((el) => el.remove());
+  const html = buildSuggestedQuestionsHtml(questions);
+  if (!html) return;
+  const bubble = row.querySelector(".msg-bubble");
+  if (bubble) {
+    bubble.insertAdjacentHTML("afterend", html);
+  } else {
+    row.insertAdjacentHTML("beforeend", html);
+  }
+  attachSuggestedQuestionHandlers(row);
 }
 
 function buildMessageRowFromApi(m) {
@@ -1871,7 +1869,12 @@ function buildMessageRowFromApi(m) {
       row.dataset.rating = rating;
       applyMsgRatingUi(row, rating);
     }
-    void hydrateCitationChartImages(row);
+    wireCitationChartInteractions(row, {
+      lightbox: imageLightbox,
+      onHydrate: () => recordChartUiEvent("hydrate"),
+      onHydrateFailed: () => recordChartUiEvent("hydrate_failed"),
+      onLightboxOpen: () => recordChartUiEvent("lightbox_open"),
+    });
   }
   return row;
 }
@@ -2316,6 +2319,11 @@ async function sendQuestion(presetQuestion, options = {}) {
             setAskStreaming(false);
             highlightSidebarSession(currentSessionId);
             loadChatSidebar();
+          }
+          if (event === "suggested_questions") {
+            const questions = data.questions || data.items || [];
+            const row = bubble.closest(".msg-row");
+            mountSuggestedQuestions(row, Array.isArray(questions) ? questions : []);
           }
           // 错误
           if (event === "error") {

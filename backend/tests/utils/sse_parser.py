@@ -26,6 +26,7 @@ class ParsedSSEStream:
     citations: list[dict[str, Any]] = field(default_factory=list)
     retrieval_meta: dict[str, Any] = field(default_factory=dict)
     done_payload: dict[str, Any] = field(default_factory=dict)
+    route_payload: dict[str, Any] = field(default_factory=dict)
     tail_events: list[SSEMessage] = field(default_factory=list)
 
     @property
@@ -97,6 +98,11 @@ def fold_sse_messages(messages: list[SSEMessage]) -> ParsedSSEStream:
             cites = data.get("citations")
             if isinstance(cites, list):
                 out.citations = cites
+            items = data.get("items")
+            if isinstance(items, list):
+                out.citations = items
+        elif msg.event == "route":
+            out.route_payload = data
         elif msg.event == "done":
             done_index = i
             out.done_payload = data

@@ -10,6 +10,7 @@
 - DELETE /qa/sessions/{id} — 删除会话（需登录）
 - POST /qa/feedback      — 回答反馈（需登录）
 - GET  /qa/documents/{doc_id}/charts/{filename} — 引用图表 PNG（权限与 /qa/ask 一致）
+- GET  /qa/documents/{doc_id}/assets/{asset_id} — PDF 内嵌图 asset（权限与 /qa/ask 一致）
 """
 
 from __future__ import annotations
@@ -31,8 +32,10 @@ from app.models.qa import QAMessage, QASession
 from app.repositories import document as doc_repo
 from app.retrieval.scope import resolve_kb_targets
 from app.schemas.common import BaseResponse
-from app.schemas.qa import AskRequest, FeedbackRequest, RenameSessionRequest
+from app.schemas.qa import AskRequest, ChartUiEventRequest, FeedbackRequest, RenameSessionRequest
 from app.services import storage
+from app.services.storage import StorageUnavailable
+from app.services.document_assets import infer_mime_type, resolve_document_asset
 from app.services.document_charts import (
     chart_object_name,
     ensure_pdf_charts,
@@ -47,6 +50,18 @@ from starlette.responses import StreamingResponse
 
 router = APIRouter(prefix="/qa", tags=["智能问答"])
 logger = logging.getLogger(__name__)
+
+
+def _download_storage_bytes(object_key: str) -> bytes:
+    """从对象存储读取二进制；仅存储不可用时返回 503。"""
+    try:
+        return storage.download_bytes(object_key)
+    except StorageUnavailable as exc:
+        logger.warning("storage download failed key=%s: %s", object_key, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="对象存储暂不可用，请稍后重试",
+        ) from exc
 
 
 def _request_id(x_request_id: str | None = Header(default=None, alias="X-Request-Id")) -> str:
@@ -152,6 +167,9 @@ async def list_accessible_kbs(
             "max_charts": int(settings.QA_CITATION_CHART_DISPLAY_LIMIT),
             "markdown_render_enabled": bool(settings.MARKDOWN_RENDER_ENABLED),
             "inline_citation_enabled": bool(settings.INLINE_CITATION_ENABLED),
+            "asset_citation_enabled": bool(settings.ASSET_CITATION_ENABLED),
+            "suggested_questions_enabled": bool(settings.SUGGESTED_QUESTIONS_ENABLED),
+            "clarify_enabled": bool(settings.CLARIFY_ENABLED),
         },
         request_id=request_id,
     )
@@ -241,10 +259,52 @@ async def get_qa_document_chart(
         if not storage.object_exists(object_name):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="图表不存在")
 
-    data = storage.download_bytes(object_name)
+    data = _download_storage_bytes(object_name)
     return Response(
         content=data,
         media_type="image/png",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.get(
+    "/documents/{doc_id}/assets/{asset_id}",
+    summary="获取问答引用内嵌图 asset",
+    description="返回 PDF 内嵌图二进制。访问范围与 /qa/ask 知识库可见性一致；禁止 MinIO presigned 直出。",
+)
+async def get_qa_document_asset(
+    doc_id: UUID,
+    asset_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_current_user),
+) -> Response:
+    from app.services.asset_citation import normalize_asset_id
+
+    normalized = normalize_asset_id(asset_id)
+    if normalized is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效 asset_id")
+
+    doc = await doc_repo.get_document_by_id(db, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
+
+    targets = await resolve_kb_targets(db, user=user)
+    allowed = {t.kb_id for t in targets}
+    if doc.kb_id not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该文档资源")
+
+    resolved = await resolve_document_asset(db, doc_id, normalized)
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="资源不存在")
+
+    object_key, mime_type = resolved
+    if not storage.object_exists(object_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="资源不存在")
+
+    data = _download_storage_bytes(object_key)
+    return Response(
+        content=data,
+        media_type=mime_type or infer_mime_type(object_key),
         headers={"Cache-Control": "private, max-age=3600"},
     )
 
@@ -362,6 +422,45 @@ async def delete_session(
     await db.commit()
     await session_store.delete_session_cache(session.id, guest_id=session.guest_id)
     return BaseResponse(message="会话已删除", request_id=request_id)
+
+
+@router.post(
+    "/suggested-questions/click",
+    response_model=BaseResponse,
+    summary="推荐追问点击埋点",
+)
+async def suggested_questions_click(
+    request_id: str = Depends(_request_id),
+) -> BaseResponse:
+    from app.core.metrics import suggested_questions_click_total
+
+    suggested_questions_click_total.inc()
+    return BaseResponse(data={"recorded": True}, request_id=request_id)
+
+
+@router.post(
+    "/chart-ui/event",
+    response_model=BaseResponse,
+    summary="引用图表 UI 埋点（懒加载 / lightbox）",
+)
+async def chart_ui_event(
+    body: ChartUiEventRequest,
+    request_id: str = Depends(_request_id),
+) -> BaseResponse:
+    from app.core.metrics import (
+        chart_lazy_hydrate_failed_total,
+        chart_lazy_hydrate_total,
+        lightbox_open_total,
+    )
+
+    action = (body.action or "").strip().lower()
+    if action == "hydrate":
+        chart_lazy_hydrate_total.inc()
+    elif action == "hydrate_failed":
+        chart_lazy_hydrate_failed_total.inc()
+    elif action == "lightbox_open":
+        lightbox_open_total.inc()
+    return BaseResponse(data={"recorded": True, "action": action}, request_id=request_id)
 
 
 @router.post("/feedback", response_model=BaseResponse, summary="回答反馈")

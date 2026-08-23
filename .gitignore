@@ -74,3 +74,6 @@ ragpj-docker-images.tar
 docs/*_PLAN.md
 docs/*_ACCEPTANCE.md
 docs/OPTIMIZATION_STATUS.md
+# 本地运维 / 迭代状态（不入 GitHub；发版要点见 README §六、§九 与 docs/API.md）
+docs/DEV_STATUS.md
+docs/RUNBOOK.md

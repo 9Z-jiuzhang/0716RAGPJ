@@ -124,7 +124,7 @@ async def expand_neighbor_hits(
                     score=max(0.0, float(hit.score) * 0.85),
                     source="sticky",
                     raw_score=0.0,
-                    metadata={"sticky": True, "neighbor_of": hit.chunk_id},
+                    metadata={**(row.chunk_metadata or {}), "sticky": True, "neighbor_of": hit.chunk_id},
                 )
             )
     return neighbors
@@ -180,6 +180,8 @@ async def _resolve_citation_hit(
         score_f = float(score) if score is not None else 0.5
     except (TypeError, ValueError):
         score_f = 0.5
+    meta = dict(chunk.chunk_metadata or {})
+    meta.update({"sticky": True, "from_citation": True})
     return RetrievalHit(
         chunk_id=str(chunk.id),
         doc_id=str(chunk.document_id),
@@ -190,5 +192,5 @@ async def _resolve_citation_hit(
         score=score_f,
         source="sticky",
         raw_score=score_f,
-        metadata={"sticky": True, "from_citation": True},
+        metadata=meta,
     )

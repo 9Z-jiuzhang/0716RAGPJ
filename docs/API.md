@@ -1,6 +1,6 @@
 # AI 知识库 RAG 平台 — 接口文档（中文）
 
-> 版本：**2.1.12**　与 [`openapi.json`](./openapi.json) 同步；开发状态见 [`DEV_STATUS.md`](./DEV_STATUS.md)  
+> 版本：**2.1.13**　与 [`openapi.json`](./openapi.json) 同步；`APP_VERSION` 见 `backend/app/core/config.py`  
 > 本文档逐接口详解路径、方法、鉴权、请求/响应字段与约束，字段名与类型取自 `backend/app/schemas/*` 与路由签名。  
 > 契约说明见 [`CONTRACT.md`](./CONTRACT.md)。
 
@@ -441,7 +441,10 @@ Authorization: Bearer <access_token>
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/qa/accessible-kbs` | **可选认证** | 返回当前身份可检索且已建索引的知识库 `{items:[{id,name}], total, max_charts, markdown_render_enabled, inline_citation_enabled}`；`max_charts` 为前端「相关图表」展示上限；供问答页下拉使用 |
+| GET | `/qa/accessible-kbs` | **可选认证** | 返回 `{items, total, max_charts, markdown_render_enabled, inline_citation_enabled, asset_citation_enabled, suggested_questions_enabled, clarify_enabled}` |
+| GET | `/qa/documents/{doc_id}/assets/{asset_id}` | **可选认证** | PDF 内嵌图二进制；鉴权同 `/qa/ask`；`asset_id` 为入库 `block_id` |
+| POST | `/qa/suggested-questions/click` | **可选认证** | 推荐追问 chip 点击埋点（Prometheus `suggested_questions_click_total`） |
+| POST | `/qa/chart-ui/event` | **可选认证** | 引用图表 UI 埋点；Body：`action`=`hydrate` \| `hydrate_failed` \| `lightbox_open`；对应 `chart_lazy_hydrate_total`、`chart_lazy_hydrate_failed_total`、`lightbox_open_total` |
 
 **SSE 事件**：
 
@@ -453,15 +456,16 @@ Authorization: Bearer <access_token>
 | `query_processing` | Query 改写 / 扩展 / HyDE 等预处理元信息（可关） |
 | `cache_hit` | 命中角色缓存问题，可直接返回答案 |
 | `chunk` | 增量文本，字段 `content` |
-| `citations` | 引用来源列表（`items` 与 `citations` 双键） |
+| `citations` | 引用来源列表（`items` 与 `citations` 双键）；每项含 `chart_refs[]`（懒加载元数据），`images` 恒为 `[]` |
 | `done` | 结束，含 `session_id`、`message_id`、`request_id`、`performance`、`confidence`(high/medium/low) |
+| `suggested_questions` | **可选尾事件**（`SUGGESTED_QUESTIONS_ENABLED`）：在 `done` 之后下发 `questions[]`（启发式推荐追问，无 LLM） |
 | `error` | 错误信息 |
 
-典型顺序：`intent` →（可选 `route`）→（可选 `query_processing` / `cache_hit`）→ `chunk*` → `citations` → `done`；被拦截时为 `guard_blocked`。
+典型顺序：`intent` →（可选 `route`）→（可选 `query_processing` / `cache_hit`）→ `chunk*` → `citations` → `done` →（可选 `suggested_questions`）；被拦截时为 `guard_blocked`。
 
 > **知识库 FAQ** 精确命中时走短路径秒答（`retrieval_meta` / 元数据含 `source=kb_faq`）；多级缓存 L1–L4 由功能开关控制；角色缓存过渡期仍可发 `cache_hit`。接口与行为见下文 [12.1](#121-知识库-faq摘要)。
 
-**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky` 会话延续）；可选 `images[]`（`page`、`url`），为与**本命中片段相关**的 PDF 页缩略图（URL 形如 `/api/v1/qa/documents/{doc_id}/charts/page-XX.png`，权限与 `/qa/ask` 一致）。**不会**按文档总页数展开整本 PDF；无页码元数据时可不返回 `images`。向量相关度一般为 `1 - cosine_distance`。
+**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky`）；可选 `cite_index`（内联 `[N]`）；可选 `block_type`、`structure_html`、`sheet_name`（Excel）；**P1 `chart_refs[]`**（懒加载元数据，无 URL）：`kind=asset` 时 `asset_id`、可选 `page`、`caption`；`kind=page` 时 `page`；同 citation 内 asset 与同页 page 不重复；跨 citation 同 `doc_id+page` 去重且 asset 优先。`images` 在 ask 路径恒为 `[]`（向后兼容字段；GET `/charts/`、`/assets/` 按需拉图）。禁止 MinIO presigned。
 
 **多轮粘性证据**（`QA_STICKY_EVIDENCE_ENABLED`，默认开）：路由为上下文跟进问且上轮助手消息含 citations 时，将上轮引用分段合并进本轮证据（并可补同文档邻段），避免 top_k 漏召回导致前后矛盾。会话历史仍**不得**替代检索证据；本轮无依据时说「本轮检索依据不足」，不得称上轮为幻觉。
 
@@ -479,7 +483,8 @@ Authorization: Bearer <access_token>
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/qa/documents/{doc_id}/charts/{filename}` | 与 ask 可见库一致 | 返回 PNG（`page-01.png`）；旧 PDF 可按需栅格化 |
+| GET | `/qa/documents/{doc_id}/charts/{filename}` | 与 ask 可见库一致 | 返回 PNG（`page-01.png`）；旧 PDF 可按需栅格化；对象存储不可用时 **503**（`StorageUnavailable`） |
+| GET | `/qa/documents/{doc_id}/assets/{asset_id}` | 与 ask 可见库一致 | PDF 内嵌图二进制；鉴权同 `/qa/ask`；存储不可用时 **503** |
 | GET | `/qa/sessions` | 需登录 | 仅本人会话（分页） |
 | GET | `/qa/sessions/{session_id}` | 需登录 | 消息历史（含 citations，默认 `page_size=50`） |
 | PUT | `/qa/sessions/{session_id}` | 需登录 | Body：`title`(1–100) |
@@ -712,7 +717,7 @@ Authorization: Bearer <access_token>
 3. 知识库列表不得返回未授权库；访客仅见 GUEST 部门库。
 4. `/qa/ask` 覆盖：未登录仅 GUEST 库、登录后授权范围、非法 `kb_ids`、`guard_blocked`、`rewrite_enabled` 开/关；`GET /qa/accessible-kbs` 仅返回已建索引库。
 5. 上传超大文件 → `413`；不支持格式 → `400` 且 message 明确；txt/md 异常编码应提示另存 UTF-8/GBK 或成功解码 UTF-16。
-6. SSE 至少覆盖 `intent →（可选 route）→ chunk → citations → done`；拦截场景覆盖 `guard_blocked`。
+6. SSE 至少覆盖 `intent →（可选 route）→ chunk → citations → done`；`SUGGESTED_QUESTIONS_ENABLED=true` 时覆盖 `suggested_questions` 尾事件；拦截场景覆盖 `guard_blocked`；`citations` 含 `chart_refs` 且 `images=[]`。
 7. 回退：`confirm=false` 必拒；`true` 后创建 `rollback_rebuild` 向量化任务，可通过 `GET /knowledge-bases/{kb_id}/vectorize-status` 查询进度；重建成功后原子激活新索引，失败则用保护快照补偿库表且不切换版本。
 8. 部门：GUEST 部门不可删除/改 code；员工访问 GUEST 库不应被拒。
 9. 用户：管理员不可删除/禁用同级或更高级用户；不可将他人设为 admin/超管；角色权限配置仅超管可调。
@@ -725,10 +730,9 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| 2.1.13-p2 | 2026-08-23 | E 模块：内联 `[N]`、`cite_index`、overlap 观测、`INLINE_CITATION_ENABLED` |
-| 2.1.13-p1 | 2026-08-23 | D 模块：`GET /qa/accessible-kbs` 下发 `markdown_render_enabled`；访客/管理端会话 Markdown（流式阶段纯文本） |
+| 2.1.13 | 2026-08-23 | **2.1.13 总览**：Markdown 答案区、`INLINE_CITATION`、`ASSET` API、Excel metadata、`suggested_questions` SSE 尾事件、`CLARIFY_ENABLED`、CJK `FULLTEXT_ANALYZER_BACKEND`；**P1** `chart_refs[]`（ask 路径 `images=[]`）、去重与 `total_chart_refs_total`；**P2** 前端图表折叠/懒加载/lightbox、blob 回收、`POST /qa/chart-ui/event`；图表/asset 下载仅 `StorageUnavailable`→503 |
 | 2.1.12-p1 | 2026-08-23 | 图表**按需栅格化**（非整本）；`CHART_RASTERIZE_ZOOM`；GET chart 只补单页；`asyncio.to_thread` 栅格化 |
-| 2.1.12 | 2026-08-23 | 图表引用 P0、`max_charts`、角色缓存 shadow；见 RUNBOOK.md |
+| 2.1.12 | 2026-08-23 | 图表引用 P0、`max_charts`、角色缓存 shadow |
 | 2.1.11 | 2026-08-20 | FAQ 语义命中与答案校验告警；citations.images 仅挂命中相关页（非整本 PDF）；见 §12.1、KB_FAQ.md |
 | 2.1.10 | 2026-08-14 | Chroma 固定至 1.5.5，Python 客户端保持 `>=1.5,<2.0`，避免使用 `latest` 造成跨版本数据不兼容。 |
 | 2.1.9 | 2026-08-13 | FAQ 知识库缓存：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 §12.1 |

@@ -275,8 +275,7 @@ export async function askStream(body, { onEvent, signal, _retried = false } = {}
     let gotTerminal = false;
     for (const part of parts) {
       const ev = parseSseBlock(part, onEvent);
-      // 收到 done/error 即可结束读流，后台埋点不再卡住「发送」
-      if (ev === "done" || ev === "error" || ev === "guard_blocked" || ev === "access_denied") {
+      if (ev === "error" || ev === "guard_blocked" || ev === "access_denied") {
         gotTerminal = true;
         break;
       }

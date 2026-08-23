@@ -25,6 +25,25 @@ GOLDEN_E2E_ADMIN_USER = (os.environ.get("GOLDEN_E2E_ADMIN_USER") or "admin").str
 GOLDEN_E2E_ADMIN_PASSWORD = (os.environ.get("GOLDEN_E2E_ADMIN_PASSWORD") or "Admin123!").strip()
 
 
+def _clarify_assertion_enabled() -> bool:
+    raw = os.environ.get("CLARIFY_ENABLED", "").strip().lower()
+    return raw in ("1", "true", "yes")
+
+
+def _citation_has_chart_kind(citations: list[dict[str, Any]], kind: str) -> bool:
+    target = str(kind or "").strip()
+    if not target:
+        return False
+    for cite in citations:
+        for ref in cite.get("chart_refs") or []:
+            if str(ref.get("kind") or "") == target:
+                return True
+        for img in cite.get("images") or []:
+            if str(img.get("kind") or "") == target:
+                return True
+    return False
+
+
 def _skip_if_not_e2e() -> None:
     if not GOLDEN_E2E:
         pytest.skip("GOLDEN_E2E 未开启")
@@ -69,6 +88,17 @@ def _assert_pass_query(stream: Any, expect: dict[str, Any]) -> None:
 
     for needle in expect.get("must_not_contain") or []:
         assert needle not in text, f"答案不应含 {needle}"
+
+    if expect.get("clarify_triggered"):
+        if not _clarify_assertion_enabled():
+            pytest.skip("CLARIFY_ENABLED 未开启，跳过 clarify_triggered 断言（生产默认 false）")
+        assert stream.route_payload.get("should_clarify") is True, "route.should_clarify 应为 true"
+
+    asset_kind = expect.get("asset_kind")
+    if asset_kind:
+        assert _citation_has_chart_kind(stream.citations, str(asset_kind)), (
+            f"citations.chart_refs 应含 kind={asset_kind}（旧缓存可 fallback images）"
+        )
 
 
 def _assert_partial_query(stream: Any, expect: dict[str, Any]) -> None:

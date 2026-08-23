@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # ---------- 应用基础 ----------
     APP_NAME: str = "AI-KnowledgeBase-RAG"
-    APP_VERSION: str = "2.1.12"
+    APP_VERSION: str = "2.1.13"
     DEBUG: bool = False
     # local=开发联调；cloud=云端生产（启动时强制校验密钥与 CORS）
     DEPLOYMENT_MODE: str = "local"
@@ -299,7 +299,7 @@ class Settings(BaseSettings):
     # 单图 asset 引用与代理 API（关则仅 page 级整页图）
     ASSET_CITATION_ENABLED: bool = True
     SUGGESTED_QUESTIONS_ENABLED: bool = True
-    CLARIFY_ENABLED: bool = True
+    CLARIFY_ENABLED: bool = False
     # cite 轻校验：默认仅观测（全量算 overlap）；true 时才降 confidence / 展示 unverified
     CITE_VALIDATION_ENFORCE: bool = False
     # 全文检索 analyzer：default | zh_jieba（双后端 env 切换，勿绑死重建）

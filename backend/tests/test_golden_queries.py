@@ -30,12 +30,12 @@ def test_golden_expected_status_distribution() -> None:
     statuses = {q["expected_status"] for q in data["queries"]}
     assert statuses <= {"pass", "partial", "fail_implemented"}
     assert "pass" in statuses
-    assert "fail_implemented" in statuses
+    # 2.1.13 齐套后 10 条均可为 pass；fail_implemented 仅在大包未合时占位
 
 
 def test_golden_blocked_modules_counted_not_failed() -> None:
     blocked = iter_blocked_queries()
-    assert len(blocked) == 3  # figure, cjk, clarify
+    assert len(blocked) == 0
 
 
 def test_golden_review_due_not_expired() -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import time
 from collections.abc import Sequence
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document import Document, DocumentChunk
 from app.retrieval.types import KBTarget, RetrievalHit
+from app.services.cjk_fulltext import prepare_query_for_tsvector, record_fulltext_latency
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +42,15 @@ class FulltextRetriever:
         if not cleaned or not targets:
             return []
 
+        cleaned = prepare_query_for_tsvector(cleaned)
+        start = time.perf_counter()
         kb_ids = [t.kb_id for t in targets]
-        # 先走 tsvector；召回不足时叠加 trigram
+        # 先走 tsvector；召回不足时叠加 trigram（latency 仅在此处记一次端到端耗时）
         hits = await self._search_tsvector(db, cleaned, kb_ids, top_k=top_k)
         if len(hits) < top_k:
             trgm_hits = await self._search_trgm(db, cleaned, kb_ids, top_k=top_k)
             hits = self._merge_by_chunk_id(hits, trgm_hits, top_k=top_k)
+        record_fulltext_latency(time.perf_counter() - start)
         return hits
 
     async def _search_tsvector(

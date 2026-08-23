@@ -1,6 +1,6 @@
 # 知识库 RAG 平台 — 第三方应用接入指南
 
-> 版本：与产品 `APP_VERSION`（当前 **2.1.12**）对齐；开发中能力见仓库 `docs/DEV_STATUS.md`  
+> 版本：与产品 `APP_VERSION`（当前 **2.1.13**）对齐；权威来源 `backend/app/core/config.py`、`.env.example`  
 > 适用场景：将本系统接入 **Android / iOS / 桌面客户端 / 其他业务后台**  
 > 完整字段级契约另见仓库 `docs/API.md`、运行时 [`/openapi.json`](/openapi.json)、仓库 `docs/CONTRACT.md`
 
@@ -257,17 +257,19 @@ data: {"content":"……"}
 | `cache_hit` | 命中角色/问题缓存（若启用） | 可能直接给出缓存回答相关信息 |
 | `query_processing` | Query 预处理结果 | 改写/扩展等元数据 |
 | `chunk` | 回答正文增量 | 字段 `content`；前端拼接到气泡 |
-| `citations` | 引用来源列表 | `citations`：文档名、分段、相关度；`images[]` 为命中相关 **PDF 页**缩略图 URL（`/qa/documents/{doc_id}/charts/page-NN.png`） |
+| `citations` | 引用来源列表 | `citations`：文档名、分段、相关度；`chart_refs[]` 为命中相关图表元数据（`kind=page` 或 `kind=asset`，**无 URL**）；`images` 恒为 `[]`。缩略图按需 `GET /qa/documents/{doc_id}/charts/page-NN.png` 或 `GET /qa/documents/{doc_id}/assets/{asset_id}` |
 | `done` | 本轮结束 | session_id、message_id、confidence、performance 等 |
+| `suggested_questions` | 可选尾事件（`SUGGESTED_QUESTIONS_ENABLED`） | `questions[]`：启发式推荐追问，在 `done` 之后下发 |
 | `error` | 流水线错误 | message |
 
 **App 渲染建议：**
 
 1. 收到 `chunk` → 追加到当前助手气泡（注意思考内容若带 `<think>` 可折叠展示）  
-2. 收到 `citations` → 展示「引用来源」与检索相关度  
+2. 收到 `citations` → 展示「引用来源」与检索相关度；图表区默认折叠，展开后懒加载 `chart_refs`  
 3. 收到 `done` → 保存 `session_id` / `message_id`，解锁输入框  
-4. 收到 `guard_blocked` / `error` → 展示 message，结束流  
-5. `route` / `intent` 等流水线事件可忽略或用于轻提示，不必写入回答正文
+4. 收到 `suggested_questions` → 展示推荐追问 chips（可选 `POST /qa/suggested-questions/click` 埋点）  
+5. 收到 `guard_blocked` / `error` → 展示 message，结束流  
+6. `route` / `intent` 等流水线事件可忽略或用于轻提示，不必写入回答正文
 
 > 功能开关默认见仓库根目录 `.env.example`「功能开关」段与 `backend/app/core/config.py`。问答链路总览见仓库 `README.md` §1.3 / §2.5。
 
@@ -425,7 +427,7 @@ client.newCall(req).execute().use { resp ->
 2. **最小权限**：终端用户使用 `guest` / `staff` Token，不要把超管账号写进 App。  
 3. **HTTPS**：公网部署必须 TLS；改密、登录必须加密传输。  
 4. **限流**：频繁调用可能 `429`，请做指数退避。  
-5. **引用展示**：回答附带 citations，建议 UI 展示文档名与相关度，并提示「请结合原文核对」。  
+5. **引用展示**：回答附带 citations（`chart_refs` 懒加载图表、`images=[]`），建议 UI 展示文档名与相关度，并提示「请结合原文核对」。  
 6. **密钥**：App 内勿硬编码管理端密钥；模型 API Key 只存在服务端。
 
 ---

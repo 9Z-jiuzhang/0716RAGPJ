@@ -13,7 +13,7 @@
 4. **多级 QA 缓存 L2/L3**（L2 键含 `user_max_level`；L3 可注入 FAQ 近义候选，默认观察态）
 5. 原 RAG
 
-角色缓存（`/role-caches`）**退场中**：`ROLE_CACHE_SHADOW_METRICS_ENABLED=true` 时只观测命中、不短路；shadow 窗口结束后读路径自动关闭。过渡期接口仍只读 + 密级补检。见 [`RUNBOOK.md`](RUNBOOK.md)。
+角色缓存（`/role-caches`）**退场中**：`ROLE_CACHE_SHADOW_METRICS_ENABLED=true` 时只观测命中、不短路；shadow 窗口结束后读路径自动关闭。过渡期接口仍只读 + 密级补检。
 
 密级不足：FAQ 精确/语义明确拒答；后续链路按 L2/L3/RAG 继续。
 
@@ -56,4 +56,4 @@
 
 - 旧 FAQ 若 `embedding` 为空，语义命中不会生效，需编辑触发刷新或重新生成。
 - 不自动回填答案、不整删角色缓存（另开需求）。
-- 问答引用图表为 PDF **整页**缩略图（非单图 asset）；见 README §2.5、`RUNBOOK.md` PR-A。
+- 问答引用图表：`citations.chart_refs[]` 为懒加载元数据（PDF 页或内嵌 asset）；前端按需 `GET /charts/` / `GET /assets/`；ask 路径 `images=[]`。见 README §2.5、`docs/API.md` §10。

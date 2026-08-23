@@ -1713,11 +1713,29 @@ async function fetchPermissionCatalog() {
   return [];
 }
 
-function openRolePermissionForm({ title, role = null, permissionData, onSave }) {
+function openRolePermissionForm({
+  title,
+  role = null,
+  permissionData,
+  onSave,
+  readOnly = false,
+  canEditMeta = true,
+  canEditPerms = true,
+}) {
   closeAllModals();
   const dialogId = `roleForm-${Date.now()}`;
   const selected = new Set(role?.permissions || []);
   const perms = Array.isArray(permissionData) ? permissionData : [];
+  const metaLocked = readOnly || !canEditMeta;
+  const permsLocked = readOnly || !canEditPerms;
+  const nameReadonly = role ? Boolean(role.is_builtin) || metaLocked : metaLocked;
+  const enabledHtml =
+    role
+      ? `<label style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <input type="checkbox" name="is_enabled" ${role.is_enabled !== false ? "checked" : ""} ${metaLocked ? "disabled" : ""} />
+          启用该角色
+        </label>`
+      : "";
   document.body.insertAdjacentHTML(
     "beforeend",
     `<div id="${dialogId}" class="modal-backdrop" style="display:flex">
@@ -1725,16 +1743,17 @@ function openRolePermissionForm({ title, role = null, permissionData, onSave }) 
         <div class="modal-header"><h3>${escapeHtml(title)}</h3></div>
         <div class="modal-body">
           <label class="form-label">角色标识（英文/下划线，创建后不可改）</label>
-          <input class="form-control" name="name" value="${escapeHtml(role?.name || "")}" ${role ? "readonly" : "required"} placeholder="例如 dept_a_staff" />
+          <input class="form-control" name="name" value="${escapeHtml(role?.name || "")}" ${nameReadonly ? "readonly" : ""} ${!role && !metaLocked ? "required" : ""} placeholder="例如 dept_a_staff" />
           <label class="form-label" style="margin-top:12px">角色说明</label>
-          <input class="form-control" name="description" value="${escapeHtml(role?.description || "")}" placeholder="中文说明" />
+          <input class="form-control" name="description" value="${escapeHtml(role?.description || "")}" placeholder="中文说明" ${metaLocked ? "readonly" : ""} />
+          ${enabledHtml}
           <p class="text-muted" style="margin-top:14px">功能权限（显示为中文名；可不勾选）</p>
           <div class="checkbox-grid">${
             perms.length
               ? perms
                   .map(
                     (item) =>
-                      `<label><input type="checkbox" name="permission" value="${escapeHtml(item.code)}" ${selected.has(item.code) ? "checked" : ""}>
+                      `<label><input type="checkbox" name="permission" value="${escapeHtml(item.code)}" ${selected.has(item.code) ? "checked" : ""} ${permsLocked ? "disabled" : ""}>
                         ${escapeHtml(item.name || item.code)} <small>${escapeHtml(item.code)}</small></label>`
                   )
                   .join("")
@@ -1742,8 +1761,8 @@ function openRolePermissionForm({ title, role = null, permissionData, onSave }) 
           }</div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-close>取消</button>
-          <button class="btn btn-primary" type="submit">保存</button>
+          <button type="button" class="btn btn-secondary" data-close>${readOnly ? "关闭" : "取消"}</button>
+          ${readOnly ? "" : `<button class="btn btn-primary" type="submit">保存</button>`}
         </div>
       </form>
     </div>`
@@ -1753,6 +1772,7 @@ function openRolePermissionForm({ title, role = null, permissionData, onSave }) 
   root.onclick = (e) => {
     if (e.target === root) root.remove();
   };
+  if (readOnly) return;
   root.querySelector("form").onsubmit = async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1762,6 +1782,7 @@ function openRolePermissionForm({ title, role = null, permissionData, onSave }) 
       await onSave({
         name,
         description: String(form.get("description") || "").trim(),
+        is_enabled: role ? form.has("is_enabled") : true,
         permission_codes: form.getAll("permission").map(String),
       });
       root.remove();
@@ -1803,87 +1824,55 @@ async function pageRoles() {
       };
     }
 
-    root.querySelectorAll("[data-view]").forEach((btn) => {
+    root.querySelectorAll("[data-edit-role]").forEach((btn) => {
       btn.onclick = async () => {
-        const r = allRoles.find((x) => String(x.id) === btn.getAttribute("data-view"));
-        if (!r) return;
-        try {
-          const catalog = await fetchPermissionCatalog();
-          const byCode = Object.fromEntries(catalog.map((p) => [p.code, p.name]));
-          const lines = (r.permissions || []).map((c) => `${byCode[c] || c}（${c}）`);
-          await openWideModal({
-            title: `${r.display_name || r.name} · 权限`,
-            bodyHtml: `<pre style="white-space:pre-wrap;font-size:13px;margin:0">${escapeHtml(lines.join("\n") || "无权限")}</pre>`,
-            actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">关闭</button>`,
-          });
-        } catch {
-          alert((r.permissions || []).join("\n") || "无");
-        }
-      };
-    });
-
-    root.querySelectorAll("[data-edit-meta]").forEach((btn) => {
-      btn.onclick = async () => {
-        const role = allRoles.find((item) => String(item.id) === btn.getAttribute("data-edit-meta"));
+        const role = allRoles.find((item) => String(item.id) === btn.getAttribute("data-edit-role"));
         if (!role) return;
-        const result = await openWideModal({
-          title: `编辑角色 · ${role.display_name || role.name}`,
-          bodyHtml: `
-            <label class="text-muted">角色标识</label>
-            <input class="form-control" id="roleMetaName" value="${escapeHtml(role.name)}" ${role.is_builtin ? "readonly" : ""} style="margin:6px 0 12px" />
-            <label class="text-muted">说明</label>
-            <textarea class="form-control" id="roleMetaDesc" rows="3" style="margin:6px 0">${escapeHtml(role.description || "")}</textarea>
-            <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="roleMetaEnabled" ${role.is_enabled !== false ? "checked" : ""} /> 启用</label>`,
-          actionsHtml: `<button type="button" class="btn btn-secondary" data-act="cancel">取消</button>
-            <button type="button" class="btn" data-act="ok">保存</button>`,
-        });
-        if (!result) return;
-        const name = result.root.querySelector("#roleMetaName")?.value?.trim();
-        const description = result.root.querySelector("#roleMetaDesc")?.value?.trim() || null;
-        const is_enabled = Boolean(result.root.querySelector("#roleMetaEnabled")?.checked);
-        result.root.remove();
-        if (!name || name.length < 2) return toast("角色标识至少 2 字符", "error");
-        try {
-          await api.put(`/roles/${role.id}`, { name, description, is_enabled, permission_codes: role.permissions || [] });
-          toast("角色已更新", "success");
-          pageRoles();
-        } catch (e) {
-          toast(e.message || "更新失败", "error");
-        }
-      };
-    });
-
-    root.querySelectorAll("[data-edit-perms]").forEach((btn) => {
-      btn.onclick = async () => {
-        if (!isSuperAdmin()) {
-          toast("仅超级管理员可配置角色权限", "error");
-          return;
-        }
-        const role = allRoles.find((item) => String(item.id) === btn.getAttribute("data-edit-perms"));
-        if (!role) return;
+        const isSuperRole = role.name === "super_admin";
+        const canEditMeta = canWrite && (isSuperAdmin() || !isSuperRole);
+        const canConfigPerms = isSuperAdmin() && canEditMeta;
+        const readOnly = !canEditMeta && !canConfigPerms;
         try {
           const permissionData = await fetchPermissionCatalog();
           openRolePermissionForm({
-            title: `配置「${role.display_name || role.name}」权限`,
+            title: readOnly
+              ? `查看角色 · ${role.display_name || role.name}`
+              : `编辑角色 · ${role.display_name || role.name}`,
             role,
             permissionData,
+            readOnly,
+            canEditMeta,
+            canEditPerms: canConfigPerms,
             onSave: async (payload) => {
-              await api.put(`/roles/${role.id}/permissions`, { permission_codes: payload.permission_codes });
-              toast("角色权限已更新", "success");
+              if (canEditMeta) {
+                await api.put(`/roles/${role.id}`, {
+                  name: payload.name,
+                  description: payload.description || null,
+                  is_enabled: payload.is_enabled,
+                });
+              }
+              if (canConfigPerms) {
+                await api.put(`/roles/${role.id}/permissions`, { permission_codes: payload.permission_codes });
+              }
+              toast("角色已保存", "success");
             },
           });
         } catch (e) {
-          toast(e.message || "无法打开权限配置", "error");
+          toast(e.message || "无法打开角色编辑", "error");
         }
       };
     });
 
-    root.querySelectorAll("[data-del]").forEach((btn) => {
+    root.querySelectorAll("[data-del-role]").forEach((btn) => {
       btn.onclick = async () => {
+        if (!isSuperAdmin()) {
+          toast("仅超级管理员可删除角色", "error");
+          return;
+        }
         const ok = await confirmDialog({ title: "删除角色", message: "确定删除该角色？", confirmText: "删除" });
         if (!ok) return;
         try {
-          await api.delete(`/roles/${btn.getAttribute("data-del")}`);
+          await api.delete(`/roles/${btn.getAttribute("data-del-role")}`);
           toast("已删除", "success");
           pageRoles();
         } catch (e) {
@@ -1956,6 +1945,8 @@ async function pageRoles() {
                       const isSuperRole = r.name === "super_admin";
                       const canEditThis = canWrite && (isSuperAdmin() || !isSuperRole);
                       const canConfigPerms = isSuperAdmin() && canEditThis;
+                      const canDeleteRole = isSuperAdmin() && !r.is_builtin && r.name !== "super_admin";
+                      const editLabel = canEditThis || canConfigPerms ? "编辑" : "查看";
                       const desc = r.description || "";
                       const sens = sensByRole[String(r.name)] || null;
                       const curLevel = sens?.max_sensitivity_level || sens?.default_level || "normal";
@@ -1977,10 +1968,8 @@ async function pageRoles() {
                   <td class="col-sens-default">${escapeHtml(sensitivityLabel(defaultLevel))}</td>
                   <td class="col-actions">
                     <div class="table-actions">
-                      <button class="btn btn-secondary btn-sm" data-view="${escapeHtml(r.id)}">查看权限</button>
-                      ${canEditThis ? `<button class="btn btn-secondary btn-sm" data-edit-meta="${escapeHtml(r.id)}">编辑说明</button>` : ""}
-                      ${canConfigPerms ? `<button class="btn btn-secondary btn-sm" data-edit-perms="${escapeHtml(r.id)}">配置权限</button>` : ""}
-                      ${!r.is_builtin && canEditThis ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(r.id)}">删除</button>` : ""}
+                      <button class="btn btn-secondary btn-sm" data-edit-role="${escapeHtml(r.id)}">${escapeHtml(editLabel)}</button>
+                      ${canDeleteRole ? `<button class="btn btn-danger btn-sm" data-del-role="${escapeHtml(r.id)}">删除</button>` : ""}
                     </div>
                   </td>
                 </tr>`;
@@ -3853,7 +3842,7 @@ async function pageKbList() {
             });
             toast("创建成功", "success");
             mask.remove();
-            navigate(`/admin/knowledge-bases/${kb.id || ""}`);
+            navigate(kbWorkspacePath(kb.id || "", "docs"));
           } catch (e) {
             toast(e.message || "创建失败", "error");
             if (submitBtn) {
@@ -4071,6 +4060,28 @@ const DOC_BUSY_STATUSES = new Set([
   "vectorizing",
   "pending_segment",
 ]);
+
+/** 流水线深度处理中：禁止删/勾选，避免与后台任务竞态 */
+const DOC_PIPELINE_ACTIVE_STATUSES = new Set([
+  "parsing",
+  "processing",
+  "normalizing",
+  "segmenting",
+  "vectorizing",
+  "pending_segment",
+]);
+
+function isDocFaqJobBusy(d) {
+  const job = String(d?.faq_job_status || "").toLowerCase();
+  return job === "queued" || job === "running";
+}
+
+/** 列表删除/批量勾选：uploaded 等早期状态可删；深度流水线中不可删 */
+function isDocDeletionBlocked(d) {
+  const st = String(d?.status || "").toLowerCase();
+  if (isDocFaqJobBusy(d)) return true;
+  return DOC_PIPELINE_ACTIVE_STATUSES.has(st);
+}
 
 /** 文档流水线状态：中文文案 + 徽章色 */
 const DOC_STATUS_META = {
@@ -4436,7 +4447,7 @@ async function pageDocuments(kbId, opts = {}) {
       lead = "正在解析 / 分段 / 向量化；就绪后可离开本区，FAQ 会在后台继续生成（见下方列表状态）";
     } else if (cancelled) {
       title = `已结束 · 就绪 ${ready} · 失败 ${fail} · 取消 ${cancelled}`;
-      lead = "可继续上传剩余文件；处理失败项会留在文档列表，可点重试";
+      lead = "已停止后续上传；未完成文档会自动清理。若仍留在列表，可手动删除";
     } else if (fail) {
       title = `已结束 · 就绪 ${ready} 个，失败 ${fail} 个`;
       lead = "上传失败可在本区重试；处理失败会留在下方列表，也可点列表「重试」。FAQ 若仍在生成，见列表「更新FAQ中」";
@@ -4567,6 +4578,48 @@ async function pageDocuments(kbId, opts = {}) {
     }
   };
 
+  /** 取消上传后清理已入库但未就绪的文档，避免 MinIO/向量孤儿 */
+  const cleanupCancelledBatchDocs = async () => {
+    if (!uploadBatch?.length) return { ok: 0, fail: 0, skipped: 0 };
+    const candidates = uploadBatch.filter((x) => x.docId && x.status === "cancelled");
+    if (!candidates.length) return { ok: 0, fail: 0, skipped: 0 };
+    let ok = 0;
+    let fail = 0;
+    let skipped = 0;
+    for (const item of candidates) {
+      const docId = String(item.docId || "").trim();
+      if (!docId) continue;
+      try {
+        const doc = await api.get(`/knowledge-bases/${kbId}/documents/${docId}`);
+        const st = String(doc?.status || "").toLowerCase();
+        if (st === "ready") {
+          skipped += 1;
+          item.status = "ready";
+          delete item.error;
+          continue;
+        }
+        await api.delete(`/knowledge-bases/${kbId}/documents/${docId}`);
+        ok += 1;
+        delete item.docId;
+      } catch (e) {
+        const msg = String(e?.message || "");
+        if (msg.includes("404") || msg.includes("不存在")) {
+          ok += 1;
+          delete item.docId;
+        } else {
+          fail += 1;
+        }
+      }
+    }
+    return { ok, fail, skipped };
+  };
+
+  const notifyCancelCleanup = ({ ok, fail, skipped }) => {
+    if (ok > 0) toast(`已取消上传，并清理 ${ok} 个未完成文档`, "success");
+    if (skipped > 0) toast(`${skipped} 个文档已处理完成，已保留`, "info");
+    if (fail > 0) toast(`${fail} 个文档清理失败，可在列表中手动删除`, "warning");
+  };
+
   /** 处理当前批次中 status=pending 的项，并轮询至 ready/error */
   const runPendingUploads = async () => {
     if (!uploadBatch?.length || isUploading) return;
@@ -4582,6 +4635,11 @@ async function pageDocuments(kbId, opts = {}) {
         } finally {
           uploadBatchDone = true;
           isUploading = false;
+          if (uploadCancelled) {
+            markRemainingCancelled();
+            const stats = await cleanupCancelledBatchDocs();
+            notifyCancelCleanup(stats);
+          }
           paintDropzoneBatch();
           listPage = 1;
           await renderList();
@@ -4653,6 +4711,11 @@ async function pageDocuments(kbId, opts = {}) {
       uploadBatchDone = true;
       isUploading = false;
       uploadAbort = null;
+      if (uploadCancelled) {
+        markRemainingCancelled();
+        const stats = await cleanupCancelledBatchDocs();
+        notifyCancelCleanup(stats);
+      }
       paintDropzoneBatch();
       listPage = 1;
       await renderList();
@@ -4739,6 +4802,11 @@ async function pageDocuments(kbId, opts = {}) {
     } finally {
       uploadBatchDone = true;
       isUploading = false;
+      if (uploadCancelled) {
+        markRemainingCancelled();
+        const stats = await cleanupCancelledBatchDocs();
+        notifyCancelCleanup(stats);
+      }
       paintDropzoneBatch();
       listPage = 1;
       await renderList();
@@ -5119,10 +5187,7 @@ async function pageDocuments(kbId, opts = {}) {
         listPage = totalPages;
         return renderList();
       }
-      const isFaqBusyDoc = (d) => {
-        const job = String(d.faq_job_status || "").toLowerCase();
-        return job === "queued" || job === "running";
-      };
+      const isFaqBusyDoc = (d) => isDocFaqJobBusy(d);
       const busy = items.some(
         (d) => DOC_BUSY_STATUSES.has(String(d.status || "")) || isFaqBusyDoc(d)
       );
@@ -5138,9 +5203,7 @@ async function pageDocuments(kbId, opts = {}) {
 
       const { buttons: pageButtons, jump: pageJump } = renderCompactPagerParts(listPage, totalPages);
 
-      const selectableCount = items.filter(
-        (d) => !DOC_BUSY_STATUSES.has(String(d.status || "")) && !isFaqBusyDoc(d)
-      ).length;
+      const selectableCount = items.filter((d) => !isDocDeletionBlocked(d)).length;
 
       const docActions = canUpload
         ? `<input type="file" id="adminFile" class="hidden" multiple accept=".pdf,.doc,.docx,.pptx,.txt,.md,.html,.htm,.csv,.xlsx,.xls,text/markdown,text/html,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
@@ -5199,13 +5262,14 @@ async function pageDocuments(kbId, opts = {}) {
                 const st = String(d.status || "");
                 const isError = st === "error";
                 const faqJob = String(d.faq_job_status || "").toLowerCase();
+                const deleteBlocked = isDocDeletionBlocked(d);
                 const isBusy =
                   DOC_BUSY_STATUSES.has(st) || faqJob === "queued" || faqJob === "running";
                 const seq = (listPage - 1) * DOC_PAGE_SIZE + i + 1;
                 return `<tr>
                   ${
                     canWrite
-                      ? `<td class="col-check"><input type="checkbox" class="doc-row-check" value="${escapeHtml(d.id)}" ${isBusy ? "disabled" : ""} aria-label="选择 ${escapeHtml(d.filename || d.name || "文档")}" /></td>`
+                      ? `<td class="col-check"><input type="checkbox" class="doc-row-check" value="${escapeHtml(d.id)}" ${deleteBlocked ? "disabled" : ""} aria-label="选择 ${escapeHtml(d.filename || d.name || "文档")}" /></td>`
                       : ""
                   }
                   <td class="col-index">${seq}</td>
@@ -5239,8 +5303,8 @@ async function pageDocuments(kbId, opts = {}) {
                       ${
                         canWrite
                           ? `<div class="table-actions-row">
-                        ${!isBusy ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
-                        ${isError && !isBusy ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
+                        ${!deleteBlocked ? `<button class="btn btn-danger btn-sm" data-del="${escapeHtml(d.id)}">删除</button>` : ""}
+                        ${isError && !deleteBlocked ? `<button class="btn btn-sm" data-retry="${escapeHtml(d.id)}">重试</button>` : ""}
                       </div>`
                           : ""
                       }

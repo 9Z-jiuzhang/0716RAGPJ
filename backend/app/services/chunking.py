@@ -260,6 +260,16 @@ def _split_layout_aware(
                     "table_part": pi,
                     "table_parts": len(pieces),
                 }
+                block_extra = block.get("extra") or {}
+                if block_extra.get("source_type"):
+                    meta["source_type"] = block_extra["source_type"]
+                sheet_name = block_extra.get("sheet_name") or block_extra.get("sheet")
+                if sheet_name:
+                    meta["sheet_name"] = sheet_name
+                if block_extra.get("columns"):
+                    meta["columns"] = block_extra["columns"]
+                if block_extra.get("rows") is not None:
+                    meta["rows"] = block_extra["rows"]
                 if isinstance(block_page, int) and block_page > 0:
                     meta["page"] = block_page
                 out.append(ChunkPreview(chunk_index=idx, content=piece, char_count=len(piece), metadata=meta))

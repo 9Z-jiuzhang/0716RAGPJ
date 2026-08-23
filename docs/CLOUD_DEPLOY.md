@@ -176,4 +176,4 @@ Compose 默认把数据挂在项目下 `./data/*` 与 `./data/langfuse/*`。云�
 | 演示账号 | 默认播种 | 不播种 |
 | 注册 | 默认开放 | 默认关闭 |
 
-更细的接口说明见 `API_INTEGRATION_GUIDE.md`、`API.md` 与 [`DEV_STATUS.md`](./DEV_STATUS.md)。
+更细的接口说明见 `API_INTEGRATION_GUIDE.md` 与 [`API.md`](./API.md)。

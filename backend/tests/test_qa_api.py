@@ -72,3 +72,26 @@ async def test_accessible_kbs_includes_ux_flags(client_mocked: AsyncClient) -> N
 async def test_sessions_requires_auth(client_mocked: AsyncClient) -> None:
     resp = await client_mocked.get("/api/v1/qa/sessions")
     assert resp.status_code == 401
+
+
+def test_download_storage_bytes_maps_storage_error_to_503() -> None:
+    from fastapi import HTTPException
+
+    from app.api.v1.qa import _download_storage_bytes
+    from app.services.storage import StorageUnavailable
+
+    with patch(
+        "app.api.v1.qa.storage.download_bytes",
+        side_effect=StorageUnavailable("minio down"),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            _download_storage_bytes("kb/test/object")
+    assert exc.value.status_code == 503
+
+
+def test_download_storage_bytes_does_not_mask_value_error() -> None:
+    from app.api.v1.qa import _download_storage_bytes
+
+    with patch("app.api.v1.qa.storage.download_bytes", side_effect=ValueError("bad key")):
+        with pytest.raises(ValueError, match="bad key"):
+            _download_storage_bytes("kb/test/object")

@@ -154,12 +154,22 @@ def _table_block(
     md = table_rows_to_markdown(headers, rows)
     if not md.strip():
         return None
+    merged = dict(extra)
+    sheet = merged.get("sheet_name") or merged.get("sheet")
+    merged.update(
+        {
+            "source_type": "spreadsheet",
+            "sheet_name": sheet,
+            "columns": headers,
+            "rows": len(rows),
+        }
+    )
     return ContentBlock(
         block_type=ContentBlockType.TABLE.value,
         content=md,
         markdown=md,
         html=table_rows_to_html(headers, rows),
-        extra=dict(extra),
+        extra=merged,
     )
 
 

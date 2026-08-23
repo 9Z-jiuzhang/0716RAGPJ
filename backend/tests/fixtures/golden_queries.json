@@ -95,8 +95,8 @@
     {
       "id": "pdf-cite-figure-01",
       "category": "pdf_figure",
-      "expected_status": "fail_implemented",
-      "pass_when": "F 模块（asset API）合并后",
+      "expected_status": "pass",
+      "pass_when": "F 模块 asset API + 引用组装",
       "question": "我国晶圆制造主体运营现状分布是怎样的？请结合文档中的图表说明。",
       "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
       "expect": {
@@ -109,8 +109,8 @@
     {
       "id": "cjk-longtail-01",
       "category": "cjk_longtail",
-      "expected_status": "fail_implemented",
-      "pass_when": "G 模块 CJK 全文合并后",
+      "expected_status": "pass",
+      "pass_when": "G 模块 CJK 全文 zh_jieba 查询增强",
       "question": "什么是多项目晶圆MPW加工服务？",
       "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
       "expect": {
@@ -139,10 +139,11 @@
     {
       "id": "clarify-01",
       "category": "clarify",
-      "expected_status": "fail_implemented",
-      "pass_when": "澄清反问模块合并后",
+      "expected_status": "pass",
+      "pass_when": "澄清反问 vague_kb_query",
       "question": "那个集成电路政策到底怎么样？",
       "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "notes": "Golden E2E 需 CLARIFY_ENABLED=true；生产默认 false",
       "expect": {
         "expect_source": null,
         "min_confidence": 0.0,
