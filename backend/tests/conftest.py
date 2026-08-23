@@ -15,7 +15,9 @@ from httpx import ASGITransport, AsyncClient
 # 宿主机：.../backend/tests → parents[1]=backend
 # 容器内：/app/tests → parents[1]=/app（与 Dockerfile COPY 布局一致）
 _APP_ROOT = Path(__file__).resolve().parents[1]
+_TESTS_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_APP_ROOT))
+sys.path.insert(0, str(_TESTS_ROOT))
 
 # 仅在宿主机跑 pytest 时，把 Compose 服务名映射为 localhost。
 # 容器内（存在 /.dockerenv）应继续使用 postgres/redis 等服务名。

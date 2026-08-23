@@ -1,6 +1,6 @@
 # 知识库 RAG 平台 — 第三方应用接入指南
 
-> 版本：与产品 `APP_VERSION`（当前 `2.1.0`）对齐  
+> 版本：与产品 `APP_VERSION`（当前 **2.1.12**）对齐；开发中能力见仓库 `docs/DEV_STATUS.md`  
 > 适用场景：将本系统接入 **Android / iOS / 桌面客户端 / 其他业务后台**  
 > 完整字段级契约另见仓库 `docs/API.md`、运行时 [`/openapi.json`](/openapi.json)、仓库 `docs/CONTRACT.md`
 
@@ -257,7 +257,7 @@ data: {"content":"……"}
 | `cache_hit` | 命中角色/问题缓存（若启用） | 可能直接给出缓存回答相关信息 |
 | `query_processing` | Query 预处理结果 | 改写/扩展等元数据 |
 | `chunk` | 回答正文增量 | 字段 `content`；前端拼接到气泡 |
-| `citations` | 引用来源列表 | `citations` / `items`：文档名、分段、相关度 score |
+| `citations` | 引用来源列表 | `citations`：文档名、分段、相关度；`images[]` 为命中相关 **PDF 页**缩略图 URL（`/qa/documents/{doc_id}/charts/page-NN.png`） |
 | `done` | 本轮结束 | session_id、message_id、confidence、performance 等 |
 | `error` | 流水线错误 | message |
 

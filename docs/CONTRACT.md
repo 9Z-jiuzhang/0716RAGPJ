@@ -8,8 +8,11 @@
 |------|------|
 | [`openapi.json`](./openapi.json) | 机器可读契约（OpenAPI 3.0.3）。由脚本生成，请勿手工直接编辑 |
 | [`API.md`](./API.md) | 中文接口文档（逐接口详解，与契约同步） |
-| [`API_INTEGRATION_GUIDE.md`](./API_INTEGRATION_GUIDE.md) | 第三方 / 移动端接入指南（功能解说与示例） |
+| [`KB_FAQ.md`](./KB_FAQ.md) | 知识库 FAQ 产品说明 |
+| [`API_INTEGRATION_GUIDE.md`](./API_INTEGRATION_GUIDE.md) | 第三方 / 移动端接入指南 |
 | [`CLOUD_DEPLOY.md`](./CLOUD_DEPLOY.md) | 云端 / 生产部署与安全加固 |
+| [`RUNBOOK.md`](./RUNBOOK.md) | 运维 Runbook（发版、shadow、监控） |
+| [`DEV_STATUS.md`](./DEV_STATUS.md) | 开发/发布状态（文档对齐基准） |
 | [`CONTRACT.md`](./CONTRACT.md) | 本文件：契约使用与变更流程 |
 | [`../scripts/generate_openapi.py`](../scripts/generate_openapi.py) | 契约生成脚本（契约的**代码来源**） |
 
@@ -60,5 +63,6 @@ python scripts/generate_openapi.py
 
 ## 版本
 
-- 契约版本：`2.1.0`，与产品手册 V2.1 及仓库 `APP_VERSION` 保持同步。
-- 文档修订：`2.1.8`（2026-08-06）— 见 `API.md` 变更记录。
+- 契约版本：**2.1.12**，与仓库 `APP_VERSION` 及 [`DEV_STATUS.md`](./DEV_STATUS.md) 保持同步。
+- 文档修订：**2026-08-23**（Chroma 1.5.5、图表按需栅格化、RUNBOOK/DEV_STATUS 索引）。
+- 历史修订见 `API.md` §20 变更记录。

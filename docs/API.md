@@ -1,6 +1,6 @@
 # AI 知识库 RAG 平台 — 接口文档（中文）
 
-> 版本：`2.1.0`　与 [`openapi.json`](./openapi.json) 同步  
+> 版本：**2.1.12**　与 [`openapi.json`](./openapi.json) 同步；开发状态见 [`DEV_STATUS.md`](./DEV_STATUS.md)  
 > 本文档逐接口详解路径、方法、鉴权、请求/响应字段与约束，字段名与类型取自 `backend/app/schemas/*` 与路由签名。  
 > 契约说明见 [`CONTRACT.md`](./CONTRACT.md)。
 
@@ -725,7 +725,8 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| 2.1.12 | 2026-08-23 | 图表引用 P0：`MAX_CITATION_CHART_PAGES`、`CHART_CITATION_USE_LEGACY_LOGIC`；`GET /qa/accessible-kbs` 增加 `max_charts`；角色缓存 shadow 观测与窗口自动关闭；见 RUNBOOK.md |
+| 2.1.12-p1 | 2026-08-23 | 图表**按需栅格化**（非整本）；`CHART_RASTERIZE_ZOOM`；GET chart 只补单页；`asyncio.to_thread` 栅格化 |
+| 2.1.12 | 2026-08-23 | 图表引用 P0、`max_charts`、角色缓存 shadow；见 RUNBOOK.md |
 | 2.1.11 | 2026-08-20 | FAQ 语义命中与答案校验告警；citations.images 仅挂命中相关页（非整本 PDF）；见 §12.1、KB_FAQ.md |
 | 2.1.10 | 2026-08-14 | Chroma 固定至 1.5.5，Python 客户端保持 `>=1.5,<2.0`，避免使用 `latest` 造成跨版本数据不兼容。 |
 | 2.1.9 | 2026-08-13 | FAQ 知识库缓存：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 §12.1 |

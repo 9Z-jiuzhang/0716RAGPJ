@@ -20,6 +20,9 @@ docker compose exec api python -m app.scripts.clear_qa_citation_images
 | `MAX_CITATION_CHART_PAGES` | 5 | 单条引用最多拉图页数 |
 | `QA_CITATION_CHART_DISPLAY_LIMIT` | 8 | 前端展示上限（`GET /qa/accessible-kbs` 下发 `max_charts`） |
 | `CHART_CITATION_USE_LEGACY_LOGIC` | false | true=develop 旧逻辑 |
+| `CHART_RASTERIZE_ZOOM` | 1.5 | 缩略图栅格 zoom（2.0 更慢更大） |
+
+按需栅格化：`ensure_pdf_charts(pages=[N])` 只补缺失页；GET `/charts/page-NN.png` 同样只渲该页。
 
 ---
 
@@ -90,18 +93,18 @@ Redis 不可用：shadow 降级，**不影响正常问答**。
 
 开干前 30 分钟对齐 **第 8 项**：下列 env 齐全且 staging 已测「关开关回旧行为」。
 
-| 模块 | 环境变量 | 默认 | 关开关效果 |
-|------|----------|------|------------|
-| Shadow | `ROLE_CACHE_SHADOW_METRICS_ENABLED` | false | 不采集 shadow |
-| Markdown | `MARKDOWN_RENDER_ENABLED` | true | 访客/管理端会话详情回纯文本 |
-| 内联引用 | `INLINE_CITATION_ENABLED` | true | 回 citations 数组旧展示 |
-| Asset 图 | `ASSET_CITATION_ENABLED` | true | 仅 page 级整页图 |
-| 推荐问 | `SUGGESTED_QUESTIONS_ENABLED` | true | 不发 SSE 尾事件 |
-| 澄清反问 | `CLARIFY_ENABLED` | true | staging 3 天后再开 prod |
-| Cite 校验 | `CITE_VALIDATION_ENFORCE` | false | 仍 **全量计算** overlap，仅不展示 unverified |
-| CJK 全文 | `FULLTEXT_ANALYZER_BACKEND` | default | 切 `default` 回退（与 zh_jieba 双后端并存） |
-| FAQ 语义 | `FAQ_SEMANTIC_HIT_ENABLED` | true | 仅精确 FAQ |
-| FAQ 校验 | `FAQ_VERIFY_ENABLED` | true | 关闭自动校验任务 |
+| 模块 | 环境变量 | 默认 | 关开关效果 | 紧急回退测试 |
+|------|----------|------|------------|--------------|
+| Shadow | `ROLE_CACHE_SHADOW_METRICS_ENABLED` | false | 不采集 shadow | `/metrics` 无 shadow 计数 |
+| Markdown | `MARKDOWN_RENDER_ENABLED` | true | 访客/管理端会话详情回纯文本 | 答案无 MD、无闪 `**` |
+| 内联引用 | `INLINE_CITATION_ENABLED` | true | 回 citations 数组旧展示 | 无 `[1]`，仅侧栏引用 |
+| Asset 图 | `ASSET_CITATION_ENABLED` | true | 仅 page 级整页图 | 无 `kind=asset` |
+| 推荐问 | `SUGGESTED_QUESTIONS_ENABLED` | true | 不发 SSE 尾事件 | `done` 后无尾事件 |
+| 澄清反问 | `CLARIFY_ENABLED` | true | staging 3 天后再开 prod | 模糊问不澄清 |
+| Cite 校验 | `CITE_VALIDATION_ENFORCE` | false | 仍全量算 overlap，不展示 unverified | `cite_validation_unverified_total` 仍增 |
+| CJK 全文 | `FULLTEXT_ANALYZER_BACKEND` | default | 切 `default` 回退 | 长尾召回恢复改前 |
+| FAQ 语义 | `FAQ_SEMANTIC_HIT_ENABLED` | true | 仅精确 FAQ | 近义无 cache_hit |
+| FAQ 校验 | `FAQ_VERIFY_ENABLED` | true | 关闭自动校验任务 | verify 无 drift |
 
 **澄清 prod**：建议 staging 跑满 3 天且 `clarify_triggered_total` 在 5–20% 后再开 `CLARIFY_ENABLED=true`。
 
@@ -146,6 +149,8 @@ Redis 不可用：shadow 降级，**不影响正常问答**。
 - 分布：5 FAQ（精确+语义）+ 2 PDF 引用（含图）+ 1 中文长尾 + 1 多轮 + 1 故意模糊（澄清）。
 - **每个 PR** 跑 `pytest tests/test_golden_queries.py`；定稿后扩展端到端断言，**任 1 条退化 PR 不过**。
 - 文件：`backend/tests/fixtures/golden_queries.json`
+- `expected_status`: `pass` | `partial` | `fail_implemented`（blocked 不算 PR failure）
+- `review_due` 过期 → CI 禁止发版，须季度审视后延期
 
 ---
 

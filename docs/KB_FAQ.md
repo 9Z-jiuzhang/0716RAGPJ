@@ -48,10 +48,12 @@
 
 ## 管理端
 
-- FAQ 列表：`rag_drift` 显示过时标记；详情可看 `verify_diff`
+- FAQ 列表：`rag_drift` 显示过时标记；详情可看 `verify_diff`、模拟问答对照
+- FAQ 详情：**编辑**（非仅查看）→ 校验面板「填入上方答案框」→ **保存** 可清除 `rag_drift`
 - 文档列表：`faq_job_status` / `faq_job_reason`（空文、无 Key、限额等）
 
 ## 说明
 
 - 旧 FAQ 若 `embedding` 为空，语义命中不会生效，需编辑触发刷新或重新生成。
 - 不自动回填答案、不整删角色缓存（另开需求）。
+- 问答引用图表为 PDF **整页**缩略图（非单图 asset）；见 README §2.5、`RUNBOOK.md` PR-A。

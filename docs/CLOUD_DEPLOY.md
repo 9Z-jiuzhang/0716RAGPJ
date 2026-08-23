@@ -172,7 +172,8 @@ Compose 默认把数据挂在项目下 `./data/*` 与 `./data/langfuse/*`。云�
 | Redis | 业务 Redis 无密码 | requirepass |
 | Grafana | 可匿名嵌入 | 关匿名，ROOT_URL=PUBLIC_BASE_URL |
 | Langfuse | 自建独立栈 | 同左；MinIO 等数据面不暴露 |
+| Chroma | `chromadb/chroma:1.5.5`，数据 `/data` | 勿用 `latest`；升级需同步 Python 客户端并 reindex |
 | 演示账号 | 默认播种 | 不播种 |
 | 注册 | 默认开放 | 默认关闭 |
 
-更细的接口说明见 `API_INTEGRATION_GUIDE.md` 与 `API.md`。
+更细的接口说明见 `API_INTEGRATION_GUIDE.md`、`API.md` 与 [`DEV_STATUS.md`](./DEV_STATUS.md)。

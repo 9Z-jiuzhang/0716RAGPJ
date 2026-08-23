@@ -2,7 +2,7 @@
 
 基于大语言模型（LLM）的企业级智能知识库平台。提供文档上传与自动向量化、混合检索（向量 + 全文 + RRF 融合）、多轮流式问答、RBAC + 部门驱动的访问控制、命中率评测、快照与回退、以及 Prometheus/Grafana/Langfuse 全链路可观测能力。
 
-- **应用版本**：`APP_VERSION=2.1.12`（与产品手册 V2.1 对齐）
+- **应用版本**：`APP_VERSION=2.1.12`（配置默认；2.1.13 开发中，见 [`docs/DEV_STATUS.md`](docs/DEV_STATUS.md)）
 - **技术栈**：FastAPI（异步）· PostgreSQL（pg_trgm + tsvector）· Chroma（向量库）· Redis（会话热态）· MinIO（对象存储）· 原生 ES Module 前端 · Docker Compose 编排
 - **统一入口（本机 Docker 默认）**：`http://localhost:9080`（Nginx 反向代理；容器与宿主机均为 9080）
 - **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml` + `docker-compose.langfuse.yml`）
@@ -284,6 +284,8 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 检索命中后的 **citations.images**：仅挂与命中片段相关的 PDF 页（分段元数据 `page`；layout 图/表块优先块级 `page`），**不会**把整本 PDF 缩略图塞进「相关图表」。前端文案为「PDF 第 N 页」；`GET /qa/accessible-kbs` 下发 `max_charts` 控制展示上限。旧文档无页码元数据时不展示图表，需重解析/重分段后才有精确页。回滚开关：`CHART_CITATION_USE_LEGACY_LOGIC=true`（见 `docs/RUNBOOK.md`）。
 
+**图表性能**：`ensure_pdf_charts(pages=[…])` **只栅格化缺失页**（非整本）；`GET /qa/documents/{id}/charts/page-NN.png` 懒加载同样只补该页；`CHART_RASTERIZE_ZOOM` 默认 1.5；栅格化在线程池执行不阻塞 event loop。单图 **asset** 引用仍属 2.1.13 F 模块（当前为整页 PNG）。
+
 ### 2.6 前端
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
@@ -362,14 +364,15 @@ pytest backend/tests -q
 | 超管 / 种子 | `SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_SYNC_PASSWORD`、`SEED_DEMO_USERS`、`AUTH_REGISTER_ENABLED`、`METRICS_PUBLIC` |
 | PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=9543`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
 | Redis | `REDIS_HOST=redis`、`REDIS_PORT=9637`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
-| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE`；镜像固定 `chromadb/chroma:0.6.3` |
+| Chroma | `CHROMA_HOST=chroma`、`CHROMA_PORT=8000`（宿主机调试映射口为 9800）、`CHROMA_TENANT`、`CHROMA_DATABASE`；镜像固定 **`chromadb/chroma:1.5.5`**；Python **`chromadb>=1.5,<2.0`**（生产建议 `==1.5.5`）；持久化目录容器 `/data` |
 | MinIO | `MINIO_ENDPOINT=minio:9900`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET` |
 | LLM | `LLM_PROVIDER=dashscope`、`LLM_API_KEY`、`LLM_MODEL=qwen3.7-plus`、`LLM_BASE_URL`、思考相关开关 |
 | Embedding | `EMBEDDING_PROVIDER=dashscope`、`EMBEDDING_API_KEY`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_BATCH_SIZE` |
 | Rerank | `RERANK_PROVIDER=dashscope`、`RERANK_API_KEY`、`RERANK_MODEL` |
 | Langfuse | `LANGFUSE_HOST`（默认 `http://langfuse-web:9310`）、公钥/密钥、自建 `LANGFUSE_NEXTAUTH_*` / `LANGFUSE_*_PASSWORD` / `INIT_*`（见 `.env.example`） |
 | JWT / CORS | `JWT_SECRET_KEY`、`ACCESS_TOKEN_EXPIRE_MINUTES=30`、`CORS_ORIGINS`、`CORS_ALLOW_CREDENTIALS` |
-| 问答 / Guard | `QA_*`、`MAX_CITATION_CHART_PAGES`、`CHART_CITATION_USE_LEGACY_LOGIC`、`LLM_GUARD_*`、`ROLE_CACHE_*`（含 shadow）、`RAGAS_*` |
+| 问答 / Guard | `QA_*`、`MAX_CITATION_CHART_PAGES`、`CHART_CITATION_USE_LEGACY_LOGIC`、`CHART_RASTERIZE_ZOOM`、`LLM_GUARD_*`、`ROLE_CACHE_*`（含 shadow）、`RAGAS_*` |
+| 2.1.13 开关（已入 env，功能分批上线） | `MARKDOWN_RENDER_ENABLED`、`INLINE_CITATION_ENABLED`、`ASSET_CITATION_ENABLED`、`SUGGESTED_QUESTIONS_ENABLED`、`CLARIFY_ENABLED`、`CITE_VALIDATION_ENFORCE`、`FULLTEXT_ANALYZER_BACKEND` — 见 `docs/RUNBOOK.md` |
 
 > **安全提示**：模型 API Key 通过 `ModelConfig.api_key_env`（环境变量**名**）引用，**不落库、不在接口明文返回**。
 
@@ -414,7 +417,7 @@ pytest backend/tests -q
 | `export_role_cache_shadow_hits.py` | `backend/app/scripts/` | 导出角色缓存 shadow 命中频次（ZSET） |
 | `backfill_l2_from_shadow.py` | `backend/app/scripts/` | shadow 窗口结束后将高频题写入 L2（短 TTL） |
 
-发版与 shadow 试跑步骤见 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)。本地联调语料（`testdoc/`、`testdata/`）及依赖它们的灌数脚本不入库。
+发版与 shadow 试跑步骤见 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)。Golden 结构测试：`pytest backend/tests/test_golden_queries.py`。本地联调语料（`testdoc/`、`testdata/`）及依赖它们的灌数脚本不入库。
 
 **Windows 端口速查**：
 
@@ -437,7 +440,9 @@ docker compose ps
 | [`docs/KB_FAQ.md`](docs/KB_FAQ.md) | 知识库 FAQ 产品说明（精确/语义命中、校验、配置） |
 | [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md) | 第三方 / Android 等接入指南 |
 | [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
-| [`docs/CONTRACT.md`](docs/CONTRACT.md) | 契约使用与变更流程 |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | 发版、shadow、图表性能、2.1.13 开关与监控 |
+| [`docs/DEV_STATUS.md`](docs/DEV_STATUS.md) | 开发/发布状态（文档对齐基准） |
+| [`docs/CONTRACT.md`](docs/CONTRACT.md) | OpenAPI 契约变更流程 |
 | 运行时 Swagger（官方） | http://localhost:9080/docs |
 | 管理端嵌入 Swagger | http://localhost:9080/assets/vendor/swagger-ui/index.html |
 
@@ -478,6 +483,8 @@ docker compose ps
 │   ├── KB_FAQ.md                 # FAQ 产品说明
 │   ├── API_INTEGRATION_GUIDE.md  # 第三方接入指南
 │   ├── CLOUD_DEPLOY.md           # 云端部署指南
+│   ├── RUNBOOK.md                # 运维 Runbook
+│   ├── DEV_STATUS.md             # 开发/发布状态
 │   └── CONTRACT.md               # 契约说明
 ├── scripts/                      # 契约生成 / 种子与运维脚本
 ├── docker-compose.yml            # 本机开发编排
@@ -494,7 +501,7 @@ docker compose ps
 - **分支**：主开发 `develop`，稳定发布 `main`。
 - **提交**：Conventional Commits。
 - **CI**：`.github/workflows/ci.yml` 强制 `ruff` / `black` / `pytest` 通过。
-- **契约与文档同步（上传 / 发分支前必做）**：功能变更须同步更新 README.md 与 docs/ 中**正式说明**（至少涉及模块的专篇 + 本 README 对应章节）；接口变更需更新 docs/API.md，并视需要重跑 scripts/generate_openapi.py 更新 docs/openapi.json（及 rontend/shared/docs/ 副本），评审后再合入主干。
+- **契约与文档同步（上传 / 发分支前必做）**：功能变更须同步 README、`docs/DEV_STATUS.md` 与 `docs/` 正式说明；接口变更更新 `docs/API.md`，视需要重跑 `scripts/generate_openapi.py` 及 `frontend/shared/docs/` 副本。
 - **勿提交**：.env、本地数据卷、含密钥的临时文件；**过程稿 / 结项清单 / 临时方案**（如 docs/*_PLAN.md、docs/*_ACCEPTANCE.md，已在 .gitignore）— 产品行为以 README.md、docs/API.md、docs/KB_FAQ.md 等正式文档为准。
 
 ## 许可证

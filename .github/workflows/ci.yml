@@ -57,6 +57,40 @@ jobs:
       - name: Black check
         run: black --check backend
 
+      - name: Golden fixture schema (Layer 0)
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: knowledge_base_test
+          POSTGRES_USER: kb_user
+          POSTGRES_PASSWORD: test_password
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          JWT_SECRET_KEY: pytest-secret-key-change-me-32bytes!!
+          LLM_API_KEY: test-key
+          EMBEDDING_API_KEY: test-key
+          RATE_LIMIT_ENABLED: "false"
+        run: pytest backend/tests/test_golden_queries.py backend/tests/test_sse_parser.py -q --tb=short
+
+      - name: Golden E2E (staging release branch only)
+        if: github.ref == 'refs/heads/release/2.1.13' || github.ref == 'refs/heads/feature/2.1.13'
+        env:
+          GOLDEN_E2E: "1"
+          GOLDEN_E2E_BASE_URL: ${{ vars.STAGING_URL }}
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: knowledge_base_test
+          POSTGRES_USER: kb_user
+          POSTGRES_PASSWORD: test_password
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          JWT_SECRET_KEY: pytest-secret-key-change-me-32bytes!!
+          LLM_API_KEY: test-key
+          EMBEDDING_API_KEY: test-key
+          RATE_LIMIT_ENABLED: "false"
+        run: pytest backend/tests/test_golden_e2e.py -q -m golden --tb=short
+        continue-on-error: true
+
       - name: Pytest
         env:
           POSTGRES_HOST: localhost

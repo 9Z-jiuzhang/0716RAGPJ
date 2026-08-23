@@ -1,75 +1,156 @@
 {
-  "version": 1,
-  "description": "2.1.13 golden regression set — 开干第1天对齐后替换占位",
+  "version": 2,
+  "description": "2.1.13 golden regression — 验收 KB：芯片（企业发展策略_智能创新整合集成电路快速流片线计划_V1.3.pdf）",
+  "review_due": "2026-11-23",
+  "golden_kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+  "golden_kb_name": "芯片",
+  "golden_document": "企业发展策略_智能创新整合集成电路快速流片线计划_V1.3.pdf",
   "queries": [
     {
       "id": "faq-exact-01",
       "category": "faq_exact",
-      "question": "[PLACEHOLDER] FAQ 精确命中问句 1",
-      "kb_id": "",
-      "notes": "应 FAQ 秒答，source=kb_faq"
+      "expected_status": "pass",
+      "pass_when": "FAQ 精确命中秒答",
+      "question": "智能、创新、整合集成电路快速流片线计划的资金需求是多少，主要用于哪些方面？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "expect": {
+        "expect_source": "kb_faq",
+        "min_confidence": 0.9,
+        "sse_events_any": ["cache_hit"],
+        "must_contain": ["280", "亿"]
+      }
     },
     {
       "id": "faq-exact-02",
       "category": "faq_exact",
-      "question": "[PLACEHOLDER] FAQ 精确命中问句 2",
-      "kb_id": ""
+      "expected_status": "pass",
+      "pass_when": "多关键点答案完整性",
+      "question": "目前主流的半导体产业商业模式包括哪两种？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "expect": {
+        "expect_source": "kb_faq",
+        "min_confidence": 0.9,
+        "sse_events_any": ["cache_hit"],
+        "must_contain": ["IDM", "Fabless"]
+      }
     },
     {
       "id": "faq-semantic-01",
       "category": "faq_semantic",
-      "question": "[PLACEHOLDER] FAQ 语义近义问句 1",
-      "kb_id": "",
-      "notes": "与库内 FAQ 措辞不同但应命中"
+      "expected_status": "pass",
+      "pass_when": "语义阈值 0.85 命中",
+      "question": "本计划一共需要多少资金，主要投在哪些项目上？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "expect": {
+        "expect_source": "kb_faq_semantic",
+        "min_confidence": 0.85,
+        "sse_events_any": ["cache_hit"],
+        "must_contain": ["280"]
+      }
     },
     {
       "id": "faq-semantic-02",
       "category": "faq_semantic",
-      "question": "[PLACEHOLDER] FAQ 语义近义问句 2",
-      "kb_id": ""
+      "expected_status": "pass",
+      "pass_when": "边界近义问句（sim≈0.83）不应 FAQ 秒答",
+      "question": "2019年全球半导体市场规模和增长率是多少？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "expect": {
+        "expect_source": null,
+        "min_confidence": 0.3,
+        "sse_events_forbidden": ["cache_hit"],
+        "must_contain": []
+      }
     },
     {
       "id": "faq-verify-01",
       "category": "faq_verify",
-      "question": "[PLACEHOLDER] FAQ 校验对照问句",
-      "kb_id": "",
-      "notes": "管理端 verify 面板可复现"
+      "expected_status": "pass",
+      "pass_when": "管理端校验 rag_drift 可复现",
+      "question": "快速流片量产线（K线）的定位和特点是什么？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "notes": "Layer 1：管理端 FAQ 列表应见 stale_reason=rag_drift；E2E 断言 verify API",
+      "expect": {
+        "expect_source": "kb_faq",
+        "min_confidence": 0.0,
+        "verify_expect_rag_drift": true,
+        "must_contain": ["K线"]
+      }
     },
     {
       "id": "pdf-cite-text-01",
       "category": "pdf_citation",
-      "question": "[PLACEHOLDER] PDF 正文引用问句",
-      "kb_id": "",
-      "notes": "答案含 [1] 且 citation 页码非整本"
+      "expected_status": "partial",
+      "pass_when": "E 模块内联 [1] 合并后升为 pass",
+      "question": "2019年全球半导体销售总额是多少？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "expect": {
+        "expect_source": null,
+        "min_confidence": 0.3,
+        "partial_checks": ["citation_max_pages"],
+        "skip_checks": ["inline_bracket_citation"],
+        "citation_max_pages": 5,
+        "must_contain": ["4121"]
+      }
     },
     {
       "id": "pdf-cite-figure-01",
       "category": "pdf_figure",
-      "question": "[PLACEHOLDER] PDF 含图页问句",
-      "kb_id": "",
-      "notes": "引用区可见 asset 或单页图，非 99 页"
+      "expected_status": "fail_implemented",
+      "pass_when": "F 模块（asset API）合并后",
+      "question": "我国晶圆制造主体运营现状分布是怎样的？请结合文档中的图表说明。",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "expect": {
+        "expect_source": null,
+        "min_confidence": 0.3,
+        "must_contain": ["晶圆"],
+        "asset_kind": "asset"
+      }
     },
     {
       "id": "cjk-longtail-01",
       "category": "cjk_longtail",
-      "question": "[PLACEHOLDER] 中文长尾专有名词",
-      "kb_id": "",
-      "notes": "FULLTEXT_ANALYZER_BACKEND 对比基线"
+      "expected_status": "fail_implemented",
+      "pass_when": "G 模块 CJK 全文合并后",
+      "question": "什么是多项目晶圆MPW加工服务？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "expect": {
+        "expect_source": null,
+        "min_confidence": 0.3,
+        "must_contain": ["多项目晶圆"],
+        "retrieval_top5_must_include": "多项目晶圆"
+      }
     },
     {
       "id": "followup-01",
       "category": "multi_turn",
-      "question": "[PLACEHOLDER] 多轮跟进问句",
-      "kb_id": "",
-      "prior_question": "[PLACEHOLDER] 首轮问题",
-      "notes": "同 session 第二轮"
+      "expected_status": "pass",
+      "pass_when": "sticky + 上下文跟进",
+      "question": "它为什么尽可能损益平衡而不做量产？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "prior_question": "快速流片量产线（K线）的定位和特点是什么？",
+      "expect": {
+        "expect_source": null,
+        "min_confidence": 0.3,
+        "sticky_merged": true,
+        "must_not_contain": ["我是人工智能", "我是 AI"],
+        "must_contain": ["损益平衡"]
+      }
     },
     {
       "id": "clarify-01",
       "category": "clarify",
-      "question": "[PLACEHOLDER] 故意模糊跨主题问句",
-      "kb_id": "",
-      "notes": "应触发澄清反问（非纯 abstention）"
+      "expected_status": "fail_implemented",
+      "pass_when": "澄清反问模块合并后",
+      "question": "那个集成电路政策到底怎么样？",
+      "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
+      "expect": {
+        "expect_source": null,
+        "min_confidence": 0.0,
+        "clarify_triggered": true,
+        "must_not_contain": ["不知道", "无法回答"],
+        "must_contain": []
+      }
     }
   ]
 }
