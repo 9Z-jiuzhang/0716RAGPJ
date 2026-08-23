@@ -29,6 +29,13 @@ class RetrievalHit:
 
     def to_citation(self) -> dict[str, Any]:
         """转换为 API CitationResponse 字段结构。"""
+        from app.services.chart_citation import chart_citation_use_legacy, citation_safe_citation
+        from app.services.document_charts import (
+            citation_images_for_pages,
+            chart_api_url,
+            pages_for_citation_metadata,
+        )
+
         citation: dict[str, Any] = {
             "chunk_id": self.chunk_id,
             "doc_id": self.doc_id,
@@ -39,20 +46,21 @@ class RetrievalHit:
             "source": self.source,
             "images": [],
         }
-        # 入库时写入的 chart_page_count（标量）；无则由流水线懒加载补全
-        try:
-            n = int((self.metadata or {}).get("chart_page_count") or 0)
-        except (TypeError, ValueError):
-            n = 0
-        if n > 0:
-            citation["images"] = [
-                {
-                    "page": i,
-                    "url": f"/api/v1/qa/documents/{self.doc_id}/charts/page-{i:02d}.png",
-                }
-                for i in range(1, n + 1)
-            ]
-        return citation
+        if chart_citation_use_legacy():
+            pages = pages_for_citation_metadata(self.metadata)
+            if pages:
+                citation["images"] = [
+                    {"page": p, "url": chart_api_url(self.doc_id, p)} for p in pages
+                ]
+        else:
+            pages = pages_for_citation_metadata(self.metadata)
+            if pages:
+                citation["images"] = citation_images_for_pages(
+                    self.doc_id,
+                    pages,
+                    kb_id=self.kb_id,
+                )
+        return citation_safe_citation(citation)
 
 
 @dataclass

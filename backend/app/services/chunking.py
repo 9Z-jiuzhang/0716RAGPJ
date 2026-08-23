@@ -244,6 +244,7 @@ def _split_layout_aware(
     for block in blocks:
         btype = block.get("block_type") or ContentBlockType.TEXT.value
         content = (block.get("content") or "").strip()
+        block_page = block.get("page")
         if btype == ContentBlockType.TABLE.value:
             pieces = split_table_with_header(block.get("markdown") or content, max_table)
             for pi, piece in enumerate(pieces):
@@ -259,6 +260,8 @@ def _split_layout_aware(
                     "table_part": pi,
                     "table_parts": len(pieces),
                 }
+                if isinstance(block_page, int) and block_page > 0:
+                    meta["page"] = block_page
                 out.append(ChunkPreview(chunk_index=idx, content=piece, char_count=len(piece), metadata=meta))
                 idx += 1
             continue
@@ -274,6 +277,8 @@ def _split_layout_aware(
                 "parent_content": body,
                 "structure_md": body,
             }
+            if isinstance(block_page, int) and block_page > 0:
+                meta["page"] = block_page
             out.append(ChunkPreview(chunk_index=idx, content=body, char_count=len(body), metadata=meta))
             idx += 1
             continue

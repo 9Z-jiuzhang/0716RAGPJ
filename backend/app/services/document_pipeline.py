@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -28,6 +29,21 @@ from app.services.observability import langfuse_span, record_metric, write_audit
 from app.services.snapshot_hooks import take_auto_snapshot
 
 logger = logging.getLogger(__name__)
+
+_PDF_PAGE_MARKER_RE = re.compile(r"\[\[pdf_page:(\d+)\]\]")
+
+
+def _apply_pdf_page_metadata(content: str, metadata: dict | None) -> tuple[str, dict]:
+    """从正文中的 [[pdf_page:N]] 提取页码写入 metadata，并剥离标记以免污染检索。"""
+    from app.services.chart_citation import apply_pdf_page_to_metadata
+
+    meta = dict(metadata or {})
+    pages = [int(m.group(1)) for m in _PDF_PAGE_MARKER_RE.finditer(content or "")]
+    clean = _PDF_PAGE_MARKER_RE.sub("", content or "")
+    clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
+    if pages:
+        meta = apply_pdf_page_to_metadata(pages, meta)
+    return clean, meta
 
 
 async def run_upload_pipeline(document_id: uuid.UUID, *, auto_vectorize: bool = True) -> None:
@@ -323,7 +339,7 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
         meta0 = dict(previews[0].metadata or {})
         meta0["coverage_ratio"] = round(coverage, 4)
         previews[0].metadata = meta0
-    # 图表页数写入各段 metadata（Chroma 仅保留标量），问答引用可直接拼 URL
+    # 图表可用性标记（标量）；问答引用不再据此展开整本 PDF 缩略图
     try:
         from app.services.document_charts import list_chart_pages
 
@@ -332,11 +348,22 @@ async def _segment(db: AsyncSession, doc, force: bool = False) -> None:
     except Exception as exc:
         logger.warning("list chart pages failed doc=%s: %s", doc.id, exc)
         chart_n = 0
-    if chart_n and previews:
+    is_pdf = (doc.file_type or "").lower().lstrip(".") == "pdf"
+    if previews:
         for p in previews:
             meta = dict(p.metadata or {})
-            meta["chart_page_count"] = chart_n
-            p.metadata = meta
+            content = p.content or ""
+            if is_pdf:
+                content, meta = _apply_pdf_page_metadata(content, meta)
+                p.content = content
+                p.char_count = len(content)
+            if chart_n:
+                meta["has_pdf_charts"] = True
+                # 保留标量供排障；禁止前端/引用层按此展开全部页（legacy 开关除外）
+                meta["chart_page_count"] = chart_n
+            from app.services.chart_citation import normalize_chunk_metadata_for_storage
+
+            p.metadata = normalize_chunk_metadata_for_storage(meta)
     chunks = [
         DocumentChunk(
             kb_id=doc.kb_id,

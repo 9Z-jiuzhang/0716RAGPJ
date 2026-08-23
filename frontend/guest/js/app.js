@@ -774,6 +774,10 @@ async function loadQaComposerOptions() {
   try {
     const data = await api.get("/qa/accessible-kbs");
     const items = data?.items || [];
+    const maxCharts = Number(data?.max_charts);
+    if (Number.isFinite(maxCharts) && maxCharts > 0) {
+      qaMaxCitationCharts = maxCharts;
+    }
     const opts = [`<option value="">全部可访问知识库</option>`];
     for (const kb of items) {
       opts.push(
@@ -1689,7 +1693,9 @@ function renderCitationItemHtml(c) {
   </details>`;
 }
 
-/** 按 doc_id + page 去重，汇总引用中的图表 */
+/** 后端下发的引用图表展示上限（GET /qa/accessible-kbs.max_charts） */
+let qaMaxCitationCharts = 8;
+
 function collectCitationCharts(citations) {
   const seen = new Set();
   const charts = [];
@@ -1703,6 +1709,9 @@ function collectCitationCharts(citations) {
       if (seen.has(key)) continue;
       seen.add(key);
       charts.push({ url, page, docName });
+      if (charts.length >= qaMaxCitationCharts) {
+        return charts;
+      }
     }
   }
   return charts;
@@ -1713,7 +1722,7 @@ function renderCitationChartsHtml(citations) {
   if (!charts.length) return "";
   const items = charts
     .map((ch) => {
-      const pageLabel = ch.page ? `第 ${ch.page} 页` : "图表";
+      const pageLabel = ch.page ? `PDF 第 ${ch.page} 页` : "图表";
       const alt = escapeHtml(`${ch.docName} · ${pageLabel}`);
       return `<figure class="citation-chart-item">
         <img class="citation-chart-img" data-chart-url="${escapeHtml(ch.url)}" alt="${alt}" loading="lazy" />

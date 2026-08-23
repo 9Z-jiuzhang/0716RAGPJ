@@ -28,12 +28,14 @@ def upsert_chunks(
         return
     from app.services.chroma_store import chroma_store
 
+    from app.services.chart_citation import normalize_chunk_metadata_for_storage
+
     doc_name = ""
     ids = [str(c["id"]) for c in chunks]
     documents = [c["content"] for c in chunks]
     metadatas = []
     for c in chunks:
-        meta = dict(c.get("metadata") or {})
+        meta = normalize_chunk_metadata_for_storage(dict(c.get("metadata") or {}))
         doc_name = str(meta.get("doc_name") or meta.get("filename") or doc_name or "")
         metadatas.append(
             {

@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID, uuid4
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_optional_current_user, require_permission
 from app.core.qa_pipeline import qa_pipeline
@@ -144,7 +145,14 @@ async def list_accessible_kbs(
     """供问答页知识库下拉框使用；访客仅见 GUEST 部门已建索引的库。"""
     targets = await resolve_kb_targets(db, user=user, kb_ids=None)
     items = [{"id": str(t.kb_id), "name": t.name} for t in targets]
-    return BaseResponse(data={"items": items, "total": len(items)}, request_id=request_id)
+    return BaseResponse(
+        data={
+            "items": items,
+            "total": len(items),
+            "max_charts": int(settings.QA_CITATION_CHART_DISPLAY_LIMIT),
+        },
+        request_id=request_id,
+    )
 
 
 @router.post(
