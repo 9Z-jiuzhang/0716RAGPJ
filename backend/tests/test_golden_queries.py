@@ -28,7 +28,9 @@ def test_golden_has_ten_queries() -> None:
 def test_golden_expected_status_distribution() -> None:
     data = load_golden_fixture()
     statuses = {q["expected_status"] for q in data["queries"]}
-    assert statuses == {"pass", "partial", "fail_implemented"}
+    assert statuses <= {"pass", "partial", "fail_implemented"}
+    assert "pass" in statuses
+    assert "fail_implemented" in statuses
 
 
 def test_golden_blocked_modules_counted_not_failed() -> None:

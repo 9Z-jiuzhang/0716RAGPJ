@@ -13,13 +13,15 @@ function safeUrl(raw) {
   return escapeHtml(url);
 }
 
-/** 行内：code / bold / italic / link */
-function renderInline(text) {
+/** 行内：code / bold / italic / link / [N] 引用 */
+function renderInline(text, { inlineCitations = false } = {}) {
   const src = String(text || "");
   if (!src) return "";
 
   const parts = [];
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  const re = inlineCitations
+    ? /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|\[\d{1,2}\])/g
+    : /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
   let last = 0;
   let m;
   while ((m = re.exec(src)) !== null) {
@@ -33,6 +35,11 @@ function renderInline(text) {
       parts.push(`<strong>${escapeHtml(token.slice(2, -2))}</strong>`);
     } else if (token.startsWith("*") && token.endsWith("*")) {
       parts.push(`<em>${escapeHtml(token.slice(1, -1))}</em>`);
+    } else if (inlineCitations && /^\[\d{1,2}\]$/.test(token)) {
+      const idx = token.slice(1, -1);
+      parts.push(
+        `<button type="button" class="inline-citation" data-cite-index="${escapeHtml(idx)}" aria-label="引用 ${escapeHtml(idx)}">${escapeHtml(token)}</button>`
+      );
     } else if (token.startsWith("[")) {
       const lm = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (lm) {
@@ -45,6 +52,31 @@ function renderInline(text) {
     } else {
       parts.push(escapeHtml(token));
     }
+    last = m.index + token.length;
+  }
+  if (last < src.length) {
+    parts.push(escapeHtml(src.slice(last)));
+  }
+  return parts.join("");
+}
+
+/** 纯文本答案中的 [N] → 可点击按钮（Markdown 关闭时） */
+export function renderPlainWithInlineCitations(text) {
+  const src = String(text || "");
+  if (!src) return "";
+  const re = /(\[\d{1,2}\])/g;
+  const parts = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    if (m.index > last) {
+      parts.push(escapeHtml(src.slice(last, m.index)));
+    }
+    const token = m[1];
+    const idx = token.slice(1, -1);
+    parts.push(
+      `<button type="button" class="inline-citation" data-cite-index="${escapeHtml(idx)}" aria-label="引用 ${escapeHtml(idx)}">${escapeHtml(token)}</button>`
+    );
     last = m.index + token.length;
   }
   if (last < src.length) {
@@ -66,9 +98,9 @@ function parseTableRow(line) {
 
 /**
  * @param {string} text
- * @param {{ streaming?: boolean }} opts
+ * @param {{ streaming?: boolean, inlineCitations?: boolean }} opts
  */
-export function renderMarkdownSafe(text, { streaming = false } = {}) {
+export function renderMarkdownSafe(text, { streaming = false, inlineCitations = false } = {}) {
   const raw = String(text || "");
   if (!raw) return "";
   if (streaming) return escapeHtml(raw);
@@ -100,9 +132,9 @@ export function renderMarkdownSafe(text, { streaming = false } = {}) {
         if (lines[i].trim()) bodyRows.push(parseTableRow(lines[i]));
         i += 1;
       }
-      const head = headerCells.map((h) => `<th>${renderInline(h)}</th>`).join("");
+      const head = headerCells.map((h) => `<th>${renderInline(h, { inlineCitations })}</th>`).join("");
       const body = bodyRows
-        .map((row) => `<tr>${row.map((c) => `<td>${renderInline(c)}</td>`).join("")}</tr>`)
+        .map((row) => `<tr>${row.map((c) => `<td>${renderInline(c, { inlineCitations })}</td>`).join("")}</tr>`)
         .join("");
       out.push(`<div class="md-table-wrap"><table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`);
       continue;
@@ -111,7 +143,7 @@ export function renderMarkdownSafe(text, { streaming = false } = {}) {
     const hm = line.match(/^(#{1,4})\s+(.*)$/);
     if (hm) {
       const level = hm[1].length;
-      out.push(`<h${level}>${renderInline(hm[2])}</h${level}>`);
+      out.push(`<h${level}>${renderInline(hm[2], { inlineCitations })}</h${level}>`);
       i += 1;
       continue;
     }
@@ -119,7 +151,7 @@ export function renderMarkdownSafe(text, { streaming = false } = {}) {
     if (/^[\s]*[-*]\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^[\s]*[-*]\s+/.test(lines[i])) {
-        items.push(`<li>${renderInline(lines[i].replace(/^[\s]*[-*]\s+/, ""))}</li>`);
+        items.push(`<li>${renderInline(lines[i].replace(/^[\s]*[-*]\s+/, ""), { inlineCitations })}</li>`);
         i += 1;
       }
       out.push(`<ul>${items.join("")}</ul>`);
@@ -129,7 +161,7 @@ export function renderMarkdownSafe(text, { streaming = false } = {}) {
     if (/^[\s]*\d+\.\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^[\s]*\d+\.\s+/.test(lines[i])) {
-        items.push(`<li>${renderInline(lines[i].replace(/^[\s]*\d+\.\s+/, ""))}</li>`);
+        items.push(`<li>${renderInline(lines[i].replace(/^[\s]*\d+\.\s+/, ""), { inlineCitations })}</li>`);
         i += 1;
       }
       out.push(`<ol>${items.join("")}</ol>`);
@@ -141,7 +173,7 @@ export function renderMarkdownSafe(text, { streaming = false } = {}) {
       continue;
     }
 
-    out.push(`<p>${renderInline(line)}</p>`);
+    out.push(`<p>${renderInline(line, { inlineCitations })}</p>`);
     i += 1;
   }
 

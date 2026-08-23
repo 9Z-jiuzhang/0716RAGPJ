@@ -897,7 +897,7 @@ class QAPipeline:
                         answer_text += piece
                         yield self._event("chunk", content=piece)
                 else:
-                    citations = [self._hit_to_citation(h) for h in evidence_hits]
+                    citations = self._citations_from_hits(evidence_hits)
                     citations = await self._enrich_citation_images(db, citations)
                     yield self._event("citations", citations=citations)
 
@@ -938,6 +938,17 @@ class QAPipeline:
             if not answer_text.strip():
                 answer_text = _NO_EVIDENCE_REPLY
                 yield self._event("chunk", content=answer_text)
+
+            if citations and answer_text.strip() and answer_text != _NO_EVIDENCE_REPLY:
+                from app.services.cite_validation import (
+                    annotate_citations_if_enforce,
+                    record_cite_validation_metrics,
+                    validate_answer_citations,
+                )
+
+                validations = validate_answer_citations(answer_text, citations)
+                record_cite_validation_metrics(validations)
+                citations = annotate_citations_if_enforce(citations, validations)
 
             # [7] 持久化
             with tracker.track("persist"):
@@ -1440,6 +1451,20 @@ class QAPipeline:
         messages.append({"role": "user", "content": user_block})
         return messages
 
+    @staticmethod
+    def _rag_system_prompt() -> str:
+        prompt = _RAG_SYSTEM_PROMPT
+        if settings.INLINE_CITATION_ENABLED:
+            from app.services.cite_validation import inline_citation_prompt_rule
+
+            prompt = f"{prompt}\n{inline_citation_prompt_rule()}"
+        return prompt
+
+    def _citations_from_hits(self, hits: list[RetrievalHit]) -> list[dict[str, Any]]:
+        from app.services.cite_validation import citations_with_index
+
+        return citations_with_index(hits, self._hit_to_citation)
+
     def _build_generation_messages(
         self,
         *,
@@ -1458,7 +1483,7 @@ class QAPipeline:
             "不得将对话历史中的助手回答称为幻觉。"
         )
         # history 已含摘要 system；再追加 RAG system 与当前问题
-        messages: list[dict[str, str]] = [{"role": "system", "content": _RAG_SYSTEM_PROMPT}]
+        messages: list[dict[str, str]] = [{"role": "system", "content": self._rag_system_prompt()}]
         for msg in history_messages:
             # 避免重复 system 过多：保留摘要 system，跳过其他 system
             if msg["role"] == "system":

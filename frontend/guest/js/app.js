@@ -31,7 +31,7 @@ import {
   getGuestId,
 } from "/assets/js/auth.js?v=gap-opt-0721i";
 import { escapeHtml, formatDateTime, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=gap-opt-0721i";
-import { renderMarkdownSafe } from "/assets/js/markdown-render.js?v=2.1.13-md";
+import { renderMarkdownSafe, renderPlainWithInlineCitations } from "/assets/js/markdown-render.js?v=2.1.13-md";
 import { initMotion, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721i";
 import { mountEnvParticleField } from "/assets/js/env-particle-field.js?v=landing-particle-0727i";
@@ -148,11 +148,17 @@ function renderAssistantBubbleHtml(
   const { reasoning, answer, reasoningOpen } = splitModelReasoning(rawText);
   const answerTrim = (answer || "").trim();
   const placeholder = reasoningOpen && !forceCollapseReasoning ? "（正在生成最终回答…）" : "";
+  const useInline = qaInlineCitationEnabled && !streaming && answerTrim;
   const useMarkdown = qaMarkdownRenderEnabled && !streaming && answerTrim;
-  const answerClass = useMarkdown ? "msg-answer msg-answer--md" : "msg-answer";
-  const answerInner = useMarkdown
-    ? renderMarkdownSafe(answerTrim)
-    : escapeHtml(answerTrim || placeholder);
+  const answerClass = useMarkdown || useInline ? "msg-answer msg-answer--md" : "msg-answer";
+  let answerInner;
+  if (useMarkdown) {
+    answerInner = renderMarkdownSafe(answerTrim, { inlineCitations: useInline });
+  } else if (useInline) {
+    answerInner = renderPlainWithInlineCitations(answerTrim);
+  } else {
+    answerInner = escapeHtml(answerTrim || placeholder);
+  }
   const answerHtml = `<div class="${answerClass}">${answerInner}</div>`;
   let reasoningHtml = "";
   if (reasoning) {
@@ -792,6 +798,9 @@ async function loadQaComposerOptions() {
     }
     if (typeof data?.markdown_render_enabled === "boolean") {
       qaMarkdownRenderEnabled = data.markdown_render_enabled;
+    }
+    if (typeof data?.inline_citation_enabled === "boolean") {
+      qaInlineCitationEnabled = data.inline_citation_enabled;
     }
     const opts = [`<option value="">全部可访问知识库</option>`];
     for (const kb of items) {
@@ -1699,11 +1708,14 @@ function sortCitationsByRelevance(citations) {
 }
 
 function renderCitationItemHtml(c) {
+  const citeIdx = Number(c.cite_index) || 0;
+  const citeLabel = citeIdx > 0 ? `<span class="citation-index">[${citeIdx}]</span> ` : "";
   const docName = escapeHtml(c.doc_name || "未知文档");
   const chunkIndex = escapeHtml(c.chunk_index);
   const scoreLabel = formatRetrievalRelevance(c.score);
-  return `<details class="citation-item">
-    <summary class="citation-meta">${docName} · 分段 #${chunkIndex} · 检索相关度 ${scoreLabel}</summary>
+  const idAttr = citeIdx > 0 ? ` id="citation-${citeIdx}" data-citation-index="${citeIdx}"` : "";
+  return `<details class="citation-item"${idAttr}>
+    <summary class="citation-meta">${citeLabel}${docName} · 分段 #${chunkIndex} · 检索相关度 ${scoreLabel}</summary>
     <div class="citation-content">${escapeHtml(c.content || "")}</div>
   </details>`;
 }
@@ -1712,6 +1724,34 @@ function renderCitationItemHtml(c) {
 let qaMaxCitationCharts = 8;
 /** 答案 Markdown 渲染（GET /qa/accessible-kbs.markdown_render_enabled） */
 let qaMarkdownRenderEnabled = true;
+/** 内联 [N] 引用（GET /qa/accessible-kbs.inline_citation_enabled） */
+let qaInlineCitationEnabled = true;
+
+function attachInlineCitationHandlers(root) {
+  if (!root || !qaInlineCitationEnabled) return;
+  root.querySelectorAll(".inline-citation").forEach((btn) => {
+    if (btn.dataset.inlineBound === "1") return;
+    btn.dataset.inlineBound = "1";
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      const idx = String(btn.dataset.citeIndex || "").trim();
+      if (!idx) return;
+      const row = root.closest(".msg-row") || root;
+      const target = row.querySelector(`#citation-${idx}, .citation-item[data-citation-index="${idx}"]`);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (target.tagName === "DETAILS") target.open = true;
+      target.classList.add("citation-item--highlight");
+      window.setTimeout(() => target.classList.remove("citation-item--highlight"), 2200);
+    });
+  });
+}
+
+function finalizeAssistantBubbleContent(bubble) {
+  if (!bubble) return;
+  attachInlineCitationHandlers(bubble);
+  void hydrateCitationChartImages(bubble);
+}
 
 function collectCitationCharts(citations) {
   const seen = new Set();
@@ -1754,7 +1794,12 @@ function renderCitationChartsHtml(citations) {
 }
 
 function buildCitationsHtml(citations) {
-  const items = sortCitationsByRelevance(citations);
+  let items = [...(citations || [])];
+  if (qaInlineCitationEnabled) {
+    items.sort((a, b) => Number(a.cite_index || 0) - Number(b.cite_index || 0));
+  } else {
+    items = sortCitationsByRelevance(items);
+  }
   if (!items.length) return "";
   const primary = items.slice(0, CITATION_PRIMARY_DISPLAY);
   const rest = items.slice(CITATION_PRIMARY_DISPLAY);
@@ -2188,6 +2233,7 @@ async function sendQuestion(presetQuestion, options = {}) {
                   forceCollapseReasoning: true,
                 })
               );
+              finalizeAssistantBubbleContent(bubble);
               attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
             }
             return;
@@ -2244,6 +2290,7 @@ async function sendQuestion(presetQuestion, options = {}) {
                   forceCollapseReasoning: true,
                 })
               );
+              finalizeAssistantBubbleContent(bubble);
               attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
             }
           }
@@ -2259,7 +2306,7 @@ async function sendQuestion(presetQuestion, options = {}) {
                 forceCollapseReasoning: true,
               })
             );
-            void hydrateCitationChartImages(bubble);
+            finalizeAssistantBubbleContent(bubble);
             const row = bubble.closest(".msg-row");
             if (row && data.message_id) {
               row.dataset.messageId = data.message_id;

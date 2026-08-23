@@ -80,15 +80,14 @@
     {
       "id": "pdf-cite-text-01",
       "category": "pdf_citation",
-      "expected_status": "partial",
-      "pass_when": "E 模块内联 [1] 合并后升为 pass",
+      "expected_status": "pass",
+      "pass_when": "E 模块内联 [1] 与侧栏引用联动",
       "question": "2019年全球半导体销售总额是多少？",
       "kb_id": "59396f60-82d2-4d44-8880-01b6042d1e87",
       "expect": {
         "expect_source": null,
         "min_confidence": 0.3,
-        "partial_checks": ["citation_max_pages"],
-        "skip_checks": ["inline_bracket_citation"],
+        "partial_checks": ["citation_max_pages", "inline_bracket_citation"],
         "citation_max_pages": 5,
         "must_contain": ["4121"]
       }

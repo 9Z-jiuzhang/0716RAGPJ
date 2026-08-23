@@ -725,6 +725,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.13-p2 | 2026-08-23 | E 模块：内联 `[N]`、`cite_index`、overlap 观测、`INLINE_CITATION_ENABLED` |
 | 2.1.13-p1 | 2026-08-23 | D 模块：`GET /qa/accessible-kbs` 下发 `markdown_render_enabled`；访客/管理端会话 Markdown（流式阶段纯文本） |
 | 2.1.12-p1 | 2026-08-23 | 图表**按需栅格化**（非整本）；`CHART_RASTERIZE_ZOOM`；GET chart 只补单页；`asyncio.to_thread` 栅格化 |
 | 2.1.12 | 2026-08-23 | 图表引用 P0、`max_charts`、角色缓存 shadow；见 RUNBOOK.md |

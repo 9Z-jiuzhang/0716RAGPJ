@@ -37,7 +37,7 @@
 | 模块 | 状态 |
 |------|------|
 | D Markdown 流式渲染 | ✅ 访客 + 管理端会话；`MARKDOWN_RENDER_ENABLED` |
-| E 内联 `[N]`、cite 指标 | ❌ |
+| E 内联 `[N]`、cite overlap 观测 | ✅ 展示+跳转；`CITE_VALIDATION_ENFORCE=false` |
 | F Asset 代理 API + 鉴权 | ❌ |
 | G CJK 双后端 | ❌ |
 | H 推荐问 SSE 尾事件 | ❌ |

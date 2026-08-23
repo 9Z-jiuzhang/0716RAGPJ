@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import pytest
@@ -83,8 +84,8 @@ def _assert_partial_query(stream: Any, expect: dict[str, Any]) -> None:
             elif pages is not None:
                 assert int(pages) <= max_pages or len(stream.citations) <= max_pages
 
-    if "inline_bracket_citation" in skips:
-        pytest.skip("partial: 内联 [1] 待 E 模块")
+    if "inline_bracket_citation" in checks:
+        assert re.search(r"\[\d{1,2}\]", stream.answer_text or ""), "答案应含内联 [N] 引用"
 
     _assert_pass_query(stream, expect)
 
