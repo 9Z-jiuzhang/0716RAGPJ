@@ -58,6 +58,17 @@ async def test_ask_sse_event_sequence(_mock_run: AsyncMock, client_mocked: Async
 
 
 @pytest.mark.asyncio
+async def test_accessible_kbs_includes_ux_flags(client_mocked: AsyncClient) -> None:
+    with patch("app.api.v1.qa.resolve_kb_targets", new_callable=AsyncMock, return_value=[]):
+        resp = await client_mocked.get("/api/v1/qa/accessible-kbs")
+    assert resp.status_code == 200
+    data = resp.json().get("data") or {}
+    assert isinstance(data.get("markdown_render_enabled"), bool)
+    assert isinstance(data.get("inline_citation_enabled"), bool)
+    assert isinstance(data.get("max_charts"), int)
+
+
+@pytest.mark.asyncio
 async def test_sessions_requires_auth(client_mocked: AsyncClient) -> None:
     resp = await client_mocked.get("/api/v1/qa/sessions")
     assert resp.status_code == 401

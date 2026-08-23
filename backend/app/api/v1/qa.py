@@ -150,6 +150,8 @@ async def list_accessible_kbs(
             "items": items,
             "total": len(items),
             "max_charts": int(settings.QA_CITATION_CHART_DISPLAY_LIMIT),
+            "markdown_render_enabled": bool(settings.MARKDOWN_RENDER_ENABLED),
+            "inline_citation_enabled": bool(settings.INLINE_CITATION_ENABLED),
         },
         request_id=request_id,
     )

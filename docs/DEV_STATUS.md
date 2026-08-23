@@ -36,7 +36,7 @@
 
 | 模块 | 状态 |
 |------|------|
-| D Markdown 流式渲染 | ❌ |
+| D Markdown 流式渲染 | ✅ 访客 + 管理端会话；`MARKDOWN_RENDER_ENABLED` |
 | E 内联 `[N]`、cite 指标 | ❌ |
 | F Asset 代理 API + 鉴权 | ❌ |
 | G CJK 双后端 | ❌ |

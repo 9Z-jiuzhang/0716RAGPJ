@@ -20,6 +20,8 @@ pytestmark = pytest.mark.golden
 
 GOLDEN_E2E = os.environ.get("GOLDEN_E2E", "").strip() in ("1", "true", "yes")
 BASE_URL = (os.environ.get("GOLDEN_E2E_BASE_URL") or "").strip().rstrip("/")
+GOLDEN_E2E_ADMIN_USER = (os.environ.get("GOLDEN_E2E_ADMIN_USER") or "admin").strip()
+GOLDEN_E2E_ADMIN_PASSWORD = (os.environ.get("GOLDEN_E2E_ADMIN_PASSWORD") or "Admin123!").strip()
 
 
 def _skip_if_not_e2e() -> None:
@@ -27,6 +29,16 @@ def _skip_if_not_e2e() -> None:
         pytest.skip("GOLDEN_E2E 未开启")
     if not BASE_URL:
         pytest.skip("GOLDEN_E2E_BASE_URL 未配置")
+
+
+async def _golden_admin_headers(client: AsyncClient) -> dict[str, str]:
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"username": GOLDEN_E2E_ADMIN_USER, "password": GOLDEN_E2E_ADMIN_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    token = login.json()["data"]["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _assert_pass_query(stream: Any, expect: dict[str, Any]) -> None:
@@ -99,7 +111,6 @@ async def test_golden_e2e_runnable_queries() -> None:
     if not runnable:
         pytest.skip("无可运行 golden 条目")
 
-    # 对齐前 kb_id 为空会 skip
     if all(not (q.get("kb_id") or "").strip() for q in runnable):
         pytest.skip("golden kb_id 未定稿")
 
@@ -107,6 +118,7 @@ async def test_golden_e2e_runnable_queries() -> None:
     blocked = len(iter_blocked_queries())
 
     async with AsyncClient(base_url=BASE_URL, timeout=120.0) as client:
+        headers = await _golden_admin_headers(client)
         for q in runnable:
             qid = q["id"]
             body: dict[str, Any] = {
@@ -117,8 +129,8 @@ async def test_golden_e2e_runnable_queries() -> None:
                 # 多轮：先首轮再跟进（简化：同一 client 需 session_id 由 done 带回）
                 pass
 
-            headers = {
-                "X-Guest-Id": "golden-e2e-guest",
+            req_headers = {
+                **headers,
                 "X-Request-Id": f"golden-{qid}",
             }
             try:
@@ -126,7 +138,7 @@ async def test_golden_e2e_runnable_queries() -> None:
                     "POST",
                     "/api/v1/qa/ask",
                     json=body,
-                    headers=headers,
+                    headers=req_headers,
                 ) as resp:
                     assert resp.status_code == 200
                     stream = await consume_sse_stream(resp.aiter_lines())

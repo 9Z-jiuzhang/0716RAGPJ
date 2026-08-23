@@ -9,6 +9,7 @@ import { route, startRouter, navigate, currentPath } from "/assets/js/router.js?
 import { api, clearDemoFlags } from "/assets/js/api.js?v=upload-progress-0806a";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js?v=gap-opt-0721s";
 import { escapeHtml, formatDateTime, formatDateTimeHtml, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=bug-ui-palette-0721ea";
+import { renderMarkdownSafe } from "/assets/js/markdown-render.js?v=2.1.13-md";
 import { initMotion, runCountUps, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721s";
 import { getBrandMarkSvg } from "/assets/js/brand-mark.js?v=brand-mark-0727a";
@@ -24,6 +25,17 @@ function fmtCount(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return String(n);
   return formatStatNumber(v);
+}
+
+let adminMarkdownRenderEnabled = true;
+
+function formatStoredAnswerHtml(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return escapeHtml("-");
+  if (!adminMarkdownRenderEnabled) {
+    return `<div style="white-space:pre-wrap">${escapeHtml(raw)}</div>`;
+  }
+  return `<div class="msg-answer msg-answer--md">${renderMarkdownSafe(raw)}</div>`;
 }
 
 /** 将 0~1 置信度安全格式化为百分比文案；非法则 -- */
@@ -8114,6 +8126,14 @@ async function openKbFaqDetail(item, options = {}) {
 /** 加载并弹窗展示单个会话中每一轮的 Query 预处理结果。 */
 async function openQaSessionDetail(sessionId) {
   try {
+    try {
+      const ux = await api.get("/qa/accessible-kbs");
+      if (typeof ux?.markdown_render_enabled === "boolean") {
+        adminMarkdownRenderEnabled = ux.markdown_render_enabled;
+      }
+    } catch {
+      /* 默认开启 Markdown */
+    }
     const data = await api.get(`/qa/admin/sessions/${sessionId}`);
     const session = data.session || {};
     const messages = data.messages || [];
@@ -8160,7 +8180,7 @@ async function openQaSessionDetail(sessionId) {
                   <span class="text-muted">检索结果</span><div>命中 ${escapeHtml(fmtCount(meta.hit_count ?? 0))} 段；扩展 Query ${escapeHtml(fmtCount(meta.expanded_query_count ?? expansions.length))} 条；HyDE ${meta.hyde_used ? "已参与向量检索" : "未参与"}</div>
                   <span class="text-muted">Rerank</span><div>${rerank.applied ? `${escapeHtml(rerank.provider || "-")} / ${escapeHtml(rerank.model || "-")}` : `未应用${rerank.error ? `（${escapeHtml(rerank.error)}）` : ""}`}</div>
                   <span class="text-muted">用户反馈</span><div>${escapeHtml(fbLabel)}${fbComment ? ` · ${escapeHtml(fbComment)}` : ""}</div>
-                  <span class="text-muted">最终回答</span><div style="white-space:pre-wrap">${escapeHtml(turn.answer?.content || "-")}</div>
+                  <span class="text-muted">最终回答</span><div>${formatStoredAnswerHtml(turn.answer?.content || "-")}</div>
                 </div>
               </div>`;
           })

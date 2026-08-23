@@ -441,7 +441,7 @@ Authorization: Bearer <access_token>
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/qa/accessible-kbs` | **可选认证** | 返回当前身份可检索且已建索引的知识库 `{items:[{id,name}], total, max_charts}`；`max_charts` 为前端「相关图表」展示上限；供问答页下拉使用 |
+| GET | `/qa/accessible-kbs` | **可选认证** | 返回当前身份可检索且已建索引的知识库 `{items:[{id,name}], total, max_charts, markdown_render_enabled, inline_citation_enabled}`；`max_charts` 为前端「相关图表」展示上限；供问答页下拉使用 |
 
 **SSE 事件**：
 
@@ -725,6 +725,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.13-p1 | 2026-08-23 | D 模块：`GET /qa/accessible-kbs` 下发 `markdown_render_enabled`；访客/管理端会话 Markdown（流式阶段纯文本） |
 | 2.1.12-p1 | 2026-08-23 | 图表**按需栅格化**（非整本）；`CHART_RASTERIZE_ZOOM`；GET chart 只补单页；`asyncio.to_thread` 栅格化 |
 | 2.1.12 | 2026-08-23 | 图表引用 P0、`max_charts`、角色缓存 shadow；见 RUNBOOK.md |
 | 2.1.11 | 2026-08-20 | FAQ 语义命中与答案校验告警；citations.images 仅挂命中相关页（非整本 PDF）；见 §12.1、KB_FAQ.md |

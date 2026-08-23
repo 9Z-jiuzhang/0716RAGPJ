@@ -31,6 +31,7 @@ import {
   getGuestId,
 } from "/assets/js/auth.js?v=gap-opt-0721i";
 import { escapeHtml, formatDateTime, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=gap-opt-0721i";
+import { renderMarkdownSafe } from "/assets/js/markdown-render.js?v=2.1.13-md";
 import { initMotion, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721i";
 import { mountEnvParticleField } from "/assets/js/env-particle-field.js?v=landing-particle-0727i";
@@ -139,9 +140,20 @@ function splitModelReasoning(raw) {
 }
 
 /** 渲染助手气泡：模型「推理过程」；生成中展开，结束后可折叠。 */
-function renderAssistantBubbleHtml(rawText, extrasHtml = "", { forceCollapseReasoning = false } = {}) {
+function renderAssistantBubbleHtml(
+  rawText,
+  extrasHtml = "",
+  { forceCollapseReasoning = false, streaming = false } = {}
+) {
   const { reasoning, answer, reasoningOpen } = splitModelReasoning(rawText);
-  const answerHtml = escapeHtml((answer || "").trim() || (reasoningOpen && !forceCollapseReasoning ? "（正在生成最终回答…）" : ""));
+  const answerTrim = (answer || "").trim();
+  const placeholder = reasoningOpen && !forceCollapseReasoning ? "（正在生成最终回答…）" : "";
+  const useMarkdown = qaMarkdownRenderEnabled && !streaming && answerTrim;
+  const answerClass = useMarkdown ? "msg-answer msg-answer--md" : "msg-answer";
+  const answerInner = useMarkdown
+    ? renderMarkdownSafe(answerTrim)
+    : escapeHtml(answerTrim || placeholder);
+  const answerHtml = `<div class="${answerClass}">${answerInner}</div>`;
   let reasoningHtml = "";
   if (reasoning) {
     const expanded = reasoningOpen && !forceCollapseReasoning;
@@ -151,7 +163,7 @@ function renderAssistantBubbleHtml(rawText, extrasHtml = "", { forceCollapseReas
       <div class="model-reasoning-body">${escapeHtml(reasoning)}</div>
     </details>`;
   }
-  return `${reasoningHtml}<div class="msg-answer">${answerHtml}</div>${extrasHtml || ""}`;
+  return `${reasoningHtml}${answerHtml}${extrasHtml || ""}`;
 }
 
 function formatRetrievalRelevance(value) {
@@ -777,6 +789,9 @@ async function loadQaComposerOptions() {
     const maxCharts = Number(data?.max_charts);
     if (Number.isFinite(maxCharts) && maxCharts > 0) {
       qaMaxCitationCharts = maxCharts;
+    }
+    if (typeof data?.markdown_render_enabled === "boolean") {
+      qaMarkdownRenderEnabled = data.markdown_render_enabled;
     }
     const opts = [`<option value="">全部可访问知识库</option>`];
     for (const kb of items) {
@@ -1695,6 +1710,8 @@ function renderCitationItemHtml(c) {
 
 /** 后端下发的引用图表展示上限（GET /qa/accessible-kbs.max_charts） */
 let qaMaxCitationCharts = 8;
+/** 答案 Markdown 渲染（GET /qa/accessible-kbs.markdown_render_enabled） */
+let qaMarkdownRenderEnabled = true;
 
 function collectCitationCharts(citations) {
   const seen = new Set();
@@ -2204,7 +2221,7 @@ async function sendQuestion(presetQuestion, options = {}) {
             clearThinkingArmed();
             bubble.classList.add("streaming-cursor");
             rawAssistantText += data.content || data || "";
-            setAssistantStreamHtml(bubble, renderAssistantBubbleHtml(rawAssistantText));
+            setAssistantStreamHtml(bubble, renderAssistantBubbleHtml(rawAssistantText, "", { streaming: true }));
             scrollMessagesToBottom();
           }
           // 引用来源：按相关度排序，默认展示 Top-3，其余折叠

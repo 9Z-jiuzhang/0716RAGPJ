@@ -3492,6 +3492,37 @@ html[data-theme="light"] .msg-thinking-dots i {
   color: inherit;
 }
 
+.msg-answer--md {
+  white-space: normal;
+}
+
+.msg-answer--md p {
+  margin: 0.35em 0;
+}
+
+.msg-answer--md .md-table-wrap {
+  margin: 10px 0;
+  overflow-x: auto;
+}
+
+.msg-answer--md .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.msg-answer--md .md-table th,
+.msg-answer--md .md-table td {
+  border: 1px solid var(--color-border, #e2e8f0);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.msg-answer--md .md-table th {
+  background: var(--color-bg-tint, #f1f5f9);
+  font-weight: 600;
+}
+
 .model-reasoning {
   margin: 0 0 12px;
   padding: 14px 16px;
