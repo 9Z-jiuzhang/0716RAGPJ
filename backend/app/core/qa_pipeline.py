@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -1568,7 +1569,8 @@ class QAPipeline:
             images: list[dict[str, Any]] = []
             if doc is not None and (doc.file_type or "").lower().lstrip(".") == "pdf" and doc.file_path:
                 try:
-                    images = ensure_pdf_charts(
+                    images = await asyncio.to_thread(
+                        ensure_pdf_charts,
                         kb_id=doc.kb_id,
                         doc_id=doc.id,
                         file_path=doc.file_path,
