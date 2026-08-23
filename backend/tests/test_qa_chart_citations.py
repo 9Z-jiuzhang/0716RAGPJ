@@ -15,6 +15,7 @@ from app.services.chart_citation import (
 from app.services.document_charts import (
     chart_api_url,
     citation_images_for_pages,
+    ensure_pdf_charts,
     pages_for_citation_metadata,
     parse_chart_filename,
 )
@@ -131,3 +132,57 @@ def test_pages_for_citation_metadata_layout_image_uses_block_page() -> None:
 def test_normalize_chunk_metadata_stringifies_lists() -> None:
     meta = normalize_chunk_metadata_for_storage({"pages": [2, 3]})
     assert meta["pages"] == "2,3"
+
+
+def test_ensure_pdf_charts_skips_full_rasterize_when_page_exists(monkeypatch) -> None:
+    persist_calls: list[dict] = []
+    rasterize_calls: list[list[int]] = []
+
+    monkeypatch.setattr(
+        "app.services.document_charts.persist_pdf_chart_pages",
+        lambda **kw: persist_calls.append(kw) or 99,
+    )
+    monkeypatch.setattr(
+        "app.services.document_charts._rasterize_specific_pages",
+        lambda kb_id, doc_id, pdf_bytes, pages, **kw: rasterize_calls.append(list(pages)),
+    )
+    monkeypatch.setattr(
+        "app.services.document_charts._list_chart_pages_cached",
+        lambda kb_id, doc_id: [1, 2, 3, 4, 5],
+    )
+
+    result = ensure_pdf_charts(kb_id="kb1", doc_id="d1", pages=[3])
+    assert result == [{"page": 3, "url": chart_api_url("d1", 3)}]
+    assert persist_calls == []
+    assert rasterize_calls == []
+
+
+def test_ensure_pdf_charts_rasterizes_only_missing_pages(monkeypatch) -> None:
+    persist_calls: list[dict] = []
+    rasterize_calls: list[list[int]] = []
+
+    monkeypatch.setattr(
+        "app.services.document_charts.persist_pdf_chart_pages",
+        lambda **kw: persist_calls.append(kw) or 99,
+    )
+    monkeypatch.setattr(
+        "app.services.document_charts._rasterize_specific_pages",
+        lambda kb_id, doc_id, pdf_bytes, pages, **kw: rasterize_calls.append(list(pages)) or len(pages),
+    )
+    monkeypatch.setattr(
+        "app.services.document_charts._list_chart_pages_cached",
+        lambda kb_id, doc_id: [1, 2],
+    )
+    monkeypatch.setattr(
+        "app.services.document_charts._download_pdf_bytes",
+        lambda file_path: b"%PDF-fake",
+    )
+
+    ensure_pdf_charts(
+        kb_id="kb1",
+        doc_id="d1",
+        file_path="kb1/d1/file.pdf",
+        pages=[2, 5, 7],
+    )
+    assert persist_calls == []
+    assert rasterize_calls == [[5, 7]]

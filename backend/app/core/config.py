@@ -292,6 +292,7 @@ class Settings(BaseSettings):
     MAX_CITATION_CHART_PAGES: int = 5
     QA_CITATION_CHART_DISPLAY_LIMIT: int = 8
     CHART_CITATION_USE_LEGACY_LOGIC: bool = False
+    CHART_RASTERIZE_ZOOM: float = 1.5
     # ---------- 2.1.13 UX 能力开关（默认开；出问题 env 一行关，无需发新版） ----------
     MARKDOWN_RENDER_ENABLED: bool = True
     INLINE_CITATION_ENABLED: bool = True

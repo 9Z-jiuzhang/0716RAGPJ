@@ -228,7 +228,12 @@ async def get_qa_document_chart(
     if not storage.object_exists(object_name):
         if (doc.file_type or "").lower().lstrip(".") == "pdf" and doc.file_path:
             try:
-                ensure_pdf_charts(kb_id=doc.kb_id, doc_id=doc.id, file_path=doc.file_path)
+                ensure_pdf_charts(
+                    kb_id=doc.kb_id,
+                    doc_id=doc.id,
+                    file_path=doc.file_path,
+                    pages=[page],
+                )
             except Exception as exc:
                 logger.warning("lazy chart generate failed doc=%s: %s", doc_id, exc)
         if not storage.object_exists(object_name):
