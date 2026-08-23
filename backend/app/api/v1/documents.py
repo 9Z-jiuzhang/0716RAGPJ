@@ -7,7 +7,7 @@ import uuid
 from urllib.parse import quote
 
 from app.core.database import get_db
-from app.core.dependencies import require_permission
+from app.core.dependencies import require_kb_access
 from app.models import User
 from app.schemas.document import DocumentSensitivityUpdate, UpdateChunkRequest, UpdateSegmentRulesRequest
 from app.schemas.response import ok
@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/knowledge-bases/{kb_id}/documents", tags=["文档管理"])
 
 
-def _uuid(value: str, name: str = "id") -> uuid.UUID:
+def _uuid(value: str | uuid.UUID, name: str = "id") -> uuid.UUID:
+    if isinstance(value, uuid.UUID):
+        return value
     try:
         return uuid.UUID(value)
     except ValueError as exc:
@@ -46,23 +48,23 @@ def _raise_doc_error(exc: DocumentError) -> None:
 
 @router.get("")
 async def list_documents(
-    kb_id: str,
+    kb_id: uuid.UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission("doc:read")),
+    user: User = Depends(require_kb_access("doc:read")),
 ):
-    """文档列表（分页+搜索）。【前端：管理端文档表格】"""
+    """文档列表（分页+搜索）；按知识库授权 + 用户密级过滤。"""
     data = await document_service.list_documents_page(
-        db, _uuid(kb_id, "kb_id"), page=page, page_size=page_size, keyword=keyword
+        db, kb_id, page=page, page_size=page_size, keyword=keyword, user=user
     )
     return ok(data.model_dump())
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_document(
-    kb_id: str,
+    kb_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(
         ...,
@@ -71,7 +73,7 @@ async def upload_document(
         ),
     ),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission("kb:upload")),
+    user: User = Depends(require_kb_access("kb:upload")),
 ):
     """上传 PDF、DOC、DOCX、PPTX、TXT、Markdown、HTML 或 Excel/CSV，并触发解析、清洗、分段和向量化流水线。"""
     content = await file.read()
@@ -79,7 +81,7 @@ async def upload_document(
     try:
         doc = await document_service.upload_document(
             db,
-            kb_id=_uuid(kb_id, "kb_id"),
+            kb_id=kb_id,
             filename=filename,
             content=content,
             user=user,
@@ -92,14 +94,15 @@ async def upload_document(
 
 @router.get("/{doc_id}")
 async def get_document(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission("doc:read")),
+    user: User = Depends(require_kb_access("doc:read")),
 ):
     """文档详情与流水线状态。【前端：状态徽章轮询】"""
     try:
-        doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
+        doc = await document_service.get_document_detail(db, kb_id, _uuid(doc_id, "doc_id"))
+        await document_service.assert_document_readable(db, user, doc)
     except DocumentError as exc:
         _raise_doc_error(exc)
     data = await document_service.to_document_response_with_faq(db, doc)
@@ -108,14 +111,16 @@ async def get_document(
 
 @router.get("/{doc_id}/content")
 async def get_document_content(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission("doc:read")),
+    user: User = Depends(require_kb_access("doc:read")),
 ):
     """文档正文预览（解析原文 / 清洗正文）。【前端：文档管理-预览】"""
     try:
-        data = await document_service.get_document_content_preview(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
+        doc = await document_service.get_document_detail(db, kb_id, _uuid(doc_id, "doc_id"))
+        await document_service.assert_document_readable(db, user, doc)
+        data = await document_service.get_document_content_preview(db, kb_id, doc.id)
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(data.model_dump())
@@ -126,7 +131,7 @@ async def download_document_markdown(
     kb_id: str,
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission("doc:read")),
+    _: User = Depends(require_kb_access("doc:read")),
 ):
     """导出 Markdown；PDF 含图表时返回 zip（md + charts/*.png 相对链接）。【前端：下载 MD】"""
     from app.services.markitdown_export import build_markdown_zip
@@ -161,14 +166,14 @@ async def download_document_markdown(
 
 @router.delete("/{doc_id}")
 async def delete_document(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission("doc:write")),
+    user: User = Depends(require_kb_access("doc:write")),
 ):
     """删除文档及关联向量/MinIO 对象。【前端：删除确认对话框】"""
     try:
-        await document_service.delete_document(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
+        await document_service.delete_document(db, kb_id, _uuid(doc_id, "doc_id"), user)
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(None, message="deleted")
@@ -176,16 +181,16 @@ async def delete_document(
 
 @router.put("/{doc_id}/segment-rules")
 async def update_segment_rules(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     body: UpdateSegmentRulesRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission("doc:segment")),
+    user: User = Depends(require_kb_access("doc:segment")),
 ):
     """只改分段规则，不立即重分段。【前端：规则表单保存】"""
     try:
         doc = await document_service.update_segment_rules(
-            db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), body, user
+            db, kb_id, _uuid(doc_id, "doc_id"), body, user
         )
     except DocumentError as exc:
         _raise_doc_error(exc)
@@ -194,15 +199,17 @@ async def update_segment_rules(
 
 @router.post("/{doc_id}/segment-preview")
 async def segment_preview(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     body: UpdateSegmentRulesRequest | None = Body(None),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission("doc:segment")),
+    user: User = Depends(require_kb_access("doc:segment")),
 ):
     """干跑分段预览（不写库）。【前端：确认重分段前预览】"""
     try:
-        data = await document_service.preview_segment(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), body)
+        doc = await document_service.get_document_detail(db, kb_id, _uuid(doc_id, "doc_id"))
+        await document_service.assert_document_readable(db, user, doc)
+        data = await document_service.preview_segment(db, kb_id, doc.id, body)
     except DocumentError as exc:
         _raise_doc_error(exc)
     return ok(data.model_dump())
@@ -210,7 +217,7 @@ async def segment_preview(
 
 @router.post("/segment-preview-file")
 async def segment_preview_file(
-    kb_id: str,
+    kb_id: uuid.UUID,
     file: UploadFile | None = File(
         None,
         description=(
@@ -226,13 +233,9 @@ async def segment_preview_file(
         description="可选覆盖：分段模式 fixed/heading/paragraph/sliding/markdown",
     ),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission("doc:segment")),
+    user: User = Depends(require_kb_access("doc:segment")),
 ):
-    """预校验分段效果：解析待上传文件（或已上传文档）并干跑分段，返回分段文本列表与每段起止下标。
-
-    该接口仅用于向量化"入库前"确认分段效果，不触发向量化、不写向量库、
-    不修改数据库正式文档记录与流水线状态（无持久化副作用）。前端：上传后确认分段效果面板。
-    """
+    """预校验分段效果：解析待上传文件（或已上传文档）并干跑分段。"""
     rule_overrides: dict[str, object] = {}
     if chunk_size is not None:
         rule_overrides["chunk_size"] = chunk_size
@@ -248,12 +251,16 @@ async def segment_preview_file(
         filename = file.filename or "unnamed"
 
     try:
+        parsed_doc_id = _uuid(doc_id, "doc_id") if doc_id else None
+        if parsed_doc_id is not None:
+            doc = await document_service.get_document_detail(db, kb_id, parsed_doc_id)
+            await document_service.assert_document_readable(db, user, doc)
         data = await document_service.preview_segment_source(
             db,
-            _uuid(kb_id, "kb_id"),
+            kb_id,
             filename=filename,
             content=content,
-            doc_id=_uuid(doc_id, "doc_id") if doc_id else None,
+            doc_id=parsed_doc_id,
             rule_overrides=rule_overrides or None,
         )
     except DocumentError as exc:
@@ -263,16 +270,16 @@ async def segment_preview_file(
 
 @router.post("/{doc_id}/re-segment", status_code=status.HTTP_202_ACCEPTED)
 async def re_segment(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission("doc:segment")),
+    user: User = Depends(require_kb_access("doc:segment")),
 ):
     """重新分段并向量化（异步 202）。【前端：预览确认后触发】"""
     try:
-        await document_service.assert_kb_mutable(db, _uuid(kb_id, "kb_id"))
-        doc = await document_service.get_document_detail(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"))
+        await document_service.assert_kb_mutable(db, kb_id)
+        doc = await document_service.get_document_detail(db, kb_id, _uuid(doc_id, "doc_id"))
     except DocumentError as exc:
         _raise_doc_error(exc)
     background_tasks.add_task(document_pipeline.run_resegment_pipeline, doc.id, user.id)
@@ -284,15 +291,15 @@ async def re_segment(
 
 @router.post("/{doc_id}/retry", status_code=status.HTTP_202_ACCEPTED)
 async def retry_document(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission("doc:write")),
+    user: User = Depends(require_kb_access("doc:write")),
 ):
     """error 状态重试流水线（异步 202）。状态机：error -> parsing。"""
     try:
-        doc = await document_service.prepare_retry(db, _uuid(kb_id, "kb_id"), _uuid(doc_id, "doc_id"), user)
+        doc = await document_service.prepare_retry(db, kb_id, _uuid(doc_id, "doc_id"), user)
     except DocumentError as exc:
         _raise_doc_error(exc)
     background_tasks.add_task(document_pipeline.run_upload_pipeline, doc.id, auto_vectorize=True)
@@ -304,11 +311,11 @@ async def retry_document(
 
 @router.post("/{doc_id}/normalize")
 async def normalize_document(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission("doc:write")),
+    user: User = Depends(require_kb_access("doc:write")),
 ):
     """文档规范化，返回统计。【前端：规范化按钮】
 
@@ -333,19 +340,21 @@ async def normalize_document(
 
 @router.get("/{doc_id}/chunks")
 async def list_chunks(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_permission("doc:read")),
+    user: User = Depends(require_kb_access("doc:read")),
 ):
     """分段预览分页。【前端：分段预览面板】"""
     try:
+        doc = await document_service.get_document_detail(db, kb_id, _uuid(doc_id, "doc_id"))
+        await document_service.assert_document_readable(db, user, doc)
         data = await document_service.list_chunks_page(
             db,
-            _uuid(kb_id, "kb_id"),
-            _uuid(doc_id, "doc_id"),
+            kb_id,
+            doc.id,
             page=page,
             page_size=page_size,
         )
@@ -356,17 +365,17 @@ async def list_chunks(
 
 @router.put("/{doc_id}/sensitivity")
 async def update_document_sensitivity(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     body: DocumentSensitivityUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission("doc:write")),
+    user: User = Depends(require_kb_access("doc:write")),
 ):
     """更新文档敏感等级，并同步到分段。"""
     try:
         doc = await document_service.update_document_sensitivity(
             db,
-            _uuid(kb_id, "kb_id"),
+            kb_id,
             _uuid(doc_id, "doc_id"),
             body.sensitivity_level,
             user,
@@ -378,18 +387,18 @@ async def update_document_sensitivity(
 
 @router.put("/{doc_id}/chunks/{chunk_id}")
 async def update_chunk(
-    kb_id: str,
+    kb_id: uuid.UUID,
     doc_id: str,
     chunk_id: str,
     body: UpdateChunkRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission("doc:segment")),
+    user: User = Depends(require_kb_access("doc:segment")),
 ):
     """编辑/禁用单个分段。is_enabled=false 不得参与检索。【前端：分段编辑器】"""
     try:
         chunk = await document_service.update_chunk(
             db,
-            _uuid(kb_id, "kb_id"),
+            kb_id,
             _uuid(doc_id, "doc_id"),
             _uuid(chunk_id, "chunk_id"),
             body,

@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "description": "2.1.13 golden regression set — 开干第1天对齐后替换占位",
+  "queries": [
+    {
+      "id": "faq-exact-01",
+      "category": "faq_exact",
+      "question": "[PLACEHOLDER] FAQ 精确命中问句 1",
+      "kb_id": "",
+      "notes": "应 FAQ 秒答，source=kb_faq"
+    },
+    {
+      "id": "faq-exact-02",
+      "category": "faq_exact",
+      "question": "[PLACEHOLDER] FAQ 精确命中问句 2",
+      "kb_id": ""
+    },
+    {
+      "id": "faq-semantic-01",
+      "category": "faq_semantic",
+      "question": "[PLACEHOLDER] FAQ 语义近义问句 1",
+      "kb_id": "",
+      "notes": "与库内 FAQ 措辞不同但应命中"
+    },
+    {
+      "id": "faq-semantic-02",
+      "category": "faq_semantic",
+      "question": "[PLACEHOLDER] FAQ 语义近义问句 2",
+      "kb_id": ""
+    },
+    {
+      "id": "faq-verify-01",
+      "category": "faq_verify",
+      "question": "[PLACEHOLDER] FAQ 校验对照问句",
+      "kb_id": "",
+      "notes": "管理端 verify 面板可复现"
+    },
+    {
+      "id": "pdf-cite-text-01",
+      "category": "pdf_citation",
+      "question": "[PLACEHOLDER] PDF 正文引用问句",
+      "kb_id": "",
+      "notes": "答案含 [1] 且 citation 页码非整本"
+    },
+    {
+      "id": "pdf-cite-figure-01",
+      "category": "pdf_figure",
+      "question": "[PLACEHOLDER] PDF 含图页问句",
+      "kb_id": "",
+      "notes": "引用区可见 asset 或单页图，非 99 页"
+    },
+    {
+      "id": "cjk-longtail-01",
+      "category": "cjk_longtail",
+      "question": "[PLACEHOLDER] 中文长尾专有名词",
+      "kb_id": "",
+      "notes": "FULLTEXT_ANALYZER_BACKEND 对比基线"
+    },
+    {
+      "id": "followup-01",
+      "category": "multi_turn",
+      "question": "[PLACEHOLDER] 多轮跟进问句",
+      "kb_id": "",
+      "prior_question": "[PLACEHOLDER] 首轮问题",
+      "notes": "同 session 第二轮"
+    },
+    {
+      "id": "clarify-01",
+      "category": "clarify",
+      "question": "[PLACEHOLDER] 故意模糊跨主题问句",
+      "kb_id": "",
+      "notes": "应触发澄清反问（非纯 abstention）"
+    }
+  ]
+}

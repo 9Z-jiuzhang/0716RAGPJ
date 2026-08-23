@@ -27,6 +27,10 @@ class DocumentResponse(BaseModel):
         default=None,
         description="FAQ 生成任务状态：queued/running/done/error/skipped；无任务时为空",
     )
+    faq_job_reason: str | None = Field(
+        default=None,
+        description="FAQ 生成跳过/失败原因：no_llm_key/no_content_chunks/daily_limit_reached 等",
+    )
     source_type: str | None = "upload"
     source_metadata: dict[str, Any] | None = None
 
@@ -69,6 +73,7 @@ class DocumentListItem(BaseModel):
     created_at: datetime
     sensitivity_level: str = "normal"
     faq_job_status: str | None = None
+    faq_job_reason: str | None = None
 
 
 class DocumentListResponse(BaseModel):

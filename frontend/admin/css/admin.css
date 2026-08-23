@@ -4648,6 +4648,21 @@ html[data-theme="dark"] .audit-export-page-input:focus {
   width: 88px;
 }
 
+.table-kb-faqs td.col-status .faq-status-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+}
+.table-kb-faqs td.col-status .faq-status-stack .badge {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-normal, 400);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+
 .table-kb-faqs col.faq-col-sens {
   width: 88px;
 }
@@ -4787,6 +4802,35 @@ html[data-theme="dark"] .table-kb-faqs .faq-child-badge {
 .table-kb-faqs td.col-source {
   font-size: var(--font-size-xs, 12px);
   color: var(--color-text-secondary, #5b6472);
+}
+
+/* FAQ 答案校验对照区：避免长文撑破弹窗 */
+.faq-verify-diff-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.faq-verify-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.faq-verify-diff-preview {
+  max-height: 140px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border, rgba(120, 130, 160, 0.22));
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface, rgba(255, 255, 255, 0.72));
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 /* 外部数据源导入弹窗局部样式 */

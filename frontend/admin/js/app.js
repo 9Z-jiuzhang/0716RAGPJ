@@ -7578,6 +7578,7 @@ async function pageKbFaqs(opts = {}) {
               <option value="">全部状态</option>
               <option value="active" ${filters.status === "active" ? "selected" : ""}>${faqStatusLabel("active")}</option>
               <option value="pending_review" ${filters.status === "pending_review" ? "selected" : ""}>${faqStatusLabel("pending_review")}</option>
+              <option value="rag_drift" ${filters.status === "rag_drift" ? "selected" : ""}>过时</option>
               <option value="disabled" ${filters.status === "disabled" ? "selected" : ""}>${faqStatusLabel("disabled")}</option>
             </select>
             <select class="form-control" data-faq-sens-filter aria-label="筛选密级">
@@ -7685,7 +7686,13 @@ async function pageKbFaqs(opts = {}) {
                           <td class="col-check"><input type="checkbox" data-faq-check value="${escapeHtml(item.id)}" /></td>
                           <td class="col-question">${treeMark}${compoundTip}${escapeHtml(item.question)}</td>
                           <td class="col-answer">${escapeHtml(item.answer || "")}</td>
-                          <td class="col-status">${faqStatusBadgeHtml(item.status)}</td>
+                          <td class="col-status"><div class="faq-status-stack">${faqStatusBadgeHtml(item.status)}${
+                            item.stale_reason === "rag_drift"
+                              ? `<span class="badge badge-warning faq-stale-badge" title="答案可能与文档口径不一致，请核对">⚠过时</span>`
+                              : item.stale_reason
+                                ? `<span class="badge faq-stale-badge" title="${escapeHtml(item.stale_reason)}">标记</span>`
+                                : ""
+                          }</div></td>
                           <td class="col-sens">${sensitivityBadgeHtml(item.sensitivity_level)}</td>
                           <td class="col-quality">${escapeHtml(String(item.quality_score ?? "-"))}</td>
                           <td class="col-hits">${escapeHtml(fmtCount(item.hit_count ?? 0))}</td>
@@ -8000,9 +8007,49 @@ async function openKbFaqDetail(item, options = {}) {
       ? " · 已拆分（父条）"
       : item.stale_reason === "split_revoked"
         ? " · 撤销拆分已停用"
-        : item.stale_reason
-          ? ` · ${escapeHtml(item.stale_reason)}`
-          : "";
+        : item.stale_reason === "rag_drift"
+          ? " · ⚠ 答案可能过时，请人工核对后保存/审批"
+          : item.stale_reason
+            ? ` · ${escapeHtml(item.stale_reason)}`
+            : "";
+  const drift = item.verify_diff && typeof item.verify_diff === "object" ? item.verify_diff : null;
+  const simPct =
+    drift && drift.similarity != null ? `${Math.round(Number(drift.similarity) * 1000) / 10}%` : "-";
+  const thrPct =
+    drift && drift.threshold != null ? `${Math.round(Number(drift.threshold) * 1000) / 10}%` : "-";
+  const driftBox =
+    item.stale_reason === "rag_drift"
+      ? `<div class="alert alert-warning" style="margin-top:12px">
+        <div><strong>答案可能过时</strong>：系统用文档片段重新模拟回答后，与当前 FAQ 答案相似度偏低（${escapeHtml(
+          String(simPct)
+        )} &lt; 阈值 ${escapeHtml(String(thrPct))}）。系统<strong>不会自动覆盖</strong>。</div>
+        ${
+          drift
+            ? `<div class="faq-verify-diff-grid" style="margin-top:10px">
+          <div class="faq-verify-diff-block">
+            <div class="faq-verify-diff-head">
+              <span class="text-muted">当前 FAQ 答案（对照）</span>
+              ${canWrite && edit ? `<button type="button" class="btn btn-text btn-sm" data-adopt-current>填入上方答案框</button>` : ""}
+            </div>
+            <div class="faq-verify-diff-preview">${escapeHtml(
+              String(drift.current_preview || item.answer || "")
+            )}</div>
+          </div>
+          <div class="faq-verify-diff-block">
+            <div class="faq-verify-diff-head">
+              <span class="text-muted">模拟回答（仅供对照，不会自动写入）</span>
+              ${canWrite && edit ? `<button type="button" class="btn btn-text btn-sm" data-adopt-simulated>填入上方答案框</button>` : ""}
+            </div>
+            <div class="faq-verify-diff-preview">${escapeHtml(
+              String(drift.simulated_preview || "")
+            )}</div>
+          </div>
+        </div>`
+            : `<div style="margin-top:8px">请人工核对后保存，或审批为启用以清除过时标记。</div>`
+        }
+      </div>`
+      : "";
+
   mask.innerHTML = `
     <div class="modal" role="dialog" aria-modal="true" style="width:min(720px,calc(100vw - 24px));max-height:90vh;overflow:auto">
       <div class="modal-header"><h3 style="margin:0">FAQ 详情</h3></div>
@@ -8016,6 +8063,7 @@ async function openKbFaqDetail(item, options = {}) {
           ${sensitivityOptionsHtml(level)}
         </select>
         <p class="text-muted" style="margin-top:12px">状态 ${escapeHtml(faqStatusLabel(item.status))} · 来源 ${escapeHtml(faqSourceLabel(item.source))} · 命中 ${escapeHtml(fmtCount(item.hit_count || 0))}${compoundNote}${staleNote}</p>
+        ${driftBox}
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-close>关闭</button>
@@ -8027,6 +8075,23 @@ async function openKbFaqDetail(item, options = {}) {
   mask.addEventListener("click", (event) => {
     if (event.target === mask) mask.remove();
   });
+  const answerEl = mask.querySelector("[data-faq-a]");
+  const adoptSim = mask.querySelector("[data-adopt-simulated]");
+  if (adoptSim && answerEl && drift) {
+    adoptSim.onclick = () => {
+      answerEl.value = String(drift.simulated_preview || "");
+      answerEl.focus();
+      toast("已填入模拟回答，请核对后点「保存」");
+    };
+  }
+  const adoptCur = mask.querySelector("[data-adopt-current]");
+  if (adoptCur && answerEl && drift) {
+    adoptCur.onclick = () => {
+      answerEl.value = String(drift.current_preview || item.answer || "");
+      answerEl.focus();
+      toast("已填入当前 FAQ 对照稿，请核对后点「保存」");
+    };
+  }
   const saveBtn = mask.querySelector("[data-save]");
   if (saveBtn) {
     saveBtn.onclick = async () => {

@@ -575,9 +575,8 @@ class RagasEvaluationService:
     @staticmethod
     async def _build_metrics() -> tuple[dict[str, Any], list[AsyncOpenAI]]:
         """按 RAGAS 0.4 collections API 创建指标及所需的兼容客户端。"""
-        # RAGAS 官方提供匿名遥测开关；企业知识库默认关闭遥测。
-        if settings.RAGAS_DO_NOT_TRACK:
-            os.environ.setdefault("RAGAS_DO_NOT_TRACK", "true")
+        # RAGAS 官方遥测开关：以 settings 为准同步到进程环境（库只认 env）
+        os.environ["RAGAS_DO_NOT_TRACK"] = "true" if settings.RAGAS_DO_NOT_TRACK else "false"
 
         from ragas.embeddings.base import embedding_factory
         from ragas.llms import llm_factory

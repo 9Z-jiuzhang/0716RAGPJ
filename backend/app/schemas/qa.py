@@ -29,7 +29,7 @@ class CitationSchema(BaseModel):
     source: str | None = Field(default=None, description="命中来源：vector/fulltext/hybrid/sticky")
     images: list[CitationImageSchema] = Field(
         default_factory=list,
-        description="该文档图表页（按 doc 去重后前端汇总展示）",
+        description="与本命中片段相关的 PDF 页缩略图（非整本文档）",
     )
 
 

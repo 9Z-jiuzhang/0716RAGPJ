@@ -23,11 +23,14 @@ from app.core.metrics import (
     faq_cache_hit_total,
     faq_generation_duration_seconds,
     faq_generation_total,
+    faq_semantic_hit_total,
+    faq_semantic_miss_total,
 )
 from app.core.redis import get_redis_client
 from app.core.redis_keys import kb_faq_key, kb_faq_lock_key
 from app.models.base import utcnow
 from app.models.document import Document, DocumentChunk
+from app.models.enums import FAQStatus
 from app.models.kb_faq import FAQAuditLog, KBCachedFAQ
 from app.models.knowledge_base import KnowledgeBase
 from app.services.llm import LLMServiceError, llm_service
@@ -88,8 +91,9 @@ class FAQMatch:
     answer: str
     chunk_ids: list[str]
     citations: list[dict[str, Any]]
-    source: str  # redis | kb_faq
+    source: str  # redis | kb_faq | kb_faq_semantic | click
     sensitivity_level: str = "normal"
+    normalized_similarity: float | None = None
 
 
 @dataclass
@@ -128,12 +132,38 @@ class KBFaqService:
         self._queue_state_lock = asyncio.Lock()
         # doc_id -> queued|running|done|error|skipped（进程内，供上传进度轮询）
         self._doc_faq_job_status: dict[str, str] = {}
+        self._doc_faq_job_reason: dict[str, str] = {}
 
     def get_doc_faq_job_status(self, doc_id: uuid.UUID | str) -> str | None:
         return self._doc_faq_job_status.get(str(doc_id))
 
-    def _set_doc_faq_job_status(self, doc_id: uuid.UUID | str, status: str) -> None:
-        self._doc_faq_job_status[str(doc_id)] = status
+    def get_doc_faq_job_reason(self, doc_id: uuid.UUID | str) -> str | None:
+        return self._doc_faq_job_reason.get(str(doc_id))
+
+    def _set_doc_faq_job_status(self, doc_id: uuid.UUID | str, status: str, reason: str | None = None) -> None:
+        key = str(doc_id)
+        self._doc_faq_job_status[key] = status
+        if reason:
+            self._doc_faq_job_reason[key] = reason
+        elif status in {"queued", "running", "done"}:
+            self._doc_faq_job_reason.pop(key, None)
+
+    @staticmethod
+    def _cosine(a: list[float] | None, b: list[float] | None) -> float:
+        if not a or not b or len(a) != len(b):
+            return 0.0
+        dot = 0.0
+        na = 0.0
+        nb = 0.0
+        for x, y in zip(a, b):
+            fx = float(x)
+            fy = float(y)
+            dot += fx * fy
+            na += fx * fx
+            nb += fy * fy
+        if na <= 0 or nb <= 0:
+            return 0.0
+        return dot / ((na**0.5) * (nb**0.5))
 
     def normalize_question(self, question: str) -> str:
         return normalize_cache_question(question)
@@ -370,6 +400,8 @@ class KBFaqService:
                     logger.debug("faq redis writeback failed", exc_info=True)
 
             faq_cache_hit_total.labels(source="kb_faq").inc()
+            if is_explicit_click:
+                faq_cache_hit_total.labels(source="click").inc()
             return FAQHitOutcome(
                 match=FAQMatch(
                     faq_id=faq.id,
@@ -382,7 +414,181 @@ class KBFaqService:
                     sensitivity_level=level,
                 )
             )
+
+        # 精确未命中：语义近义命中（A1）
+        if settings.FAQ_SEMANTIC_HIT_ENABLED:
+            semantic = await self._semantic_faq_hit(
+                db,
+                question=question,
+                tenant_id=tenant_id,
+                authorized=authorized,
+                user_max_level=user_max_level,
+                user_id=user_id,
+                conversation_id=conversation_id,
+            )
+            if semantic.match is not None:
+                if is_explicit_click:
+                    faq_cache_hit_total.labels(source="click").inc()
+                return semantic
+            if semantic.denied:
+                denied = True
+                denied_level = semantic.denied_level or denied_level
+            else:
+                faq_semantic_miss_total.inc()
+
         return FAQHitOutcome(denied=denied, denied_level=denied_level)
+
+    async def _semantic_faq_hit(
+        self,
+        db: AsyncSession,
+        *,
+        question: str,
+        tenant_id: str,
+        authorized: list[uuid.UUID],
+        user_max_level: str,
+        user_id: uuid.UUID | None,
+        conversation_id: uuid.UUID | None,
+    ) -> FAQHitOutcome:
+        from app.models.sensitivity import normalize_sensitivity_level
+        from app.services.embedding import EmbeddingServiceError, embedding_service
+        from app.services.sensitivity_service import sensitivity_service
+
+        try:
+            query_vec = await embedding_service.embed_query(question)
+        except EmbeddingServiceError:
+            logger.warning("faq semantic embed_query failed", exc_info=True)
+            return FAQHitOutcome()
+        except Exception:  # noqa: BLE001
+            logger.warning("faq semantic embed_query unexpected error", exc_info=True)
+            return FAQHitOutcome()
+
+        candidates = list(
+            (
+                await db.scalars(
+                    select(KBCachedFAQ)
+                    .where(
+                        KBCachedFAQ.tenant_id == tenant_id,
+                        KBCachedFAQ.kb_id.in_(authorized),
+                        KBCachedFAQ.is_active.is_(True),
+                        KBCachedFAQ.status == FAQStatus.ACTIVE.value,
+                        KBCachedFAQ.embedding.is_not(None),
+                    )
+                    .order_by(KBCachedFAQ.hit_count.desc())
+                    .limit(max(1, settings.FAQ_SEMANTIC_CANDIDATE_LIMIT))
+                )
+            ).all()
+        )
+        best: KBCachedFAQ | None = None
+        best_sim = -1.0
+        denied = False
+        denied_level: str | None = None
+        for faq in candidates:
+            sim = self._cosine(query_vec, list(faq.embedding) if faq.embedding else None)
+            if sim < settings.FAQ_SIMILARITY_THRESHOLD:
+                continue
+            level = normalize_sensitivity_level(getattr(faq, "sensitivity_level", None))
+            if not sensitivity_service.can_access_level(user_max_level, level):
+                denied = True
+                denied_level = level
+                await sensitivity_service.log_access_denied(
+                    db,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    question=question,
+                    sensitivity_level=level,
+                    source="faq",
+                    conversation_id=conversation_id,
+                    reason="FAQ 语义命中但密级不足",
+                )
+                continue
+            if sim > best_sim:
+                best_sim = sim
+                best = faq
+
+        if best is None:
+            return FAQHitOutcome(denied=denied, denied_level=denied_level)
+
+        best.hit_count = int(best.hit_count or 0) + 1
+        await db.flush()
+        level = normalize_sensitivity_level(getattr(best, "sensitivity_level", None))
+        faq_cache_hit_total.labels(source="kb_faq_semantic").inc()
+        faq_semantic_hit_total.inc()
+        return FAQHitOutcome(
+            match=FAQMatch(
+                faq_id=best.id,
+                kb_id=best.kb_id,
+                question=best.question,
+                answer=self.clean_answer_for_output(best.answer or ""),
+                chunk_ids=[str(x) for x in (best.chunk_ids or [])],
+                citations=list(best.citations or []),
+                source="kb_faq_semantic",
+                sensitivity_level=level,
+                normalized_similarity=best_sim,
+            )
+        )
+
+    async def list_semantic_candidates_for_cache(
+        self,
+        db: AsyncSession,
+        *,
+        question: str,
+        tenant_id: str,
+        authorized_kb_ids: list[uuid.UUID],
+        user_max_level: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """供 L3 语义 QA 缓存注入候选（A2）；不含写入 hit_count。"""
+        from app.models.sensitivity import normalize_sensitivity_level
+        from app.services.embedding import EmbeddingServiceError, embedding_service
+        from app.services.sensitivity_service import sensitivity_service
+
+        if not authorized_kb_ids:
+            return []
+        try:
+            query_vec = await embedding_service.embed_query(question)
+        except Exception:  # noqa: BLE001
+            logger.warning("L3 faq candidate embed failed", exc_info=True)
+            return []
+
+        rows = list(
+            (
+                await db.scalars(
+                    select(KBCachedFAQ)
+                    .where(
+                        KBCachedFAQ.tenant_id == tenant_id,
+                        KBCachedFAQ.kb_id.in_(authorized_kb_ids),
+                        KBCachedFAQ.is_active.is_(True),
+                        KBCachedFAQ.status == FAQStatus.ACTIVE.value,
+                        KBCachedFAQ.embedding.is_not(None),
+                    )
+                    .limit(max(1, settings.FAQ_SEMANTIC_CANDIDATE_LIMIT))
+                )
+            ).all()
+        )
+        scored: list[tuple[float, KBCachedFAQ]] = []
+        for faq in rows:
+            sim = self._cosine(query_vec, list(faq.embedding) if faq.embedding else None)
+            if sim <= 0:
+                continue
+            scored.append((sim, faq))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        out: list[dict[str, Any]] = []
+        for sim, faq in scored[: max(1, limit)]:
+            level = normalize_sensitivity_level(getattr(faq, "sensitivity_level", None))
+            out.append(
+                {
+                    "id": str(faq.id),
+                    "answer": self.clean_answer_for_output(faq.answer or ""),
+                    "citations": list(faq.citations or []),
+                    "citation_ids": [str(x) for x in (faq.chunk_ids or [])],
+                    "normalized_similarity": sim,
+                    "quality_score": float(faq.quality_score or 0),
+                    "permission_ok": sensitivity_service.can_access_level(user_max_level, level),
+                    "disabled": False,
+                    "high_risk": False,
+                }
+            )
+        return out
 
     async def generate_from_document(
         self,
@@ -398,14 +604,17 @@ class KBFaqService:
         if not (settings.LLM_API_KEY or "").strip():
             logger.info("FAQ generation skipped: LLM_API_KEY missing doc=%s", doc_id)
             faq_generation_total.labels(status="skipped_no_llm").inc()
+            self._set_doc_faq_job_status(doc_id, "skipped", "no_llm_key")
             return {"status": "skipped", "reason": "no_llm_key"}
 
         started = datetime.now(timezone.utc)
         async with SessionLocal() as db:
             doc = await db.scalar(select(Document).where(Document.id == doc_id))
             if not doc:
+                self._set_doc_faq_job_status(doc_id, "skipped", "document_not_found")
                 return {"status": "skipped", "reason": "document_not_found"}
             if doc.status != "ready":
+                self._set_doc_faq_job_status(doc_id, "skipped", "document_not_ready")
                 return {"status": "skipped", "reason": "document_not_ready"}
 
             resolved_kb = kb_id or doc.kb_id
@@ -414,6 +623,7 @@ class KBFaqService:
             await self.invalidate_kb_faq_redis(tenant_id=resolved_tenant, kb_id=resolved_kb)
             kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == resolved_kb))
             if kb is None or kb.deleted_at is not None:
+                self._set_doc_faq_job_status(doc_id, "skipped", "kb_missing")
                 return {"status": "skipped", "reason": "kb_missing"}
 
             chunks = list(
@@ -432,12 +642,14 @@ class KBFaqService:
             content_chunks = [c for c in chunks if (c.content or "").strip()]
             if not content_chunks:
                 faq_generation_total.labels(status="skipped_content").inc()
+                self._set_doc_faq_job_status(doc_id, "skipped", "no_content_chunks")
                 return {"status": "skipped", "reason": "no_content_chunks"}
             chunks = content_chunks
 
             today_count = await self._today_generation_count(db, resolved_kb)
             if today_count >= settings.FAQ_KB_DAILY_LIMIT:
                 faq_generation_total.labels(status="rate_limited").inc()
+                self._set_doc_faq_job_status(doc_id, "skipped", "daily_limit_reached")
                 return {"status": "rate_limited", "reason": "daily_limit_reached"}
 
             active_count = await db.scalar(
@@ -450,6 +662,7 @@ class KBFaqService:
                 )
             )
             if int(active_count or 0) >= settings.FAQ_PER_KB_LIMIT:
+                self._set_doc_faq_job_status(doc_id, "skipped", "kb_limit_reached")
                 return {"status": "rate_limited", "reason": "kb_limit_reached"}
 
             lock_key = kb_faq_lock_key(tenant=resolved_tenant, kb_id=str(resolved_kb))
@@ -534,6 +747,12 @@ class KBFaqService:
                     saved,
                     elapsed,
                 )
+                try:
+                    from app.services.faq_verify_service import faq_verify_service
+
+                    await faq_verify_service.enqueue_for_document(doc_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning("faq verify enqueue after generate failed doc=%s", doc_id, exc_info=True)
                 return {
                     "status": "success",
                     "generated": len(unique),
@@ -545,6 +764,7 @@ class KBFaqService:
                 await db.rollback()
                 faq_generation_total.labels(status="error").inc()
                 logger.exception("FAQ generation failed doc=%s: %s", doc_id, exc)
+                self._set_doc_faq_job_status(doc_id, "error", str(exc)[:200])
                 return {"status": "error", "reason": str(exc)[:200]}
             finally:
                 await self._release_lock(lock_key)
@@ -650,10 +870,11 @@ class KBFaqService:
                         tenant_id=job.tenant_id,
                     )
                     status = str(result.get("status") or "done")
+                    reason = str(result.get("reason") or "") or None
                     if status == "error":
-                        self._set_doc_faq_job_status(job.doc_id, "error")
+                        self._set_doc_faq_job_status(job.doc_id, "error", reason)
                     elif status in ("skipped", "rate_limited"):
-                        self._set_doc_faq_job_status(job.doc_id, "skipped")
+                        self._set_doc_faq_job_status(job.doc_id, "skipped", reason)
                     else:
                         self._set_doc_faq_job_status(job.doc_id, "done")
                     logger.info(
@@ -1187,29 +1408,50 @@ class KBFaqService:
             "created_at": utcnow(),
             "updated_at": utcnow(),
         }
+        embedding_vec: list[float] | None = None
+        try:
+            from app.services.embedding import embedding_service
+
+            embedding_vec = await embedding_service.embed_query(question)
+            values["embedding"] = embedding_vec
+        except Exception:  # noqa: BLE001
+            logger.warning("faq embedding on upsert failed q=%s", question[:80], exc_info=True)
+
         cleaned_answer = values["answer"]
+        conflict_set: dict[str, Any] = {
+            "question": question,
+            "answer": cleaned_answer,
+            "source_document_ids": source_document_ids,
+            "chunk_ids": chunk_ids,
+            "citations": citations,
+            "quality_score": quality_score,
+            "source": source,
+            "status": status,
+            "is_active": status != "disabled",
+            "model_version": model_version,
+            "stale_reason": stale_reason,
+            "sensitivity_level": sens_level,
+            "is_compound": bool(is_compound),
+            "updated_at": utcnow(),
+            "version": KBCachedFAQ.version + 1,
+        }
+        if embedding_vec is not None:
+            conflict_set["embedding"] = embedding_vec
         stmt = insert(KBCachedFAQ).values(**values)
         stmt = stmt.on_conflict_do_update(
             index_elements=["kb_id", "normalized_question"],
-            set_={
-                "question": question,
-                "answer": cleaned_answer,
-                "source_document_ids": source_document_ids,
-                "chunk_ids": chunk_ids,
-                "citations": citations,
-                "quality_score": quality_score,
-                "source": source,
-                "status": status,
-                "is_active": status != "disabled",
-                "model_version": model_version,
-                "stale_reason": stale_reason,
-                "sensitivity_level": sens_level,
-                "is_compound": bool(is_compound),
-                "updated_at": utcnow(),
-                "version": KBCachedFAQ.version + 1,
-            },
+            set_=conflict_set,
         )
         await db.execute(stmt)
+
+    async def refresh_faq_embedding(self, db: AsyncSession, faq: KBCachedFAQ) -> None:
+        """问题变更后刷新 embedding。"""
+        try:
+            from app.services.embedding import embedding_service
+
+            faq.embedding = await embedding_service.embed_query(faq.question or "")
+        except Exception:  # noqa: BLE001
+            logger.warning("faq embedding refresh failed id=%s", faq.id, exc_info=True)
 
     async def split_compound_faq(
         self,

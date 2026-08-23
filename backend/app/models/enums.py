@@ -143,3 +143,31 @@ class IndexVersionStatus(str, Enum):
     ACTIVE = "active"
     OBSOLETE = "obsolete"
     FAILED = "failed"
+
+
+class FAQStatus(str, Enum):
+    """知识库 FAQ 状态。"""
+
+    ACTIVE = "active"
+    DISABLED = "disabled"
+    PENDING_REVIEW = "pending_review"
+
+
+class FAQSource(str, Enum):
+    """FAQ 来源。"""
+
+    DOCUMENT_AUTO = "document_auto"
+    MIGRATED = "migrated"
+    MANUAL = "manual"
+    REFINED = "refined"
+    SPLIT_CHILD = "split_child"
+
+
+class FAQStaleReason(str, Enum):
+    """FAQ 过期/待审原因。"""
+
+    RAG_DRIFT = "rag_drift"
+    SPLIT_PARENT = "split_parent"
+    SPLIT_REVOKED = "split_revoked"
+    MODEL_UPGRADE = "model_upgrade"
+    REJECTED = "rejected"

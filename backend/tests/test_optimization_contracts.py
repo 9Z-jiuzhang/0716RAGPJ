@@ -22,9 +22,22 @@ def test_ask_request_default_top_k_is_5() -> None:
 
 
 def test_redis_key_naming_has_no_raw_question() -> None:
-    key = qa_exact_cache_key(tenant="default", scope_fingerprint="kb1", question_hash="abc123")
-    assert key.startswith("qa:exact:v2:")
+    key = qa_exact_cache_key(
+        tenant="default",
+        scope_fingerprint="kb1",
+        question_hash="abc123",
+        user_max_level="confidential",
+    )
+    assert key.startswith("qa:exact:v3:")
+    assert ":confidential:" in key
     assert "年假" not in key
+    low = qa_exact_cache_key(
+        tenant="default",
+        scope_fingerprint="kb1",
+        question_hash="abc123",
+        user_max_level="normal",
+    )
+    assert low != key
     meta = session_meta_key(tenant="default", conversation_id="c1")
     assert meta.startswith("session:meta:v2:")
 

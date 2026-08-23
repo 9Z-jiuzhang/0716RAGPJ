@@ -56,6 +56,7 @@ class CacheLookupRequest(BaseModel):
     user_id: str | None = None
     role_ids: list[str] = Field(default_factory=list)
     scope_fingerprint: str
+    user_max_level: str = "normal"
     permission_version: str = "v0"
     normalized_question: str
     language: str = "zh-CN"

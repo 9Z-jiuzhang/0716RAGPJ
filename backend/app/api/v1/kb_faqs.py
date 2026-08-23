@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Literal
 from uuid import UUID
@@ -16,12 +17,14 @@ from app.models.knowledge_base import KnowledgeBase
 from app.retrieval.scope import resolve_kb_targets
 from app.schemas.common import BaseResponse
 from app.services.kb_faq_service import kb_faq_service
+from app.services.qa_cache import qa_cache_service
 from app.services.sensitivity_service import sensitivity_service
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["知识库FAQ"])
 
 
@@ -60,7 +63,7 @@ class FAQSplitRevokeRequest(BaseModel):
     child_ids: list[UUID] = Field(default_factory=list, max_length=50)
 
 
-def _faq_item(row: KBCachedFAQ, kb_name: str = "") -> dict[str, Any]:
+def _faq_item(row: KBCachedFAQ, kb_name: str = "", *, verify_diff: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "id": str(row.id),
         "kb_id": str(row.kb_id),
@@ -77,6 +80,7 @@ def _faq_item(row: KBCachedFAQ, kb_name: str = "") -> dict[str, Any]:
         "status": row.status,
         "source": row.source,
         "stale_reason": row.stale_reason,
+        "verify_diff": verify_diff,
         "is_active": row.is_active,
         "version": row.version,
         "sensitivity_level": getattr(row, "sensitivity_level", None) or "normal",
@@ -210,7 +214,10 @@ async def admin_list_faq(
         raise HTTPException(status_code=404, detail="知识库不存在")
 
     filters = [KBCachedFAQ.kb_id == kb_id, KBCachedFAQ.tenant_id == settings.FAQ_TENANT_ID]
-    if status:
+    if status in ("rag_drift", "stale", "outdated"):
+        # 伪状态：按过时标记筛选（stale_reason），非独立 status 枚举
+        filters.append(KBCachedFAQ.stale_reason == "rag_drift")
+    elif status:
         filters.append(KBCachedFAQ.status == status)
     if sensitivity_level:
         filters.append(KBCachedFAQ.sensitivity_level == normalize_sensitivity_level(sensitivity_level))
@@ -245,12 +252,36 @@ async def admin_list_faq(
             )
         ).all()
     )
+    drift_ids = [row.id for row in rows if row.stale_reason == "rag_drift"]
+    verify_map: dict[str, dict[str, Any]] = {}
+    if drift_ids:
+        from app.models.kb_faq import FAQAuditLog
+
+        audits = list(
+            (
+                await db.scalars(
+                    select(FAQAuditLog)
+                    .where(
+                        FAQAuditLog.action == "faq_verify_stale",
+                        FAQAuditLog.target_id.in_(drift_ids),
+                    )
+                    .order_by(FAQAuditLog.created_at.desc())
+                )
+            ).all()
+        )
+        for audit in audits:
+            key = str(audit.target_id)
+            if key not in verify_map and isinstance(audit.new_value, dict):
+                verify_map[key] = audit.new_value
     return ok(
         {
             "kb_id": str(kb_id),
             "kb_name": kb.name,
             "faq_enabled": bool(kb.faq_enabled),
-            "items": [_faq_item(row, kb.name) for row in rows],
+            "items": [
+                _faq_item(row, kb.name, verify_diff=verify_map.get(str(row.id)))
+                for row in rows
+            ],
             "total": total,
             "page": page,
             "size": size,
@@ -282,10 +313,16 @@ async def update_faq(
     if "question" in patch and patch["question"]:
         faq.question = patch["question"]
         faq.normalized_question = kb_faq_service.normalize_question(patch["question"])
+        await kb_faq_service.refresh_faq_embedding(db, faq)
     if "answer" in patch and patch["answer"] is not None:
         faq.answer = patch["answer"]
+        # 人工修订后清掉漂移标记
+        if faq.stale_reason == "rag_drift":
+            faq.stale_reason = None
     if "status" in patch and patch["status"] is not None:
         faq.status = patch["status"]
+        if patch["status"] == "active" and faq.stale_reason == "rag_drift":
+            faq.stale_reason = None
     if "is_active" in patch and patch["is_active"] is not None:
         faq.is_active = patch["is_active"]
     if "quality_score" in patch and patch["quality_score"] is not None:
@@ -311,6 +348,13 @@ async def update_faq(
     await db.commit()
     await db.refresh(faq)
     await kb_faq_service.invalidate_kb_faq_redis(tenant_id=settings.FAQ_TENANT_ID, kb_id=faq.kb_id)
+    try:
+        await qa_cache_service.invalidate_by_kb(
+            tenant_id=settings.FAQ_TENANT_ID,
+            kb_ids=[faq.kb_id],
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("qa cache invalidate after faq update failed", exc_info=True)
     return ok(_faq_item(faq), request_id=request_id, message="已更新")
 
 

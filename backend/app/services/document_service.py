@@ -20,7 +20,7 @@ from app.models.enums import (
     SnapshotTrigger,
 )
 from app.models.kb_faq import KBCachedFAQ
-from app.models.sensitivity import normalize_sensitivity_level
+from app.models.sensitivity import levels_at_or_below, normalize_sensitivity_level
 from app.repositories import document as doc_repo
 from app.schemas.document import (
     ChunkListResponse,
@@ -47,6 +47,7 @@ from app.services.normalize import normalize_text
 from app.services.observability import record_metric, write_audit
 from app.services.parsers import detect_file_type
 from app.services.security_scan import validate_encoding_safe, virus_scan_placeholder
+from app.services.sensitivity_service import sensitivity_service
 from app.services.snapshot_hooks import take_auto_snapshot
 from app.utils.exceptions import (
     DocumentError,
@@ -64,6 +65,14 @@ async def assert_kb_mutable(db: AsyncSession, kb_id: uuid.UUID) -> None:
     kb = await doc_repo.get_knowledge_base(db, kb_id)
     if kb is not None and str(kb.status) == "vectorizing":
         raise DocumentError("知识库正在重建索引，请稍后再试", http_status=409)
+
+
+async def assert_document_readable(db: AsyncSession, user: User, doc: Document) -> None:
+    """密级门控：用户上限不足以读该文档时 403。"""
+    user_max = await sensitivity_service.resolve_user_max_level(db, user=user)
+    level = normalize_sensitivity_level(getattr(doc, "sensitivity_level", None))
+    if not sensitivity_service.can_access_level(user_max, level):
+        raise DocumentError("该文档需要更高权限访问", http_status=403)
 
 
 def to_document_response(doc: Document) -> DocumentResponse:
@@ -84,6 +93,7 @@ def to_document_response(doc: Document) -> DocumentResponse:
         updated_at=doc.updated_at,
         sensitivity_level=getattr(doc, "sensitivity_level", None) or "normal",
         faq_job_status=kb_faq_service.get_doc_faq_job_status(doc.id),
+        faq_job_reason=kb_faq_service.get_doc_faq_job_reason(doc.id),
         source_type=getattr(doc, "source_type", None) or "upload",
         source_metadata=getattr(doc, "source_metadata", None) or {},
     )
@@ -214,8 +224,20 @@ async def list_documents_page(
     page: int,
     page_size: int,
     keyword: str | None,
+    user: User | None = None,
 ) -> DocumentListResponse:
-    items, total = await doc_repo.list_documents(db, kb_id, page=page, page_size=page_size, keyword=keyword)
+    allowed_levels: list[str] | None = None
+    if user is not None:
+        user_max = await sensitivity_service.resolve_user_max_level(db, user=user)
+        allowed_levels = levels_at_or_below(user_max)
+    items, total = await doc_repo.list_documents(
+        db,
+        kb_id,
+        page=page,
+        page_size=page_size,
+        keyword=keyword,
+        allowed_sensitivity_levels=allowed_levels,
+    )
     faq_counts = await _faq_counts_for_documents(db, kb_id, [d.id for d in items])
     from app.services.kb_faq_service import kb_faq_service
 
@@ -232,6 +254,7 @@ async def list_documents_page(
                 created_at=d.created_at,
                 sensitivity_level=getattr(d, "sensitivity_level", None) or "normal",
                 faq_job_status=kb_faq_service.get_doc_faq_job_status(d.id),
+                faq_job_reason=kb_faq_service.get_doc_faq_job_reason(d.id),
             )
             for d in items
         ],

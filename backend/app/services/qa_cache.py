@@ -55,11 +55,22 @@ class QACacheService:
     def _question_hash(text: str) -> str:
         return hashlib.sha256((" ".join(text.strip().lower().split())).encode()).hexdigest()[:32]
 
+    @staticmethod
+    def _level_part(req: CacheLookupRequest) -> str:
+        return (req.user_max_level or "normal").strip().lower() or "normal"
+
     def _exact_key(self, req: CacheLookupRequest) -> str:
         return qa_exact_cache_key(
             tenant=req.tenant_id,
             scope_fingerprint=req.scope_fingerprint,
             question_hash=self._question_hash(req.normalized_question),
+            user_max_level=self._level_part(req),
+        )
+
+    def _l1_key(self, req: CacheLookupRequest, qh: str) -> str:
+        return (
+            f"{req.scope_fingerprint}:{self._level_part(req)}:{qh}"
+            f":{req.top_k}:{req.model_config_version}"
         )
 
     def _inflight_key(self, cache_key: str) -> str:
@@ -82,7 +93,7 @@ class QACacheService:
             )
 
         qh = self._question_hash(req.normalized_question)
-        l1_key = f"{req.scope_fingerprint}:{qh}:{req.top_k}:{req.model_config_version}"
+        l1_key = self._l1_key(req, qh)
         cached = self._l1.get(l1_key)
         if cached:
             result = CacheLookupResult(**cached)
@@ -93,11 +104,7 @@ class QACacheService:
 
         if settings.QA_EXACT_CACHE_ENABLED and redis_client is not None:
             try:
-                key = qa_exact_cache_key(
-                    tenant=req.tenant_id,
-                    scope_fingerprint=req.scope_fingerprint,
-                    question_hash=qh,
-                )
+                key = self._exact_key(req)
                 raw = await redis_client.get(key)
                 if raw:
                     import json
@@ -129,6 +136,7 @@ class QACacheService:
                     tenant=req.tenant_id,
                     scope_fingerprint=req.scope_fingerprint,
                     query_hash=qh,
+                    user_max_level=self._level_part(req),
                 )
                 raw = await redis_client.get(key)
                 if raw:
@@ -198,11 +206,7 @@ class QACacheService:
         import json
 
         qh = self._question_hash(req.normalized_question)
-        key = qa_exact_cache_key(
-            tenant=req.tenant_id,
-            scope_fingerprint=req.scope_fingerprint,
-            question_hash=qh,
-        )
+        key = self._exact_key(req)
         payload = {
             "answer": answer,
             "citations": citations,
@@ -210,9 +214,8 @@ class QACacheService:
         }
         try:
             await redis_client.set(key, json.dumps(payload, ensure_ascii=False), ex=ttl_seconds)
-            l1_key = f"{req.scope_fingerprint}:{qh}:{req.top_k}:{req.model_config_version}"
             self._l1.set(
-                l1_key,
+                self._l1_key(req, qh),
                 CacheLookupResult(status="hit", level="L2", **payload).model_dump(),
             )
         except Exception:  # noqa: BLE001
@@ -297,8 +300,10 @@ class QACacheService:
         self._l1.clear()
         for kb_id in ids:
             # 单库 fingerprint 与多库逗号拼接均可匹配
-            pattern = f"qa:exact:v2:{tenant_id}:*{kb_id}*"
-            deleted += await self._scan_delete(client, pattern)
+            # v3 现行；顺带清遗留 v2，避免部署后旧键残留
+            for ver in ("v3", "v2"):
+                pattern = f"qa:exact:{ver}:{tenant_id}:*{kb_id}*"
+                deleted += await self._scan_delete(client, pattern)
         return deleted
 
     @staticmethod

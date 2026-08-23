@@ -32,11 +32,14 @@ async def list_documents(
     page: int = 1,
     page_size: int = 20,
     keyword: str | None = None,
+    allowed_sensitivity_levels: list[str] | None = None,
 ) -> tuple[list[Document], int]:
     """列表按密级置顶：极高密 > 机密 > 普通，同档再按创建时间倒序。"""
     filters = [Document.kb_id == kb_id, Document.status != "archived"]
     if keyword:
         filters.append(Document.filename.ilike(f"%{keyword}%"))
+    if allowed_sensitivity_levels is not None:
+        filters.append(Document.sensitivity_level.in_(allowed_sensitivity_levels))
     total = await db.scalar(select(func.count()).select_from(Document).where(*filters)) or 0
     sens_rank = case(
         (Document.sensitivity_level == "restricted", 2),

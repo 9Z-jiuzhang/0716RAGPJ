@@ -246,10 +246,10 @@ def _extract_pdf_pypdf(content: bytes) -> str:
 
     reader = PdfReader(io.BytesIO(content))
     parts: list[str] = []
-    for page in reader.pages:
+    for idx, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
         if text.strip():
-            parts.append(text)
+            parts.append(f"[[pdf_page:{idx}]]\n{text.strip()}")
     return "\n\n".join(parts)
 
 
@@ -258,8 +258,12 @@ def _extract_pdf_pymupdf(content: bytes) -> str:
 
     doc = fitz.open(stream=content, filetype="pdf")
     try:
-        parts = [(page.get_text("text") or "").strip() for page in doc]
-        return "\n\n".join(p for p in parts if p)
+        parts: list[str] = []
+        for idx, page in enumerate(doc, start=1):
+            text = (page.get_text("text") or "").strip()
+            if text:
+                parts.append(f"[[pdf_page:{idx}]]\n{text}")
+        return "\n\n".join(parts)
     finally:
         doc.close()
 
@@ -305,7 +309,7 @@ def _extract_pdf_via_vision(content: bytes) -> str:
             logger.warning("pdf vision page %s failed: %s", idx, exc)
             body = ""
         if body:
-            sections.append(f"## 第 {idx} 页\n\n{body}")
+            sections.append(f"[[pdf_page:{idx}]]\n## 第 {idx} 页\n\n{body}")
     return "\n\n".join(sections)
 
 
