@@ -70,5 +70,7 @@ alembic.ini.local
 ragpj-docker-images.tar
 *.docker-images.tar
 
-# 本地演示用技术架构参考（不入库）
-TECH_ARCHITECTURE.md
+# 本地过程稿 / 结项清单（不入库；产品说明用 docs/KB_FAQ.md、docs/API.md）
+docs/*_PLAN.md
+docs/*_ACCEPTANCE.md
+docs/OPTIMIZATION_STATUS.md

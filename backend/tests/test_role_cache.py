@@ -96,6 +96,47 @@ async def test_cache_lookup_rejects_cross_department_source_scope() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cache_lookup_rejects_higher_sensitivity_docs() -> None:
+    """来源文档密级高于用户上限时不得命中角色缓存。"""
+    role_id = uuid4()
+    kb_id = uuid4()
+    doc_id = uuid4()
+    entry = RoleCachedQuestion(
+        id=uuid4(),
+        cache_id=uuid4(),
+        role_id=role_id,
+        question="机密制度？",
+        normalized_question=normalize_cache_question("机密制度？"),
+        answer="机密答案",
+        source="document_generated",
+        source_kb_ids=[kb_id],
+        citations=[{"doc_id": str(doc_id), "doc_name": "secret.md"}],
+        occurrence_count=1,
+        hit_count=0,
+    )
+    confidential_doc = SimpleNamespace(id=doc_id, sensitivity_level="confidential")
+    db = AsyncMock()
+    db.scalars = AsyncMock(
+        side_effect=[
+            _scalar_result([entry]),
+            _scalar_result([confidential_doc]),
+        ]
+    )
+    user = SimpleNamespace(roles=[SimpleNamespace(id=role_id, is_enabled=True)])
+
+    match = await RoleCacheService().lookup(
+        db,
+        question="机密制度？",
+        user=user,
+        authorized_kb_ids=[kb_id],
+        user_max_level="normal",
+    )
+
+    assert match is None
+    assert entry.hit_count == 0
+
+
+@pytest.mark.asyncio
 async def test_cache_lookup_requires_nonempty_source_scope() -> None:
     """没有知识库来源范围的历史答案不能绕过正常 RAG 链路直接返回。"""
     role_id = uuid4()

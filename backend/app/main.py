@@ -88,7 +88,11 @@ async def seed_identity_data() -> None:
             else:
                 role.permissions = [perm_by_code[c] for c in codes if c in perm_by_code]
 
-        super_password = (settings.SUPER_ADMIN_PASSWORD or "Super123!").strip() or "Super123!"
+        super_password = (settings.SUPER_ADMIN_PASSWORD or "").strip()
+        if not super_password:
+            raise RuntimeError(
+                "SUPER_ADMIN_PASSWORD 未配置：请在 .env 中设置超管密码（禁止使用代码内默认口令）"
+            )
         if not await db.scalar(select(User).where(User.username == "super")):
             db.add(
                 User(
@@ -372,6 +376,7 @@ async def seed_query_processing_config() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     setup_logging()
+    settings.assert_required_secrets()
     settings.assert_cloud_ready()
     get_langfuse()
     # CI/裸库需先装扩展，再 create_all（否则 gin_trgm_ops 索引会失败）
@@ -423,10 +428,14 @@ async def lifespan(_: FastAPI):
         # Chroma 暂不可用时不阻断 API 启动（健康检查会标记 degraded）
         pass
 
+    from app.services.role_cache_shadow import role_cache_shadow_maintenance_loop
+
     stop_expiry = asyncio.Event()
     expiry_task: asyncio.Task | None = None
     retention_task: asyncio.Task | None = None
     role_cache_task: asyncio.Task | None = None
+    role_cache_shadow_task: asyncio.Task | None = None
+    faq_verify_task: asyncio.Task | None = None
     # 测试环境不启后台扫描，避免干扰用例与连接生命周期
     # SCHEDULER_EXTERNAL_ENABLED 时由独立 Worker 跑周期任务，API 副本不启动循环
     if (
@@ -442,6 +451,20 @@ async def lifespan(_: FastAPI):
         role_cache_task = asyncio.create_task(
             role_cache_loop(stop_expiry),
             name="role-cache-scheduler",
+        )
+        if settings.ROLE_CACHE_SHADOW_METRICS_ENABLED:
+            role_cache_shadow_task = asyncio.create_task(
+                role_cache_shadow_maintenance_loop(
+                    stop_expiry,
+                    poll_seconds=settings.ROLE_CACHE_SCHEDULER_POLL_SECONDS,
+                ),
+                name="role-cache-shadow",
+            )
+        from app.services.faq_verify_service import faq_verify_loop
+
+        faq_verify_task = asyncio.create_task(
+            faq_verify_loop(stop_expiry),
+            name="faq-verify-scheduler",
         )
     elif settings.SCHEDULER_EXTERNAL_ENABLED:
         logging.getLogger("app.main").info("SCHEDULER_EXTERNAL_ENABLED=true：API 进程不启动周期任务循环")
@@ -465,6 +488,18 @@ async def lifespan(_: FastAPI):
         role_cache_task.cancel()
         try:
             await role_cache_task
+        except asyncio.CancelledError:
+            pass
+    if role_cache_shadow_task is not None:
+        role_cache_shadow_task.cancel()
+        try:
+            await role_cache_shadow_task
+        except asyncio.CancelledError:
+            pass
+    if faq_verify_task is not None:
+        faq_verify_task.cancel()
+        try:
+            await faq_verify_task
         except asyncio.CancelledError:
             pass
 

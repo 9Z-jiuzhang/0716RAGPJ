@@ -2,12 +2,12 @@
 
 基于大语言模型（LLM）的企业级智能知识库平台。提供文档上传与自动向量化、混合检索（向量 + 全文 + RRF 融合）、多轮流式问答、RBAC + 部门驱动的访问控制、命中率评测、快照与回退、以及 Prometheus/Grafana/Langfuse 全链路可观测能力。
 
-- **应用版本**：`APP_VERSION=2.1.0`（与产品手册 V2.1 对齐）
+- **应用版本**：`APP_VERSION=2.1.12`（与产品手册 V2.1 对齐）
 - **技术栈**：FastAPI（异步）· PostgreSQL（pg_trgm + tsvector）· Chroma（向量库）· Redis（会话热态）· MinIO（对象存储）· 原生 ES Module 前端 · Docker Compose 编排
 - **统一入口（本机 Docker 默认）**：`http://localhost:9080`（Nginx 反向代理；容器与宿主机均为 9080）
 - **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml` + `docker-compose.langfuse.yml`）
 - **接入第三方 / App**：见 [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md)
-- **知识库 FAQ**：见 [`docs/API.md`](docs/API.md) §12.1（库级精确命中 / 热门点选 / 密级门控）
+- **知识库 FAQ**：见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md) 与 [`docs/API.md`](docs/API.md) §12.1（精确命中 / 语义命中 / 热门点选 / 密级门控）
 
 ---
 
@@ -124,7 +124,7 @@ nginx 反向代理 (reverse-proxy.conf, 容器 :9080)
   ├─[会话] 有 session_id → 校验归属并续聊（expired 自动恢复 active）；无 session_id → 始终新建
   │         （X-Guest-Id 仅访客归属，不自动复用旧会话）
   ├─[范围] resolve_kb_targets：按身份计算可访问且已建索引的知识库
-  ├─[FAQ] 知识库 FAQ 精确命中（kb_id + normalized_question）→ 秒答短路（含密级校验）
+  ├─[FAQ] 知识库 FAQ：精确同题 → 语义近义（embedding）→ 秒答短路（含密级校验）
   ├─[记忆] 从 Redis 热态（或回填 PostgreSQL 历史）加载最近 N 轮 + 摘要
   ├─[改写] Query 预处理（改写/扩展/HyDE，可配置）；失败则回退原问
   ├─[缓存] 多级 QA 缓存（开关控制）→ 角色缓存只读回退（过渡期）
@@ -140,7 +140,7 @@ nginx 反向代理 (reverse-proxy.conf, 容器 :9080)
             安全拒绝时 guard_blocked；出错时 error
 
 闲置超过 `QA_SESSION_IDLE_EXPIRE_MINUTES` 的会话由后台扫描标为 `expired` 并清理 Redis；历史仍可查看，续聊可重新激活。
-FAQ 行为与接口见 docs/API.md §12.1。
+FAQ 行为见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md)、接口见 [`docs/API.md`](docs/API.md) §12.1。
 ```
 
 ### 1.4 服务与端口
@@ -210,7 +210,7 @@ app/
 | 快照管理 | `/api/v1/knowledge-bases/{kb_id}/snapshots` | `snapshot.py` | 快照创建、回退预览与回退；**含 FAQ 快照**（`snapshot_faqs`） |
 | RAGAS 评估 | `/api/v1/ragas` | `ragas_evaluation.py` | 样本预览/生成、评估运行与详情 |
 | 角色缓存（过渡期只读） | `/api/v1/role-caches` | `role_cache.py` | 写入已关闭，命中仍可只读回退 |
-| 知识库 FAQ | `/api/v1/faq/*`、`/api/v1/admin/faq/*` | `kb_faq_service.py` | 库级自动生成/精确命中/热门/密级；见 [`docs/API.md`](docs/API.md) §12.1 |
+| 知识库 FAQ | `/api/v1/faq/*`、`/api/v1/admin/faq/*` | `kb_faq_service.py`、`faq_verify_service.py` | 库级自动生成 / 精确+语义命中 / 热门 / 密级 / 答案校验告警；见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md)、[`docs/API.md`](docs/API.md) §12.1 |
 | 敏感等级 | `/api/v1/sensitivity/*` 等 | `sensitivity_service.py` | 角色/用户密级上限；FAQ/检索侧门控 |
 | Query 预处理 | `/api/v1/query-processing` | — | 改写/扩展/HyDE 策略配置（默认改写关闭） |
 | 审计日志 | `/api/v1/audit` | `audit.py` | 操作审计查询、详情与批量删除 |
@@ -280,14 +280,16 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 - **fulltext.py**：PostgreSQL 关键词检索。主路径 `plainto_tsquery('simple')` + `ts_rank_cd`；召回不足时叠加 trigram；中文查询展示分可取 `max(pg_trgm, 字面覆盖率)`。
 - **hybrid.py**：按策略分派。`hybrid` 多路命中时用 **RRF** 融合并归一化，再可选 **Rerank**，最后应用相关性阈值与软兜底。
 
-问答流水线在检索前经 **业务路由**（问候/帮助/越界模板、上一答案变换）与 **多级缓存**（L1 进程内 / L2 Redis 精确 / L3 语义门控 / L4 检索缓存，均受功能开关控制；默认见 `.env.example`）。知识库 FAQ 见 [`docs/API.md`](docs/API.md) §12.1。
+问答流水线在检索前经 **业务路由**（问候/帮助/越界模板、上一答案变换）与 **多级缓存**（L1 进程内 / L2 Redis 精确 / L3 语义门控 / L4 检索缓存，均受功能开关控制；默认见 `.env.example`）。知识库 FAQ（精确 → 语义）见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md) 与 [`docs/API.md`](docs/API.md) §12.1。
+
+检索命中后的 **citations.images**：仅挂与命中片段相关的 PDF 页（分段元数据 `page`；layout 图/表块优先块级 `page`），**不会**把整本 PDF 缩略图塞进「相关图表」。前端文案为「PDF 第 N 页」；`GET /qa/accessible-kbs` 下发 `max_charts` 控制展示上限。旧文档无页码元数据时不展示图表，需重解析/重分段后才有精确页。回滚开关：`CHART_CITATION_USE_LEGACY_LOGIC=true`（见 `docs/RUNBOOK.md`）。
 
 ### 2.6 前端
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **访客端** `frontend/guest/`（挂载 `/`）：营销落地页（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、流式中止、**知识库下拉**、**Query 改写开关**、输入上限 **2000 字**提示、引用相关度 Top-3 展开/其余折叠、置信提示）；欢迎区展示**热门 FAQ**，点选/同题粘贴可秒答（无思考态）；对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（含**字节上传进度** + 管道状态轮询，员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页 KPI（含 FAQ 数、7/30 天趋势、错误分桶、近 14 日问答反馈 KPI/趋势）与安全窗口；知识库卡片（封面显示库名、可置顶/删除的更多菜单仅管理员·超管·库管理者可见）；知识库/文档/FAQ/快照工作台（「访问范围」多选部门，含「除访客外全选」；上传列表展示上传百分比；快照含 FAQ 数且回退可还原 FAQ）；用户/角色/部门、大模型与用量、命中率测试、RAGAS、问答统计、会话分析、角色缓存、审计、LLM Guard 拦截、系统监控（健康/Grafana）、API 接入指南。
+- **访客端** `frontend/guest/`（挂载 `/`）：营销落地页（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、流式中止、**知识库下拉**、**Query 改写开关**、输入上限 **2000 字**提示、引用相关度 Top-3 展开/其余折叠、**相关图表仅展示命中相关页**、置信提示）；欢迎区展示**热门 FAQ**，点选/同题粘贴可秒答（无思考态）；对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（含**字节上传进度** + 管道状态轮询，员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页 KPI（含 FAQ 数、7/30 天趋势、错误分桶、近 14 日问答反馈 KPI/趋势）与安全窗口；知识库卡片（封面显示库名、可置顶/删除的更多菜单仅管理员·超管·库管理者可见）；知识库/文档/FAQ/快照工作台（「访问范围」多选部门，含「除访客外全选」；上传列表展示上传百分比；FAQ 可标过时待审；快照含 FAQ 数且回退可还原 FAQ）；用户/角色/部门、大模型与用量、命中率测试、RAGAS、问答统计、会话分析、角色缓存、审计、LLM Guard 拦截、系统监控（健康/Grafana）、API 接入指南。
 - **共享** `frontend/shared/`：`api.js`（含 `upload` 的 `onProgress` 字节进度）、`auth.js`、`router.js`、`brand-mark.js`、`env-particle-field.js`、主题/动效、公共 CSS、接入指南与 Swagger 静态资源。
 
 ### 2.7 可观测性
@@ -356,7 +358,7 @@ pytest backend/tests -q
 
 | 分组 | 关键变量（默认） |
 |------|------------------|
-| 应用 | `APP_NAME`、`APP_VERSION=2.1.0`、`DEBUG=false`、`DEPLOYMENT_MODE=local\|cloud`、`PUBLIC_BASE_URL`、`SECRET_KEY` |
+| 应用 | `APP_NAME`、`APP_VERSION=2.1.12`、`DEBUG=false`、`DEPLOYMENT_MODE=local\|cloud`、`PUBLIC_BASE_URL`、`SECRET_KEY` |
 | 超管 / 种子 | `SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_SYNC_PASSWORD`、`SEED_DEMO_USERS`、`AUTH_REGISTER_ENABLED`、`METRICS_PUBLIC` |
 | PostgreSQL | `POSTGRES_HOST=postgres`、`POSTGRES_PORT=9543`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD` |
 | Redis | `REDIS_HOST=redis`、`REDIS_PORT=9637`、`REDIS_DB=0`、`REDIS_PASSWORD`（云端必填） |
@@ -367,7 +369,7 @@ pytest backend/tests -q
 | Rerank | `RERANK_PROVIDER=dashscope`、`RERANK_API_KEY`、`RERANK_MODEL` |
 | Langfuse | `LANGFUSE_HOST`（默认 `http://langfuse-web:9310`）、公钥/密钥、自建 `LANGFUSE_NEXTAUTH_*` / `LANGFUSE_*_PASSWORD` / `INIT_*`（见 `.env.example`） |
 | JWT / CORS | `JWT_SECRET_KEY`、`ACCESS_TOKEN_EXPIRE_MINUTES=30`、`CORS_ORIGINS`、`CORS_ALLOW_CREDENTIALS` |
-| 问答 / Guard | `QA_*`、`LLM_GUARD_*`、`ROLE_CACHE_*`、`RAGAS_*` |
+| 问答 / Guard | `QA_*`、`MAX_CITATION_CHART_PAGES`、`CHART_CITATION_USE_LEGACY_LOGIC`、`LLM_GUARD_*`、`ROLE_CACHE_*`（含 shadow）、`RAGAS_*` |
 
 > **安全提示**：模型 API Key 通过 `ModelConfig.api_key_env`（环境变量**名**）引用，**不落库、不在接口明文返回**。
 
@@ -408,8 +410,11 @@ pytest backend/tests -q
 | `generate_openapi.py` | `scripts/` | 生成 `docs/openapi.json` |
 | `fix_unique_super_admin.py` | `scripts/` | 修正非固定账号上的超管角色 |
 | `reindex_chroma.py` | `backend/app/scripts/` | 将 `document_chunks` 回填 Chroma |
+| `clear_qa_citation_images.py` | `backend/app/scripts/` | PR-A 上线后清空历史 `qa_messages.citations.images` 脏数据 |
+| `export_role_cache_shadow_hits.py` | `backend/app/scripts/` | 导出角色缓存 shadow 命中频次（ZSET） |
+| `backfill_l2_from_shadow.py` | `backend/app/scripts/` | shadow 窗口结束后将高频题写入 L2（短 TTL） |
 
-单元/接口回归以 `backend/tests`（pytest）为准。本地联调语料（`testdoc/`、`testdata/`）及依赖它们的灌数脚本不入库。
+发版与 shadow 试跑步骤见 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)。本地联调语料（`testdoc/`、`testdata/`）及依赖它们的灌数脚本不入库。
 
 **Windows 端口速查**：
 
@@ -429,6 +434,7 @@ docker compose ps
 |------|------|
 | [`docs/openapi.json`](docs/openapi.json) | OpenAPI 3.0.3 机器可读契约 |
 | [`docs/API.md`](docs/API.md) | 中文接口详解（字段、权限、约束；含 FAQ §12.1） |
+| [`docs/KB_FAQ.md`](docs/KB_FAQ.md) | 知识库 FAQ 产品说明（精确/语义命中、校验、配置） |
 | [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md) | 第三方 / Android 等接入指南 |
 | [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | 契约使用与变更流程 |
@@ -469,6 +475,7 @@ docker compose ps
 ├── docs/
 │   ├── openapi.json              # OpenAPI 契约
 │   ├── API.md                    # 中文接口文档（含 FAQ）
+│   ├── KB_FAQ.md                 # FAQ 产品说明
 │   ├── API_INTEGRATION_GUIDE.md  # 第三方接入指南
 │   ├── CLOUD_DEPLOY.md           # 云端部署指南
 │   └── CONTRACT.md               # 契约说明
@@ -487,8 +494,8 @@ docker compose ps
 - **分支**：主开发 `develop`，稳定发布 `main`。
 - **提交**：Conventional Commits。
 - **CI**：`.github/workflows/ci.yml` 强制 `ruff` / `black` / `pytest` 通过。
-- **契约与文档同步（上传 / 发分支前必做）**：功能变更须同步更新 `README.md` 与 `docs/` 中相关说明（至少涉及模块的专篇 + 本 README 对应小节）；接口变更需更新 `docs/API.md`，并视需要重跑 `scripts/generate_openapi.py` 更新 `docs/openapi.json`（及 `frontend/shared/docs/` 副本），评审后再合入主干。
-- **勿提交**：`.env`、本地数据卷、含密钥的临时文件（如 `.env1111`）。
+- **契约与文档同步（上传 / 发分支前必做）**：功能变更须同步更新 README.md 与 docs/ 中**正式说明**（至少涉及模块的专篇 + 本 README 对应章节）；接口变更需更新 docs/API.md，并视需要重跑 scripts/generate_openapi.py 更新 docs/openapi.json（及 rontend/shared/docs/ 副本），评审后再合入主干。
+- **勿提交**：.env、本地数据卷、含密钥的临时文件；**过程稿 / 结项清单 / 临时方案**（如 docs/*_PLAN.md、docs/*_ACCEPTANCE.md，已在 .gitignore）— 产品行为以 README.md、docs/API.md、docs/KB_FAQ.md 等正式文档为准。
 
 ## 许可证
 

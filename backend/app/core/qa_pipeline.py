@@ -464,95 +464,41 @@ class QAPipeline:
                 tenant_id=settings.FAQ_TENANT_ID,
                 user_id=str(user.id) if user else None,
                 scope_fingerprint=scope_fp,
+                user_max_level=user_max_level,
                 normalized_question=question,
                 top_k=request.top_k,
             )
-            with tracker.track("qa_cache_lookup"):
+            redis_client = None
+            try:
+                redis_client = get_redis_client()
+            except Exception:  # noqa: BLE001
+                logger.warning("redis client init failed for qa cache", exc_info=True)
                 redis_client = None
-                try:
-                    redis_client = get_redis_client()
-                except Exception:  # noqa: BLE001
-                    redis_client = None
-                # L3 语义候选由外部索引注入；当前无独立语义库时保持空列表
-                cache_hit = await qa_cache_service.lookup(
-                    cache_req,
-                    redis_client=redis_client,
-                    semantic_candidates=[],
-                    permission_ok=True,
-                )
-            if cache_hit.status == "hit" and cache_hit.answer:
-                async for ev in self._emit_direct_answer(
-                    db,
-                    session=session,
-                    user=user,
-                    guest_id=guest_id,
-                    is_guest=is_guest,
-                    question=question,
-                    answer_text=cache_hit.answer,
-                    tracker=tracker,
-                    lf_trace=lf_trace,
-                    route=route,
-                    request=request,
-                    citations=list(cache_hit.citations or []),
-                    retrieval_meta={
-                        "cache": cache_hit.model_dump(),
-                        "source": "qa_multilevel_cache",
-                    },
-                ):
-                    yield ev
-                return
-            if cache_hit.status == "observe":
-                logger.info(
-                    "semantic cache observe request_id=%s similarity=%s reason=%s",
-                    tracker.request_id,
-                    cache_hit.normalized_similarity,
-                    cache_hit.miss_reason,
-                )
 
-            # Singleflight：同题高并发只让一方走完整 LLM；其余等待 L2 回写。
-            acquired_exact_build = await qa_cache_service.try_begin_exact_build(
-                cache_req,
-                redis_client=redis_client,
-            )
-            if not acquired_exact_build:
-                waited = await qa_cache_service.wait_exact_hit(
-                    cache_req,
-                    redis_client=redis_client,
-                    timeout_seconds=30.0,
-                )
-                if waited is not None and waited.answer:
-                    async for ev in self._emit_direct_answer(
-                        db,
-                        session=session,
-                        user=user,
-                        guest_id=guest_id,
-                        is_guest=is_guest,
-                        question=question,
-                        answer_text=waited.answer,
-                        tracker=tracker,
-                        lf_trace=lf_trace,
-                        route=route,
-                        request=request,
-                        citations=list(waited.citations or []),
-                        retrieval_meta={
-                            "cache": waited.model_dump(),
-                            "source": "qa_multilevel_cache",
-                            "singleflight_wait": True,
-                        },
-                    ):
-                        yield ev
-                    return
-
-            # [3] 角色缓存精确命中（过渡期只读回退）：权限复核通过后直接返回。
+            # [3] 命中优先级：精确/语义 FAQ 已过 → 角色缓存只读 → L2/L3 → RAG
             cache_match = None
+            from app.services.role_cache_shadow import (
+                RoleCacheLookupMode,
+                record_shadow_hit,
+                resolve_role_cache_lookup_mode,
+            )
+
+            role_cache_mode = RoleCacheLookupMode.DISABLED
             if settings.ROLE_CACHE_READONLY_FALLBACK:
+                role_cache_mode = await resolve_role_cache_lookup_mode(redis_client)
+            if role_cache_mode != RoleCacheLookupMode.DISABLED:
                 with tracker.track("role_cache_lookup"):
                     cache_match = await role_cache_service.lookup(
                         db,
                         question=question,
                         user=user,
                         authorized_kb_ids=[target.kb_id for target in targets],
+                        user_max_level=user_max_level,
+                        record_hit=role_cache_mode == RoleCacheLookupMode.NORMAL,
                     )
+                if cache_match is not None and role_cache_mode == RoleCacheLookupMode.SHADOW:
+                    await record_shadow_hit(redis_client, question)
+                    cache_match = None
             if cache_match is not None:
                 citations = await self._enrich_citation_images(db, list(cache_match.citations))
                 answer_text = cache_match.answer
@@ -630,12 +576,96 @@ class QAPipeline:
                 try:
                     lf_trace.update(output=answer_text[:500])
                 except Exception:  # noqa: BLE001
-                    pass
+                    logger.debug("langfuse update after role cache failed", exc_info=True)
                 try:
                     lf.flush()
                 except Exception:  # noqa: BLE001
-                    pass
+                    logger.debug("langfuse flush after role cache failed", exc_info=True)
                 return
+
+            # [3.5] 多级 QA 缓存 L2/L3（FAQ 近义候选注入 L3）
+            with tracker.track("qa_cache_lookup"):
+                semantic_candidates: list[dict] = []
+                try:
+                    semantic_candidates = await kb_faq_service.list_semantic_candidates_for_cache(
+                        db,
+                        question=question,
+                        tenant_id=settings.FAQ_TENANT_ID,
+                        authorized_kb_ids=[target.kb_id for target in targets],
+                        user_max_level=user_max_level,
+                        limit=5,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("build L3 semantic candidates failed", exc_info=True)
+                    semantic_candidates = []
+                cache_hit = await qa_cache_service.lookup(
+                    cache_req,
+                    redis_client=redis_client,
+                    semantic_candidates=semantic_candidates,
+                    permission_ok=True,
+                )
+            if cache_hit.status == "hit" and cache_hit.answer:
+                async for ev in self._emit_direct_answer(
+                    db,
+                    session=session,
+                    user=user,
+                    guest_id=guest_id,
+                    is_guest=is_guest,
+                    question=question,
+                    answer_text=cache_hit.answer,
+                    tracker=tracker,
+                    lf_trace=lf_trace,
+                    route=route,
+                    request=request,
+                    citations=list(cache_hit.citations or []),
+                    retrieval_meta={
+                        "cache": cache_hit.model_dump(),
+                        "source": "qa_multilevel_cache",
+                    },
+                ):
+                    yield ev
+                return
+            if cache_hit.status == "observe":
+                logger.info(
+                    "semantic cache observe request_id=%s similarity=%s reason=%s",
+                    tracker.request_id,
+                    cache_hit.normalized_similarity,
+                    cache_hit.miss_reason,
+                )
+
+            # Singleflight：同题高并发只让一方走完整 LLM；其余等待 L2 回写。
+            acquired_exact_build = await qa_cache_service.try_begin_exact_build(
+                cache_req,
+                redis_client=redis_client,
+            )
+            if not acquired_exact_build:
+                waited = await qa_cache_service.wait_exact_hit(
+                    cache_req,
+                    redis_client=redis_client,
+                    timeout_seconds=30.0,
+                )
+                if waited is not None and waited.answer:
+                    async for ev in self._emit_direct_answer(
+                        db,
+                        session=session,
+                        user=user,
+                        guest_id=guest_id,
+                        is_guest=is_guest,
+                        question=question,
+                        answer_text=waited.answer,
+                        tracker=tracker,
+                        lf_trace=lf_trace,
+                        route=route,
+                        request=request,
+                        citations=list(waited.citations or []),
+                        retrieval_meta={
+                            "cache": waited.model_dump(),
+                            "source": "qa_multilevel_cache",
+                            "singleflight_wait": True,
+                        },
+                    ):
+                        yield ev
+                    return
 
             # 模型配置快照：普通用户 temperature 默认不覆盖已发布/环境配置
             model_snap = await model_config_registry.resolve_chat_snapshot(
@@ -1448,12 +1478,11 @@ class QAPipeline:
         for i, hit in enumerate(hits, start=1):
             sticky = hit.source == "sticky" or (hit.metadata or {}).get("sticky")
             tag = " | 会话延续" if sticky else ""
-            try:
-                chart_n = int((hit.metadata or {}).get("chart_page_count") or 0)
-            except (TypeError, ValueError):
-                chart_n = 0
-            if chart_n > 0:
-                tag += f" | 含图表{chart_n}页（界面将展示）"
+            from app.services.document_charts import pages_for_citation_metadata
+
+            chart_pages = pages_for_citation_metadata(hit.metadata)
+            if chart_pages:
+                tag += f" | 相关页 {','.join(str(p) for p in chart_pages)}"
             block_type = (hit.metadata or {}).get("block_type")
             type_tag = f" | 类型：{block_type}" if block_type else ""
             body = evidence_content_from_metadata(hit.content, hit.metadata)
@@ -1483,46 +1512,73 @@ class QAPipeline:
         citation["content"] = evidence_content_from_metadata(hit.content, hit.metadata)
         if (hit.metadata or {}).get("block_type"):
             citation["block_type"] = hit.metadata.get("block_type")
-        return citation
+        from app.services.chart_citation import citation_safe_citation
+
+        return citation_safe_citation(citation)
 
     async def _enrich_citation_images(
         self,
         db: AsyncSession,
         citations: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """为缺少 images 的 PDF 引用按需栅格化并补全 URL（兼容旧文档）。"""
+        """按引用已声明的页码补全 PNG；不把整本 PDF 塞进 images。"""
         if not citations:
             return citations
         from app.repositories import document as doc_repo
-        from app.services.document_charts import ensure_pdf_charts
+        from app.services.chart_citation import citation_safe_citation, max_citation_chart_pages
+        from app.services.document_charts import ensure_pdf_charts, pages_for_citation_metadata
 
-        cache: dict[str, list[dict[str, Any]]] = {}
+        max_pages = max_citation_chart_pages()
+        doc_cache: dict[str, Any] = {}
         for citation in citations:
-            doc_id = str(citation.get("doc_id") or "")
-            if doc_id in cache:
-                citation["images"] = cache[doc_id]
-                continue
-            existing = citation.get("images") or []
+            existing = list(citation.get("images") or [])
+            if len(existing) > max_pages:
+                existing = existing[:max_pages]
+                citation["images"] = existing
             if existing:
-                cache[doc_id] = existing
+                citation.update(citation_safe_citation(citation))
                 continue
+
+            wanted_pages = pages_for_citation_metadata(
+                {
+                    "page": citation.get("page"),
+                    "pages": citation.get("pages"),
+                    "page_start": citation.get("page_start"),
+                    "page_end": citation.get("page_end"),
+                    "chart_page_count": citation.get("chart_page_count"),
+                },
+                max_pages=max_pages,
+            )
+            if not wanted_pages:
+                citation["images"] = []
+                citation.update(citation_safe_citation(citation))
+                continue
+
+            doc_id = str(citation.get("doc_id") or "")
+            if not doc_id:
+                citation["images"] = []
+                citation.update(citation_safe_citation(citation))
+                continue
+            if doc_id not in doc_cache:
+                try:
+                    doc_cache[doc_id] = await doc_repo.get_document_by_id(db, uuid.UUID(doc_id))
+                except (ValueError, TypeError):
+                    doc_cache[doc_id] = None
+            doc = doc_cache[doc_id]
             images: list[dict[str, Any]] = []
-            try:
-                doc = await doc_repo.get_document_by_id(db, uuid.UUID(doc_id))
-            except (ValueError, TypeError):
-                doc = None
             if doc is not None and (doc.file_type or "").lower().lstrip(".") == "pdf" and doc.file_path:
                 try:
                     images = ensure_pdf_charts(
                         kb_id=doc.kb_id,
                         doc_id=doc.id,
                         file_path=doc.file_path,
+                        pages=wanted_pages,
                     )
                 except Exception as exc:
                     logger.warning("ensure_pdf_charts failed doc=%s: %s", doc_id, exc)
                     images = []
-            cache[doc_id] = images
             citation["images"] = images
+            citation.update(citation_safe_citation(citation))
         return citations
 
     async def _persist_turn(

@@ -441,7 +441,7 @@ Authorization: Bearer <access_token>
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| GET | `/qa/accessible-kbs` | **可选认证** | 返回当前身份可检索且已建索引的知识库 `{items:[{id,name}], total}`；供问答页下拉使用 |
+| GET | `/qa/accessible-kbs` | **可选认证** | 返回当前身份可检索且已建索引的知识库 `{items:[{id,name}], total, max_charts}`；`max_charts` 为前端「相关图表」展示上限；供问答页下拉使用 |
 
 **SSE 事件**：
 
@@ -461,7 +461,7 @@ Authorization: Bearer <access_token>
 
 > **知识库 FAQ** 精确命中时走短路径秒答（`retrieval_meta` / 元数据含 `source=kb_faq`）；多级缓存 L1–L4 由功能开关控制；角色缓存过渡期仍可发 `cache_hit`。接口与行为见下文 [12.1](#121-知识库-faq摘要)。
 
-**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky` 会话延续）；可选 `images[]`（`page`、`url`），为 PDF 入库栅格化图表页，URL 形如 `/api/v1/qa/documents/{doc_id}/charts/page-XX.png`（权限与 `/qa/ask` 一致）。向量相关度一般为 `1 - cosine_distance`。
+**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky` 会话延续）；可选 `images[]`（`page`、`url`），为与**本命中片段相关**的 PDF 页缩略图（URL 形如 `/api/v1/qa/documents/{doc_id}/charts/page-XX.png`，权限与 `/qa/ask` 一致）。**不会**按文档总页数展开整本 PDF；无页码元数据时可不返回 `images`。向量相关度一般为 `1 - cosine_distance`。
 
 **多轮粘性证据**（`QA_STICKY_EVIDENCE_ENABLED`，默认开）：路由为上下文跟进问且上轮助手消息含 citations 时，将上轮引用分段合并进本轮证据（并可补同文档邻段），避免 top_k 漏召回导致前后矛盾。会话历史仍**不得**替代检索证据；本轮无依据时说「本轮检索依据不足」，不得称上轮为幻觉。
 
@@ -556,18 +556,20 @@ Authorization: Bearer <access_token>
 
 ## 12.1 知识库 FAQ（摘要）
 
-库级 FAQ 缓存（表 `kb_cached_faqs`，唯一键 `kb_id + normalized_question`）：文档 `ready` 后**异步**生成，不阻塞向量化完成。问答侧对规范化后的**精确同题**短路秒答（跳过 Embedding / 检索 / 生成）；完整 LLM Guard 在 FAQ **未命中**后执行。未命中则进入多级 QA 缓存 → 角色缓存只读回退 → 完整 RAG。生成去重用 `FAQ_SIMILARITY_THRESHOLD`（不用于问答语义命中）。配置项见 `.env.example`（`FAQ_*`、`ROLE_CACHE_*`）。
+库级 FAQ 缓存（表 `kb_cached_faqs`，唯一键 `kb_id + normalized_question`）：文档 `ready` 后**异步**生成，不阻塞向量化完成。
+
+问答侧命中顺序：**规范化精确同题** →（`FAQ_SEMANTIC_HIT_ENABLED`）**语义近义**（问题与 FAQ `embedding` 余弦 ≥ `FAQ_SIMILARITY_THRESHOLD`）→ 秒答短路（跳过 Embedding / 检索 / 生成；完整 LLM Guard 在 FAQ **未命中**后执行）。未命中则进入多级 QA 缓存 → 角色缓存只读回退 → 完整 RAG。生成去重与语义命中共用相似度阈值配置。产品说明见 [`KB_FAQ.md`](./KB_FAQ.md)；配置项见 `.env.example`（`FAQ_*`、`ROLE_CACHE_*`）。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/faq/list` | 访客热门（可选登录；密级过滤） |
-| GET | `/admin/faq/list` | 管理列表（`kb_id` 等） |
-| PUT | `/admin/faq/{id}` | 编辑（会失效该库 FAQ Redis） |
+| GET | `/admin/faq/list` | 管理列表（`kb_id` 等；可含过时/校验字段） |
+| PUT | `/admin/faq/{id}` | 编辑（会失效该库 FAQ Redis，并刷新 embedding） |
 | POST | `/admin/faq/batch` | 批量（含密级） |
 | POST | `/knowledge-bases/{kb_id}/faq/toggle` | 库级开关 `faq_enabled` |
 | POST | `/admin/knowledge-bases/{kb_id}/regenerate-faq` | 重生 |
 
-知识库更新可含 `is_pinned` / `faq_enabled`；列表响应含 `can_manage`、`faq_count` 等。快照含 `snapshot_faqs`；回退可还原 FAQ。默认上限：每文档 25 / 每库 500（可配）。
+知识库更新可含 `is_pinned` / `faq_enabled`；列表响应含 `can_manage`、`faq_count` 等。快照含 `snapshot_faqs`；回退可还原 FAQ。默认上限：每文档 25 / 每库 500（可配）。答案校验可将 FAQ 标为 `pending_review` / `rag_drift`，**不自动改写答案**。
 
 ---
 
@@ -723,8 +725,10 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| 2.1.9 | 2026-08-13 | FAQ 知识库缓存：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 §12.1 |
+| 2.1.12 | 2026-08-23 | 图表引用 P0：`MAX_CITATION_CHART_PAGES`、`CHART_CITATION_USE_LEGACY_LOGIC`；`GET /qa/accessible-kbs` 增加 `max_charts`；角色缓存 shadow 观测与窗口自动关闭；见 RUNBOOK.md |
+| 2.1.11 | 2026-08-20 | FAQ 语义命中与答案校验告警；citations.images 仅挂命中相关页（非整本 PDF）；见 §12.1、KB_FAQ.md |
 | 2.1.10 | 2026-08-14 | Chroma 固定至 1.5.5，Python 客户端保持 `>=1.5,<2.0`，避免使用 `latest` 造成跨版本数据不兼容。 |
+| 2.1.9 | 2026-08-13 | FAQ 知识库缓存：库级 FAQ、快照含 FAQ、密级门控、热门秒答；见 §12.1 |
 | 2.1.8 | 2026-08-06 | 问答页：`rewrite_enabled` 按请求可选、`GET /qa/accessible-kbs`、2000 字提示；上传字节进度；txt/md 编码放宽；契约重生成 |
 | 2.1.7 | 2026-07-31 | 云部署端口统一至 9000–9999（入口 9080）；Compose 自建 Langfuse（9310）；Chroma 宿主机 9800→容器 8000；见 CLOUD_DEPLOY.md |
 | 2.1.6 | 2026-07-27 | 前端：营销落地页（分栏、打字机、粒子场、登录弹层、访客入口、品牌标）；无 OpenAPI 变更；见 README §2.6 |

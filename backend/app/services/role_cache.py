@@ -25,7 +25,9 @@ from app.models.identity import Role, User, user_roles
 from app.models.knowledge_base import KBPermission, KnowledgeBase
 from app.models.qa import QAMessage, QASession
 from app.models.role_cache import RoleCacheConfig, RoleCachedQuestion
+from app.models.sensitivity import LEVEL_ORDER, normalize_sensitivity_level
 from app.services.llm import llm_service
+from app.services.sensitivity_service import sensitivity_service
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +109,10 @@ class RoleCacheService:
         question: str,
         user: User | None,
         authorized_kb_ids: list[uuid.UUID],
+        user_max_level: str = "normal",
+        record_hit: bool = True,
     ) -> CacheMatch | None:
-        """精确匹配缓存，并再次验证答案来源知识库仍在用户授权范围内。"""
+        """精确匹配缓存，并再次验证答案来源知识库与密级仍在用户授权范围内。"""
         normalized = normalize_cache_question(question)
         allowed_kb_ids = set(authorized_kb_ids)
         if not normalized or not allowed_kb_ids:
@@ -142,9 +146,19 @@ class RoleCacheService:
             # 空来源无法证明权限；来源必须完全包含在用户本轮授权知识库中。
             if not source_scope or not source_scope.issubset(allowed_kb_ids):
                 continue
-            entry.hit_count += 1
-            entry.last_hit_at = utcnow()
-            await db.flush()
+            content_level = await self._resolve_entry_sensitivity(db, entry)
+            if not sensitivity_service.can_access_level(user_max_level, content_level):
+                logger.info(
+                    "role_cache sensitivity miss entry_id=%s user_max=%s content=%s",
+                    entry.id,
+                    user_max_level,
+                    content_level,
+                )
+                continue
+            if record_hit:
+                entry.hit_count += 1
+                entry.last_hit_at = utcnow()
+                await db.flush()
             return CacheMatch(
                 entry_id=entry.id,
                 role_id=entry.role_id,
@@ -155,6 +169,27 @@ class RoleCacheService:
                 source=entry.source,
             )
         return None
+
+    async def _resolve_entry_sensitivity(self, db: AsyncSession, entry: RoleCachedQuestion) -> str:
+        """从来源文档推导条目最高密级；无可用文档时按 normal（历史条目兼容）。"""
+        doc_ids: set[uuid.UUID] = set()
+        for citation in entry.citations or []:
+            raw = citation.get("doc_id") if isinstance(citation, dict) else None
+            if not raw:
+                continue
+            try:
+                doc_ids.add(uuid.UUID(str(raw)))
+            except (TypeError, ValueError):
+                continue
+        if not doc_ids:
+            return "normal"
+        docs = list((await db.scalars(select(Document).where(Document.id.in_(list(doc_ids))))).all())
+        if not docs:
+            return "normal"
+        return max(
+            (normalize_sensitivity_level(getattr(d, "sensitivity_level", None)) for d in docs),
+            key=lambda lv: LEVEL_ORDER.get(lv, 0),
+        )
 
     async def analyze_documents(
         self,

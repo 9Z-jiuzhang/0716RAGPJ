@@ -49,15 +49,15 @@ class Settings(BaseSettings):
 
     # ---------- 应用基础 ----------
     APP_NAME: str = "AI-KnowledgeBase-RAG"
-    APP_VERSION: str = "2.1.0"
+    APP_VERSION: str = "2.1.12"
     DEBUG: bool = False
     # local=开发联调；cloud=云端生产（启动时强制校验密钥与 CORS）
     DEPLOYMENT_MODE: str = "local"
     SECRET_KEY: str = "change-me"
     # 对外公网根地址（含协议与域名，无尾斜杠），云端部署必填，例如 https://kb.example.com
     PUBLIC_BASE_URL: str = ""
-    # 唯一超管账号 super 的登录密码：仅通过 .env 维护，页面不可改密
-    SUPER_ADMIN_PASSWORD: str = "Super123!"
+    # 唯一超管账号 super 的登录密码：仅通过 .env 维护，页面不可改密；代码无默认值，缺则启动失败
+    SUPER_ADMIN_PASSWORD: str = ""
     # 是否在每次启动时把 DB 中 super 密码强制同步为 SUPER_ADMIN_PASSWORD（云端建议 false，首次引导后再关）
     SUPER_ADMIN_SYNC_PASSWORD: bool = True
     # 是否播种演示账号 admin / staff_*（云端务必 false）
@@ -76,7 +76,8 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 9543
     POSTGRES_DB: str = "knowledge_base"
     POSTGRES_USER: str = "kb_user"
-    POSTGRES_PASSWORD: str = "change-me"
+    # 无代码默认值；必须在 .env 中配置，缺则启动失败
+    POSTGRES_PASSWORD: str = ""
 
     # ---------- Redis（会话热状态与并发隔离） ----------
     REDIS_HOST: str = "redis"
@@ -128,8 +129,9 @@ class Settings(BaseSettings):
     # 每次向量化请求的最大文本条数；按厂商限额调整
     EMBEDDING_BATCH_SIZE: int = 10
 
-    # ---------- Rerank 重排（默认千问 DashScope） ----------
+    # ---------- Rerank 重排（默认千问 DashScope；产品决策默认值，非密钥） ----------
     # 密钥为空时服务会安全降级为原始检索排序，不中断知识库问答。
+    # 如换供应商：请同时改此处默认（或仅改 .env 的 RERANK_*）与 .env.example 注释。
     RERANK_PROVIDER: str = "dashscope"
     RERANK_API_KEY: str = ""
     RERANK_MODEL: str = "qwen3-vl-rerank"
@@ -282,6 +284,25 @@ class Settings(BaseSettings):
     # 过渡期：停止角色缓存写入，命中仅只读回退
     ROLE_CACHE_WRITE_ENABLED: bool = False
     ROLE_CACHE_READONLY_FALLBACK: bool = True
+    # Shadow 观测：只统计「本会走角色缓存」的题，不短路；窗口结束后自动关读路径
+    ROLE_CACHE_SHADOW_METRICS_ENABLED: bool = False
+    ROLE_CACHE_SHADOW_DAYS: int = 14
+    ROLE_CACHE_SHADOW_CLOSING_SOON_DAYS: int = 3
+    # ---------- 问答引用图表 ----------
+    MAX_CITATION_CHART_PAGES: int = 5
+    QA_CITATION_CHART_DISPLAY_LIMIT: int = 8
+    CHART_CITATION_USE_LEGACY_LOGIC: bool = False
+    # ---------- 2.1.13 UX 能力开关（默认开；出问题 env 一行关，无需发新版） ----------
+    MARKDOWN_RENDER_ENABLED: bool = True
+    INLINE_CITATION_ENABLED: bool = True
+    # 单图 asset 引用与代理 API（关则仅 page 级整页图）
+    ASSET_CITATION_ENABLED: bool = True
+    SUGGESTED_QUESTIONS_ENABLED: bool = True
+    CLARIFY_ENABLED: bool = True
+    # cite 轻校验：默认仅观测（全量算 overlap）；true 时才降 confidence / 展示 unverified
+    CITE_VALIDATION_ENFORCE: bool = False
+    # 全文检索 analyzer：default | zh_jieba（双后端 env 切换，勿绑死重建）
+    FULLTEXT_ANALYZER_BACKEND: str = "default"
     # ---------- 知识库 FAQ 主缓存 ----------
     FAQ_MASTER_SWITCH: bool = True
     FAQ_GENERATION_ENABLED: bool = True
@@ -304,6 +325,18 @@ class Settings(BaseSettings):
         r"1[3-9]\d{9}",
         r"[\u4e00-\u9fa5]{2,4}薪[资酬]",
     ]
+    # 二期：FAQ 语义命中（写入 embedding + 近义命中）
+    FAQ_SEMANTIC_HIT_ENABLED: bool = True
+    FAQ_SEMANTIC_CANDIDATE_LIMIT: int = 200
+    # 二期：A4-a 答案校验（只告警不覆盖）
+    FAQ_VERIFY_ENABLED: bool = True
+    FAQ_VERIFY_HIT_THRESHOLD: int = 5
+    FAQ_VERIFY_DAILY_LIMIT: int = 200
+    FAQ_VERIFY_CONCURRENCY: int = 3
+    FAQ_VERIFY_DAILY_SCAN_ENABLED: bool = False
+    FAQ_VERIFY_ANSWER_SIM_THRESHOLD: float = 0.72
+    FAQ_VERIFY_SCHEDULER_POLL_SECONDS: int = 86400
+    FAQ_VERIFY_ON_DOCUMENT_READY: bool = True
     # ---------- LLM Guard 与意图识别 ----------
     LLM_GUARD_ENABLED: bool = True
     # 本地规则无法明确归类时才调用 LLM 分类器，兼顾安全性与缓存节省效果。
@@ -355,8 +388,19 @@ class Settings(BaseSettings):
             return []
         return [part.strip() for part in raw.split(",") if part.strip()]
 
+    def assert_required_secrets(self) -> None:
+        """任意部署模式：超管密码与 Postgres 密码必须由 env 注入，禁止空值。"""
+        problems: list[str] = []
+        if not (self.SUPER_ADMIN_PASSWORD or "").strip():
+            problems.append("SUPER_ADMIN_PASSWORD 未配置（请在 .env 中设置，代码无默认口令）")
+        if not (self.POSTGRES_PASSWORD or "").strip():
+            problems.append("POSTGRES_PASSWORD 未配置（请在 .env 中设置，代码无默认口令）")
+        if problems:
+            raise RuntimeError("启动安全检查未通过：" + "；".join(problems))
+
     def assert_cloud_ready(self) -> None:
         """DEPLOYMENT_MODE=cloud 时拒绝占位密钥，避免带着默认口令上线。"""
+        self.assert_required_secrets()
         if (self.DEPLOYMENT_MODE or "local").strip().lower() != "cloud":
             return
         weak_markers = {"", "change-me", "<请填写>", "Super123!", "Admin123!", "Staff123!"}

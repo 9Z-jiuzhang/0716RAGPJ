@@ -85,6 +85,18 @@ faq_cache_hit_total = Counter(
     "FAQ cache hit count",
     ["source"],
 )
+faq_semantic_hit_total = Counter(
+    "faq_semantic_hit_total",
+    "FAQ semantic hit count",
+)
+faq_semantic_miss_total = Counter(
+    "faq_semantic_miss_total",
+    "FAQ semantic miss count (exact miss then no near match)",
+)
+faq_verify_stale_total = Counter(
+    "faq_verify_stale_total",
+    "FAQ verify marked stale (rag_drift)",
+)
 faq_generation_total = Counter(
     "faq_generation_total",
     "FAQ generation outcomes",
@@ -104,11 +116,61 @@ faq_active_count = Gauge(
     "Active FAQ count (process-local last set)",
 )
 
+role_cache_shadow_hit_total = Counter(
+    "role_cache_shadow_hit_total",
+    "Role cache hits observed during shadow (no short-circuit)",
+)
+role_cache_shadow_window_closing_soon_total = Counter(
+    "role_cache_shadow_window_closing_soon_total",
+    "Role cache shadow window closing soon warnings",
+)
+role_cache_shadow_started_at_seconds = Gauge(
+    "role_cache_shadow_started_at_seconds",
+    "Unix timestamp when role cache shadow window started",
+)
+
+# 2.1.13 上线后 7 日监控（RUNBOOK §2.1.13）
+cite_validation_unverified_total = Counter(
+    "cite_validation_unverified_total",
+    "Citations flagged unverified by overlap check (computed even when enforce=false)",
+)
+suggested_questions_total = Counter(
+    "suggested_questions_total",
+    "Suggested questions SSE tail events emitted",
+)
+suggested_questions_click_total = Counter(
+    "suggested_questions_click_total",
+    "User clicks on suggested question chips (API)",
+)
+clarify_triggered_total = Counter(
+    "clarify_triggered_total",
+    "Clarification反问 triggered (multi-topic low confidence)",
+)
+qa_feedback_total = Counter(
+    "qa_feedback_total",
+    "QA message feedback submissions",
+    ["rating", "actor"],
+)
+fulltext_query_latency_seconds = Histogram(
+    "fulltext_query_latency_seconds",
+    "Fulltext retrieval latency (CJK analyzer monitoring)",
+    ["backend"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+)
+
 # 预创建常用 label，避免从未命中时 /metrics 搜不到 faq_cache_hit_total
 faq_cache_hit_total.labels(source="kb_faq")
 faq_cache_hit_total.labels(source="redis")
+faq_cache_hit_total.labels(source="kb_faq_semantic")
+faq_cache_hit_total.labels(source="click")
 faq_generation_total.labels(status="success")
 faq_generation_total.labels(status="error")
+qa_feedback_total.labels(rating="thumbs_down", actor="visitor")
+qa_feedback_total.labels(rating="thumbs_up", actor="visitor")
+qa_feedback_total.labels(rating="thumbs_down", actor="user")
+qa_feedback_total.labels(rating="thumbs_up", actor="user")
+fulltext_query_latency_seconds.labels(backend="default")
+fulltext_query_latency_seconds.labels(backend="zh_jieba")
 
 
 def metrics_payload() -> tuple[bytes, str]:
