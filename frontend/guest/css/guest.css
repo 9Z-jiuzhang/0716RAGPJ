@@ -3543,6 +3543,70 @@ html[data-theme="light"] .msg-thinking-dots i {
   color: #fff;
 }
 
+.inline-citation.is-opening {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.citation-pdf-link {
+  display: inline;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.citation-pdf-link:hover {
+  opacity: 0.85;
+}
+
+.cite-hover-card {
+  position: fixed;
+  z-index: 1200;
+  width: min(320px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  background: var(--color-surface, #fff);
+  color: var(--color-text);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  pointer-events: none;
+}
+
+html[data-theme="dark"] .cite-hover-card {
+  background: rgba(28, 32, 42, 0.96);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.cite-hover-card-title {
+  font-size: var(--font-size-sm);
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.cite-hover-card-meta {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.cite-hover-card-snippet {
+  margin-top: 8px;
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .citation-index {
   color: var(--color-primary);
   font-weight: 600;
@@ -3624,9 +3688,37 @@ html[data-theme="dark"] .model-reasoning.model-reasoning-think > summary {
   font-family: var(--font-sans, inherit);
 }
 
-/* 流水线步骤面板保持独立，不占用「推理过程」样式 */
+/* 流水线步骤：沿用「正在思考中」文字 + 三点动画 */
+.ask-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-progress-steps .msg-thinking.is-pending {
+  opacity: 0.42;
+}
+
+.ask-progress-steps .msg-thinking.is-done {
+  opacity: 0.72;
+}
+
+.msg-pipeline-reasoning .ask-progress-steps .msg-thinking {
+  white-space: nowrap;
+}
+
+.citations--pending .citation-heading.msg-thinking {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 0;
+}
+
+/* 流水线步骤面板 */
 .msg-pipeline-reasoning {
   margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
   white-space: normal;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -3656,11 +3748,37 @@ html[data-theme="light"] .msg-pipeline-reasoning {
   border-radius: 0 var(--radius-card) var(--radius-card) 0;
 }
 
+.citations--pending {
+  min-height: 1.6em;
+}
+
+.stream-cursor,
+.citations-pending-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.15em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--color-primary, #3887f0);
+  border-radius: 1px;
+  animation: stream-cursor-blink 0.85s step-end infinite;
+}
+
+@keyframes stream-cursor-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
 .citation-heading {
   font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--color-text);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .citation-charts {
@@ -3706,7 +3824,8 @@ html[data-theme="light"] .citation-charts-fold {
 }
 
 .citation-charts-fallback {
-  margin: 6px 0 10px;
+  margin: 0 0 4px;
+  line-height: 1.3;
 }
 
 .citation-charts-scroll-btn {
@@ -3715,6 +3834,8 @@ html[data-theme="light"] .citation-charts-fold {
   background: none;
   border: none;
   padding: 0;
+  margin: 0;
+  line-height: 1.3;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -3912,13 +4033,19 @@ details.citation-item > summary.citation-meta::-webkit-details-marker {
 
 details.citation-item > summary.citation-meta::before {
   content: "▸";
-  font-size: var(--font-size-2xs);
-  color: var(--color-text-secondary);
-  transition: var(--transition);
+  flex-shrink: 0;
+  width: 1.1em;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-primary, #3b82f6);
+  opacity: 0.95;
+  transition: transform 0.15s ease, opacity 0.15s ease;
 }
 
 details.citation-item[open] > summary.citation-meta::before {
   transform: rotate(90deg);
+  opacity: 1;
 }
 
 .citation-content {

@@ -307,7 +307,28 @@ class KBFaqService:
                     data = json.loads(cached)
                 except json.JSONDecodeError:
                     continue
-                level = normalize_sensitivity_level(data.get("sensitivity_level"))
+                # 只信 DB：Redis 仅作加速；密级/启停以 KBCachedFAQ 为准
+                faq_id_raw = data.get("faq_id")
+                faq_row = None
+                if faq_id_raw:
+                    try:
+                        faq_row = await db.scalar(
+                            select(KBCachedFAQ).where(KBCachedFAQ.id == uuid.UUID(str(faq_id_raw)))
+                        )
+                    except (TypeError, ValueError):
+                        faq_row = None
+                if (
+                    faq_row is None
+                    or faq_row.kb_id != kb_id
+                    or not bool(faq_row.is_active)
+                    or str(faq_row.status or "") != "active"
+                ):
+                    try:
+                        await redis_client.delete(cache_key)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    continue
+                level = normalize_sensitivity_level(getattr(faq_row, "sensitivity_level", None))
                 if not sensitivity_service.can_access_level(user_max_level, level):
                     denied = True
                     denied_level = level
@@ -319,18 +340,18 @@ class KBFaqService:
                         sensitivity_level=level,
                         source="faq",
                         conversation_id=conversation_id,
-                        reason="FAQ Redis 命中但密级不足",
+                        reason="FAQ Redis 命中但密级不足（以 DB 为准）",
                     )
                     continue
                 faq_cache_hit_total.labels(source="redis").inc()
                 return FAQHitOutcome(
                     match=FAQMatch(
-                        faq_id=uuid.UUID(data["faq_id"]) if data.get("faq_id") else uuid.uuid4(),
+                        faq_id=faq_row.id,
                         kb_id=kb_id,
                         question=question,
-                        answer=self.clean_answer_for_output(data.get("answer") or ""),
-                        chunk_ids=[str(x) for x in (data.get("chunk_ids") or [])],
-                        citations=list(data.get("citations") or []),
+                        answer=self.clean_answer_for_output(faq_row.answer or data.get("answer") or ""),
+                        chunk_ids=[str(x) for x in (faq_row.chunk_ids or data.get("chunk_ids") or [])],
+                        citations=list(faq_row.citations or data.get("citations") or []),
                         source="redis",
                         sensitivity_level=level,
                     )

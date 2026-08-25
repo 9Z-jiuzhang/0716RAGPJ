@@ -299,6 +299,54 @@ class SensitivityService:
         )
         return {"items": [audit_row_dict(r) for r in rows], "total": total, "page": page, "size": size}
 
+    async def max_level_for_document_ids(
+        self,
+        db: AsyncSession,
+        doc_ids: list[uuid.UUID] | set[uuid.UUID],
+    ) -> str:
+        """从来源文档推导最高密级；无文档时按 normal。"""
+        from app.models.document import Document
+
+        ids = list(doc_ids)
+        if not ids:
+            return "normal"
+        docs = list((await db.scalars(select(Document).where(Document.id.in_(ids)))).all())
+        if not docs:
+            return "normal"
+        return max(
+            (normalize_sensitivity_level(getattr(d, "sensitivity_level", None)) for d in docs),
+            key=lambda lv: LEVEL_ORDER.get(lv, 0),
+        )
+
+    async def citations_allowed_for_user(
+        self,
+        db: AsyncSession,
+        citations: list[Any] | None,
+        *,
+        user_max_level: str,
+    ) -> bool:
+        """引用文档密级是否均不超过用户上限（只信 DB documents 表）。
+
+        无 doc_id 的引用视为无法核验，放行（依赖改密级时的缓存失效兜底）。
+        """
+        doc_ids: set[uuid.UUID] = set()
+        for citation in citations or []:
+            raw = None
+            if isinstance(citation, dict):
+                raw = citation.get("doc_id") or citation.get("document_id")
+            else:
+                raw = getattr(citation, "doc_id", None)
+            if not raw:
+                continue
+            try:
+                doc_ids.add(uuid.UUID(str(raw)))
+            except (TypeError, ValueError):
+                continue
+        if not doc_ids:
+            return True
+        content_level = await self.max_level_for_document_ids(db, doc_ids)
+        return self.can_access_level(user_max_level, content_level)
+
     async def filter_hits_by_sensitivity(
         self,
         db: AsyncSession,
@@ -306,7 +354,10 @@ class SensitivityService:
         *,
         user_max_level: str,
     ) -> tuple[list[Any], int]:
-        """按 document_chunks.sensitivity_level 过滤检索命中；返回 (保留列表, 滤掉数量)。"""
+        """按 document_chunks.sensitivity_level（DB）过滤检索命中；忽略向量 metadata 密级。
+
+        返回 (保留列表, 滤掉数量)。chunk 在 DB 找不到时按 normal（保持现状）。
+        """
         if not hits:
             return [], 0
         from app.models.document import DocumentChunk

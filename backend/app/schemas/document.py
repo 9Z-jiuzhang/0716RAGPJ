@@ -39,6 +39,22 @@ class DocumentSensitivityUpdate(BaseModel):
     sensitivity_level: Literal["normal", "confidential", "restricted"] = "normal"
 
 
+class DocumentSensitivitySyncStats(BaseModel):
+    """改密级后的同步统计（分段 / FAQ / 缓存失效）。"""
+
+    sensitivity_level: str
+    chunks_updated: int = 0
+    faq_related: int = 0
+    faq_updated: int = 0
+    faq_redis_deleted: int = 0
+    qa_cache_deleted: int = 0
+
+
+class DocumentSensitivityUpdateResponse(BaseModel):
+    document: DocumentResponse
+    sync: DocumentSensitivitySyncStats
+
+
 class DocumentContentPreviewResponse(BaseModel):
     """文档正文预览（管理端预览面板）。"""
 

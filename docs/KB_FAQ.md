@@ -24,13 +24,17 @@
 | 精确命中 | 规范化同题秒答；点选热门与手输同题相同 |
 | 语义命中 | upsert/编辑写 `embedding`；精确 miss 后近义命中 |
 | 答案校验 | 文档 ready / 日 hit 达标入队；标 `rag_drift` + `pending_review`；审计 `faq_verify_stale`；**不覆盖答案** |
-| 密级 | FAQ / 文档 API / QA 缓存键 / 角色缓存命中均做密级门控 |
+| 敏感闸门 | 生成时问题/答案命中 `FAQ_SENSITIVE_PATTERNS`（手机/身份证/薪资/报销额度等）→ `pending_review`，须人工 approve 才秒答；**不自动升密级**；**不回溯**已 active 的旧 FAQ |
+| 密级 | FAQ / 文档 API / QA 缓存键 / 角色缓存命中均做密级门控；授权只信 DB（FAQ 行 / 文档 / 分段），不信向量 metadata |
+| 缓存回查 | FAQ Redis 命中后回查 `kb_cached_faqs`；QA L2 命中后按引用 `doc_id` 回查文档密级，不达标则丢缓存重走链路 |
 | 快照 | `snapshot_faqs` 可回退还原 FAQ |
 
 ## 配置（节选）
 
 | 项 | 默认 | 说明 |
 |----|------|------|
+| `FAQ_REDIS_CACHE_TTL_SECONDS` | 900 | FAQ 精确命中 Redis TTL |
+| `FAQ_SENSITIVE_PATTERNS` | 见 `config.py` | JSON 正则数组；命中 → `pending_review`（不自动升密、不回溯旧 FAQ） |
 | `FAQ_SIMILARITY_THRESHOLD` | 0.85 | 生成去重 + FAQ 语义命中阈值 |
 | `FAQ_SEMANTIC_HIT_ENABLED` | true | 语义命中开关 |
 | `FAQ_SEMANTIC_CANDIDATE_LIMIT` | 200 | 语义候选扫描上限 |
@@ -55,5 +59,6 @@
 ## 说明
 
 - 旧 FAQ 若 `embedding` 为空，语义命中不会生效，需编辑触发刷新或重新生成。
+- 改文档密级：`PUT .../documents/{id}/sensitivity` 同步分段 + 关联 FAQ 取源文档最高密级，并失效该库 FAQ Redis / QA L2；响应含 `sync` 计数。
 - 不自动回填答案、不整删角色缓存（另开需求）。
-- 问答引用图表：`citations.chart_refs[]` 为懒加载元数据（PDF 页或内嵌 asset）；前端按需 `GET /charts/` / `GET /assets/`；ask 路径 `images=[]`。见 README §2.5、`docs/API.md` §10。
+- 问答引用图表：`citations.chart_refs[]` 为懒加载元数据（PDF 页或内嵌 asset）；前端按需 `GET /charts/` / `GET /assets/`；原 PDF 预览 `GET /qa/documents/{id}/file`（可 `#page=N`）；ask 路径 `images=[]`。见 README §2.5、`docs/API.md` §10。

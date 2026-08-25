@@ -243,7 +243,8 @@ class LLMService:
                         if isinstance(usage, dict) and usage:
                             usage_sink.update(usage)
                     reasoning, content = self._extract_delta_parts(chunk)
-                    if reasoning:
+                    # 本调用未开启思考时：丢弃上游仍可能下发的 reasoning，避免污染答案流
+                    if enable_thinking and reasoning:
                         if not thinking_open:
                             yield "<think>"
                             thinking_open = True
@@ -252,7 +253,13 @@ class LLMService:
                         if thinking_open:
                             yield "</think>"
                             thinking_open = False
-                        # 若上游已用 <think> 标签写在 content 里，原样透传
+                        if not enable_thinking:
+                            from app.services.query_processing import _strip_model_reasoning
+
+                            content = _strip_model_reasoning(content)
+                            if not content:
+                                continue
+                        # 若上游已用 <think> 标签写在 content 里，开启思考时原样透传
                         yield content
                 if thinking_open:
                     yield "</think>"

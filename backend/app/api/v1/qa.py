@@ -11,6 +11,7 @@
 - POST /qa/feedback      — 回答反馈（需登录）
 - GET  /qa/documents/{doc_id}/charts/{filename} — 引用图表 PNG（权限与 /qa/ask 一致）
 - GET  /qa/documents/{doc_id}/assets/{asset_id} — PDF 内嵌图 asset（权限与 /qa/ask 一致）
+- GET  /qa/documents/{doc_id}/file — 原 PDF 预览/下载（权限与 /qa/ask 一致；前端 #page=N 锚点）
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
+from urllib.parse import quote
 
 router = APIRouter(prefix="/qa", tags=["智能问答"])
 logger = logging.getLogger(__name__)
@@ -306,6 +308,53 @@ async def get_qa_document_asset(
         content=data,
         media_type=mime_type or infer_mime_type(object_key),
         headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.get(
+    "/documents/{doc_id}/file",
+    summary="获取问答引用原 PDF",
+    description="返回文档原文件（当前仅 PDF）。访问范围与 /qa/ask 知识库可见性一致；禁止 MinIO presigned 直出。"
+    "前端可用 Content-Disposition:inline + URL 片段 #page=N 定位页码。",
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def get_qa_document_file(
+    doc_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_current_user),
+) -> Response:
+    doc = await doc_repo.get_document_by_id(db, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
+
+    targets = await resolve_kb_targets(db, user=user)
+    allowed = {t.kb_id for t in targets}
+    if doc.kb_id not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该文档")
+
+    file_type = (doc.file_type or "").lower().lstrip(".")
+    if file_type != "pdf":
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="仅支持 PDF 原文预览")
+    if not doc.file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原文不存在")
+    if not storage.object_exists(doc.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原文不存在")
+
+    data = _download_storage_bytes(doc.file_path)
+    download_name = (doc.filename or "document.pdf").strip() or "document.pdf"
+    if not download_name.lower().endswith(".pdf"):
+        download_name = f"{download_name}.pdf"
+    ascii_name = "".join(ch if ord(ch) < 128 else "_" for ch in download_name) or "document.pdf"
+    disposition = (
+        f'inline; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(download_name)}'
+    )
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Content-Disposition": disposition,
+        },
     )
 
 

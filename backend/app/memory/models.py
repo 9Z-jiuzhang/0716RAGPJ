@@ -57,13 +57,13 @@ class SessionMemory:
         """去掉推理标签并截断过长内容。"""
         text = content or ""
         text = re.sub(
-            r"<(?:redacted_thinking|think|thinking)>[\s\S]*?</(?:redacted_thinking|think|thinking)>",
+            r"<(?:redacted_thinking|think|thinking|思考)>[\s\S]*?</(?:redacted_thinking|think|thinking|思考)>",
             "",
             text,
             flags=re.IGNORECASE,
         )
         text = re.sub(
-            r"<(?:redacted_thinking|think|thinking)>[\s\S]*$",
+            r"<(?:redacted_thinking|think|thinking|思考)>[\s\S]*$",
             "",
             text,
             flags=re.IGNORECASE,

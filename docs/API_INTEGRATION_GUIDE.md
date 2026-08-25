@@ -256,22 +256,22 @@ data: {"content":"……"}
 | `route` | 业务路由决策（若启用） | intent、should_retrieve、should_clarify、transform_type 等 |
 | `cache_hit` | 命中角色/问题缓存（若启用） | 可能直接给出缓存回答相关信息 |
 | `query_processing` | Query 预处理结果 | 改写/扩展等元数据 |
-| `chunk` | 回答正文增量 | 字段 `content`；前端拼接到气泡 |
-| `citations` | 引用来源列表 | `citations`：文档名、分段、相关度；`chart_refs[]` 为命中相关图表元数据（`kind=page` 或 `kind=asset`，**无 URL**）；`images` 恒为 `[]`。缩略图按需 `GET /qa/documents/{doc_id}/charts/page-NN.png` 或 `GET /qa/documents/{doc_id}/assets/{asset_id}` |
+| `chunk` | 回答正文增量 | 字段 `content`；前端拼接到气泡。**非固定超管账号 `super` 时服务端已剥离模型思考/reasoning**；勿依赖思考字段做产品逻辑 |
+| `citations` | 引用来源列表 | `citations`：文档名、分段、相关度、可选 `page`；`chart_refs[]` 为命中相关图表元数据（`kind=page` 或 `kind=asset`，**无 URL**）；`images` 恒为 `[]`。缩略图按需 `GET .../charts/` 或 `GET .../assets/`；原 PDF 预览 `GET /qa/documents/{doc_id}/file`（可拼 `#page=N`） |
 | `done` | 本轮结束 | session_id、message_id、confidence、performance 等 |
 | `suggested_questions` | 可选尾事件（`SUGGESTED_QUESTIONS_ENABLED`） | `questions[]`：启发式推荐追问，在 `done` 之后下发 |
 | `error` | 流水线错误 | message |
 
 **App 渲染建议：**
 
-1. 收到 `chunk` → 追加到当前助手气泡（注意思考内容若带 `<think>` 可折叠展示）  
-2. 收到 `citations` → 展示「引用来源」与检索相关度；图表区默认折叠，展开后懒加载 `chart_refs`  
-3. 收到 `done` → 保存 `session_id` / `message_id`，解锁输入框  
+1. 收到 `chunk` → 追加到当前助手气泡（普通终端用户不会收到模型思考流）  
+2. 收到 `citations` → 展示「引用来源」与检索相关度；图表区默认折叠，展开后懒加载 `chart_refs`；有 `page` 时可链到 `GET .../file#page=N`  
+3. 收到 `done` → 保存 `session_id` / `message_id`，解锁输入框；点赞/点踩依赖 `message_id`，可在回答展示完成后静默启用  
 4. 收到 `suggested_questions` → 展示推荐追问 chips（可选 `POST /qa/suggested-questions/click` 埋点）  
 5. 收到 `guard_blocked` / `error` → 展示 message，结束流  
 6. `route` / `intent` 等流水线事件可忽略或用于轻提示，不必写入回答正文
 
-> 功能开关默认见仓库根目录 `.env.example`「功能开关」段与 `backend/app/core/config.py`。问答链路总览见仓库 `README.md` §1.3 / §2.5。
+> 本仓库访客端另有三步流水线步骤条（检索→证据→组织回答）；回答结束后保留完成态文案，**不等待**落库/`done` 才关掉「正在组织」；无正文则隐藏步骤条。管理端不使用该步骤条。功能开关默认见仓库根目录 `.env.example`「功能开关」段与 `backend/app/core/config.py`。问答链路总览见仓库 `README.md` §1.3 / §2.5–2.6。密级门控与 FAQ 见 `docs/KB_FAQ.md`、`docs/API.md` §12.1–12.2。
 
 ### 6.4 会话与访客说明
 
@@ -427,8 +427,10 @@ client.newCall(req).execute().use { resp ->
 2. **最小权限**：终端用户使用 `guest` / `staff` Token，不要把超管账号写进 App。  
 3. **HTTPS**：公网部署必须 TLS；改密、登录必须加密传输。  
 4. **限流**：频繁调用可能 `429`，请做指数退避。  
-5. **引用展示**：回答附带 citations（`chart_refs` 懒加载图表、`images=[]`），建议 UI 展示文档名与相关度，并提示「请结合原文核对」。  
-6. **密钥**：App 内勿硬编码管理端密钥；模型 API Key 只存在服务端。
+5. **引用展示**：回答附带 citations（`chart_refs` 懒加载图表、`images=[]`；可选原 PDF `GET .../file`），建议 UI 展示文档名与相关度，并提示「请结合原文核对」。  
+6. **密钥**：App 内勿硬编码管理端密钥；模型 API Key 只存在服务端。  
+7. **思考态**：仅服务端固定超管账号 `super` 可能看到模型推理；第三方 App 用业务账号时勿依赖 `reasoning` 字段。  
+8. **密级**：FAQ / 检索结果按用户密级上限过滤；勿假设「登录即可看到全部文档」。
 
 ---
 
@@ -450,7 +452,8 @@ client.newCall(req).execute().use { resp ->
 | 文档 | 用途 |
 |------|------|
 | 本文 `API_INTEGRATION_GUIDE.md` | 第三方 / 移动端接入指南（功能解说向） |
-| 仓库 `docs/API.md` | 全量接口字段与约束（含 FAQ §12.1） |
+| 仓库 `docs/API.md` | 全量接口字段与约束（含 FAQ §12.1、敏感等级 §12.2） |
+| 仓库 `docs/KB_FAQ.md` | 知识库 FAQ 产品说明 |
 | 仓库 `docs/CLOUD_DEPLOY.md` | 云端生产部署与安全加固 |
 | 运行时 [`/openapi.json`](/openapi.json) | 机器可读契约，可导入 Postman / 代码生成 |
 | 仓库 `docs/CONTRACT.md` | 契约变更流程 |

@@ -21,6 +21,7 @@
 11. [命中率测试 `/hit-tests`](#11-命中率测试-hit-tests)
 12. [快照管理 `/knowledge-bases/{kb_id}/snapshots`](#12-快照管理-knowledge-baseskb_idsnapshots)
     - [12.1 知识库 FAQ（摘要）](#121-知识库-faq摘要)
+    - [12.2 敏感等级（摘要）](#122-敏感等级摘要)
 13. [审计日志 `/audit`](#13-审计日志-audit)
 14. [系统监控 `/monitor`](#14-系统监控-monitor)
 15. [Query 预处理 `/query-processing`](#15-query-预处理-query-processing)
@@ -390,6 +391,7 @@ Authorization: Bearer <access_token>
 | GET | `.../documents/{doc_id}/markdown` | `doc:read` | **导出 Markdown**：纯文本返回 `.md`；PDF 含图表时返回 **zip**（`*.md` + `charts/page-XX.png`，MD 内相对链接打开图表，并保留图数据/多模态描述）。输出已剔除 `\\0` 控制符。 |
 | DELETE | `.../documents/{doc_id}` | `doc:write` | 删除文档 + 向量 + MinIO 对象 |
 | PUT | `.../documents/{doc_id}/segment-rules` | `doc:segment` | 仅保存**文档级**规则（不回写知识库默认、不重分段） |
+| PUT | `.../documents/{doc_id}/sensitivity` | `doc:write` | 更新文档密级（`normal`/`confidential`/`restricted`）；同步全部分段并重算关联 FAQ 密级；失效 FAQ Redis 与 QA L2 缓存。响应 `data`：`{ document, sync }`（`sync` 含 `chunks_updated`/`faq_related`/`faq_updated`/`faq_redis_deleted`/`qa_cache_deleted`） |
 | POST | `.../documents/{doc_id}/segment-preview` | `doc:segment` | 对已存文档试分段（不落库） |
 | POST | `.../documents/segment-preview-file` | `doc:segment` | **multipart**：`file?` 或 `doc_id?` + `chunk_size?/chunk_overlap?/split_mode?`（Form）试分段 |
 | POST | `.../documents/{doc_id}/re-segment` | `doc:segment` | 重分段 + 向量化，异步 `202` |
@@ -409,9 +411,9 @@ Authorization: Bearer <access_token>
 
 ### 9.2 主要响应结构
 
-- **文档**（`DocumentResponse`）：`id`、`kb_id`、`filename`、`file_type`、`file_size`、`file_path`、`chunk_count`、`status`、`error_message?`、`creator_id`、`created_at`、`updated_at`。
+- **文档**（`DocumentResponse`）：`id`、`kb_id`、`filename`、`file_type`、`file_size`、`file_path`、`chunk_count`、`status`、`error_message?`、`creator_id`、`created_at`、`updated_at`、`sensitivity_level`（默认 `normal`）、`faq_count?`、`faq_job_status?`、`faq_job_reason?`。
 - **内容预览**（`DocumentContentPreviewResponse`）：另含 `raw_text`、`normalized_text`、`raw_char_count`、`normalized_char_count`、`truncated`、`max_preview_chars`、`preview_source`、`segment_rules`。
-- **分段**（`DocumentChunkResponse`）：`id`、`document_id`、`chunk_index`、`content`、`char_count`、`metadata`、`is_enabled`。禁用分段（`is_enabled=false`）**不参与检索与引用**。
+- **分段**（`DocumentChunkResponse`）：`id`、`document_id`、`chunk_index`、`content`、`char_count`、`metadata`、`is_enabled`。禁用分段（`is_enabled=false`）**不参与检索与引用**。分段密级随文档密级同步，授权过滤只信 DB `document_chunks.sensitivity_level`（不信向量 metadata）。
 - **分段规则请求**（`UpdateSegmentRulesRequest`）：`chunk_size`(100–5000)、`chunk_overlap`(0–1000)、`separators?[]`、`split_mode?`、`enable_semantic?`(默认false)。
 - **规范化结果**（`NormalizeResult`）：`removed_blank_lines`、`removed_duplicate_blocks`、`char_count_before`、`char_count_after`。
 
@@ -443,6 +445,7 @@ Authorization: Bearer <access_token>
 |------|------|------|------|
 | GET | `/qa/accessible-kbs` | **可选认证** | 返回 `{items, total, max_charts, markdown_render_enabled, inline_citation_enabled, asset_citation_enabled, suggested_questions_enabled, clarify_enabled}` |
 | GET | `/qa/documents/{doc_id}/assets/{asset_id}` | **可选认证** | PDF 内嵌图二进制；鉴权同 `/qa/ask`；`asset_id` 为入库 `block_id` |
+| GET | `/qa/documents/{doc_id}/file` | **可选认证** | 原 PDF 预览（`Content-Disposition: inline`）；仅 `file_type=pdf`；鉴权同 `/qa/ask`；前端可用 `#page=N` |
 | POST | `/qa/suggested-questions/click` | **可选认证** | 推荐追问 chip 点击埋点（Prometheus `suggested_questions_click_total`） |
 | POST | `/qa/chart-ui/event` | **可选认证** | 引用图表 UI 埋点；Body：`action`=`hydrate` \| `hydrate_failed` \| `lightbox_open`；对应 `chart_lazy_hydrate_total`、`chart_lazy_hydrate_failed_total`、`lightbox_open_total` |
 
@@ -455,7 +458,7 @@ Authorization: Bearer <access_token>
 | `route` | 业务路由决策（`CONVERSATION_ROUTER_V2_ENABLED`）：`intent`、`should_retrieve`、`should_clarify`、`should_use_last_answer`、`transform_type` 等 |
 | `query_processing` | Query 改写 / 扩展 / HyDE 等预处理元信息（可关） |
 | `cache_hit` | 命中角色缓存问题，可直接返回答案 |
-| `chunk` | 增量文本，字段 `content` |
+| `chunk` | 增量文本，字段 `content`（非固定超管账号 `super` 时，协议层剥离 `reasoning`/`reasoning_content` 与思考标签；仅 `super` 且 `LLM_ENABLE_THINKING=true` 可接收模型推理） |
 | `citations` | 引用来源列表（`items` 与 `citations` 双键）；每项含 `chart_refs[]`（懒加载元数据），`images` 恒为 `[]` |
 | `done` | 结束，含 `session_id`、`message_id`、`request_id`、`performance`、`confidence`(high/medium/low) |
 | `suggested_questions` | **可选尾事件**（`SUGGESTED_QUESTIONS_ENABLED`）：在 `done` 之后下发 `questions[]`（启发式推荐追问，无 LLM） |
@@ -465,7 +468,9 @@ Authorization: Bearer <access_token>
 
 > **知识库 FAQ** 精确命中时走短路径秒答（`retrieval_meta` / 元数据含 `source=kb_faq`）；多级缓存 L1–L4 由功能开关控制；角色缓存过渡期仍可发 `cache_hit`。接口与行为见下文 [12.1](#121-知识库-faq摘要)。
 
-**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky`）；可选 `cite_index`（内联 `[N]`）；可选 `block_type`、`structure_html`、`sheet_name`（Excel）；**P1 `chart_refs[]`**（懒加载元数据，无 URL）：`kind=asset` 时 `asset_id`、可选 `page`、`caption`；`kind=page` 时 `page`；同 citation 内 asset 与同页 page 不重复；跨 citation 同 `doc_id+page` 去重且 asset 优先。`images` 在 ask 路径恒为 `[]`（向后兼容字段；GET `/charts/`、`/assets/` 按需拉图）。禁止 MinIO presigned。
+**引用对象**：`doc_id`、`doc_name`、`chunk_index`、`content`、`score`；可选 `chunk_id`、`source`（含 `sticky`）；可选 `page`（PDF 页，稳定字段）；可选 `cite_index`（内联 `[N]`）；可选 `block_type`、`structure_html`、`sheet_name`（Excel）；**P1 `chart_refs[]`**（懒加载元数据，无 URL）：`kind=asset` 时 `asset_id`、可选 `page`、`caption`；`kind=page` 时 `page`；同 citation 内 asset 与同页 page 不重复；跨 citation 同 `doc_id+page` 去重且 asset 优先。`images` 在 ask 路径恒为 `[]`（向后兼容字段；GET `/charts/`、`/assets/`、`/file` 按需拉图/原 PDF）。禁止 MinIO presigned。
+
+**密级与缓存**：问答授权按用户密级上限过滤 FAQ / 检索命中 / L2 精确缓存；改文档密级后强制失效该库 FAQ Redis 与 QA L2。FAQ Redis 命中会回查 DB FAQ 行；L2 命中会按引用 `doc_id` 回查文档密级。
 
 **多轮粘性证据**（`QA_STICKY_EVIDENCE_ENABLED`，默认开）：路由为上下文跟进问且上轮助手消息含 citations 时，将上轮引用分段合并进本轮证据（并可补同文档邻段），避免 top_k 漏召回导致前后矛盾。会话历史仍**不得**替代检索证据；本轮无依据时说「本轮检索依据不足」，不得称上轮为幻觉。
 
@@ -485,6 +490,7 @@ Authorization: Bearer <access_token>
 |------|------|------|------|
 | GET | `/qa/documents/{doc_id}/charts/{filename}` | 与 ask 可见库一致 | 返回 PNG（`page-01.png`）；旧 PDF 可按需栅格化；对象存储不可用时 **503**（`StorageUnavailable`） |
 | GET | `/qa/documents/{doc_id}/assets/{asset_id}` | 与 ask 可见库一致 | PDF 内嵌图二进制；鉴权同 `/qa/ask`；存储不可用时 **503** |
+| GET | `/qa/documents/{doc_id}/file` | 与 ask 可见库一致 | 原 PDF 预览；非 PDF → **415**；存储不可用时 **503** |
 | GET | `/qa/sessions` | 需登录 | 仅本人会话（分页） |
 | GET | `/qa/sessions/{session_id}` | 需登录 | 消息历史（含 citations，默认 `page_size=50`） |
 | PUT | `/qa/sessions/{session_id}` | 需登录 | Body：`title`(1–100) |
@@ -535,6 +541,14 @@ Authorization: Bearer <access_token>
 
 **运行响应**（`TestRunResponse`）：`id`、`case_id?`、`kb_ids`、`strategy`、`top_k`、`status`(running\|completed\|failed)、`total_questions`、`hit_count`、`hit_rate?`（命中题数/总题数）、**`score?`（综合得分 = 各题命中片段相关度的算术平均，0–1；全未命中为 0）**、`recall_at_k?`、`mrr?`、`avg_elapsed_ms?`、`created_at?`、`completed_at?`。
 
+**口径说明（正式命中率 vs 冒烟）**：
+
+- **正式评测**：用例题目须配置 `expected_doc_ids` 和/或 `expected_chunk_ids`；Top-K 内命中任一期望文档或分段即计命中（`hit_rate` / `recall_at_k`）。
+- **临时问题冒烟**（仅 `questions[]`、无期望标注）：Top-K **有任意召回**即计命中，用于检索通路冒烟，**不代表**真实命中率。
+- 主策略（vector/hybrid）无召回时，实现可能**降级全文**并将阈值放宽至 `0` 再试（避免「库内有文却全零」）；对比策略表现时需知悉此兜底。
+- 管理端首页「评测命中率」趋势汇总全部 `completed` 运行；解读 KPI 时请区分冒烟与正式用例。
+- `score` 与 `hit_rate` 含义不同，勿混用。
+
 ---
 
 ## 12. 快照管理 `/knowledge-bases/{kb_id}/snapshots`
@@ -576,6 +590,21 @@ Authorization: Bearer <access_token>
 
 知识库更新可含 `is_pinned` / `faq_enabled`；列表响应含 `can_manage`、`faq_count` 等。快照含 `snapshot_faqs`；回退可还原 FAQ。默认上限：每文档 25 / 每库 500（可配）。答案校验可将 FAQ 标为 `pending_review` / `rag_drift`，**不自动改写答案**。
 
+### 12.2 敏感等级（摘要）
+
+三档：`normal` &lt; `confidential` &lt; `restricted`。用户上限 = 角色映射与用户覆盖取较高档；访客默认 `normal`。授权过滤以 DB 为准（`documents` / `document_chunks` / `kb_cached_faqs`），不信向量 metadata。
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | `/admin/sensitivity/levels` | `system:read` | 密级元数据 |
+| GET/PUT | `/admin/sensitivity/roles`、`/roles/{role}` | 读 `system:read`；改仅超管 | 角色最高密级 |
+| GET/POST/DELETE | `/admin/sensitivity/users/{user_id}/override` | 管理端 | 用户密级覆盖 |
+| GET | `/admin/sensitivity/audit` | `system:read` | 敏感访问/配置审计 |
+| POST | `/knowledge-bases/{kb_id}/sensitivity/sync` | `kb:write` | 将库内文档/分段/FAQ 同步到库默认密级 |
+| PUT | `/knowledge-bases/{kb_id}/documents/{doc_id}/sensitivity` | `doc:write` | 见 §9；响应含 `sync` 统计 |
+
+删库：`DELETE /knowledge-bases/{kb_id}` 需全局 **`kb:write`**（种子默认仅 `admin`/`super_admin`）；默认软删。快照回退**不能**复活已删知识库（回退要求库未删）。
+
 ---
 
 ## 13. 审计日志 `/audit`
@@ -597,7 +626,7 @@ Authorization: Bearer <access_token>
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
 | GET | `/monitor/health` | **公开** | `status`：healthy\|degraded\|unhealthy；`uptime_seconds`；`checks` 含 postgres/redis/chroma/langfuse/minio 连通性 |
-| GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、`qa_trend_7d` / `qa_trend_30d`、`hit_rate_trend_7d` / `hit_rate_trend_30d`、`error_24h`（4 桶）、`error_hourly_48h`（48 点）、`guard_blocked_24h`、`guard_blocked_7d`、`guard_recent_events` |
+| GET | `/monitor/stats` | `system:read` | `user_count`、`kb_count`、`doc_count`（**仅统计所属知识库未删除且文档非 archived**）、**`active_sessions`（仅 `status=active`）**、`task_queue_size`、… |
 | GET | `/monitor/guard-events` | `system:read` | 分页 Guard 拦截明细；默认 `page_size=50` |
 | GET | `/monitor/analytics/feedback` | `system:read` | 近 N 日反馈汇总 + 路由/缓存分布 + 按日趋势（Query：`days` 1–90，默认 14） |
 | GET | `/monitor/analytics/topics` | `system:read` | 主题簇列表（关键词粗聚类，聚合） |
@@ -730,6 +759,7 @@ Authorization: Bearer <access_token>
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 2.1.13 | 2026-08-25 | **ZY 加固口径**：文档密级 `PUT .../documents/{id}/sensitivity` 响应 `{document,sync}`；授权只信 DB 密级；FAQ Redis / QA L2 命中回查；FAQ 敏感模式 → `pending_review`（不自动升密）；SSE 思考态仅固定账号 `super`；`GET /qa/documents/{id}/file` PDF 原件预览；命中率正式用例 vs 冒烟口径；删库需 `kb:write`、快照不能复活已删库；见 §9 / §10 / §11 / §12.1–12.2 |
 | 2.1.13 | 2026-08-23 | **2.1.13 总览**：Markdown 答案区、`INLINE_CITATION`、`ASSET` API、Excel metadata、`suggested_questions` SSE 尾事件、`CLARIFY_ENABLED`、CJK `FULLTEXT_ANALYZER_BACKEND`；**P1** `chart_refs[]`（ask 路径 `images=[]`）、去重与 `total_chart_refs_total`；**P2** 前端图表折叠/懒加载/lightbox、blob 回收、`POST /qa/chart-ui/event`；图表/asset 下载仅 `StorageUnavailable`→503 |
 | 2.1.12-p1 | 2026-08-23 | 图表**按需栅格化**（非整本）；`CHART_RASTERIZE_ZOOM`；GET chart 只补单页；`asyncio.to_thread` 栅格化 |
 | 2.1.12 | 2026-08-23 | 图表引用 P0、`max_charts`、角色缓存 shadow |

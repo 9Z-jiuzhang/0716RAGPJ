@@ -232,6 +232,12 @@ def attach_chart_refs_to_citations(citations: list[dict[str, Any]]) -> list[dict
         sanitized = citation_safe_citation(citation)
         sanitized["chart_refs"] = chart_refs
         sanitized["images"] = []
+        if sanitized.get("page") is None:
+            for ref in chart_refs:
+                page = _coerce_page_int(ref.get("page"))
+                if page is not None:
+                    sanitized["page"] = page
+                    break
         citations[idx] = sanitized
 
     return citations

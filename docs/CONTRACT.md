@@ -16,7 +16,7 @@
 
 当前契约覆盖：**63 条路径 / 86 个操作 / 81 个数据模型**，涵盖认证、用户、角色、部门、大模型、知识库、文档、问答（SSE）、命中率测试、快照、审计、监控等核心模块。
 
-> 管理端扩展模块 **Query 预处理**（`/query-processing`）、**角色缓存**（`/role-caches`）、**RAGAS**（`/ragas`）、**管理员会话分析**（`/qa/admin/sessions*`）、**问答分析**（`/monitor/analytics/*`）、**模型版本**（`/models/{id}/publish|versions|rollback`）已在运行时 API 与 `API.md` 中说明；`/monitor/metrics` 为 Prometheus 别名（隐藏于 schema）。若需写入 `openapi.json`，请在生成脚本中补充后重跑。
+> 管理端扩展模块 **Query 预处理**（`/query-processing`）、**角色缓存**（`/role-caches`）、**RAGAS**（`/ragas`）、**管理员会话分析**（`/qa/admin/sessions*`）、**问答分析**（`/monitor/analytics/*`）、**模型版本**（`/models/{id}/publish|versions|rollback`）、**敏感等级**（`/admin/sensitivity/*`、文档 `.../sensitivity`）、**知识库 FAQ**（`/faq/*`、`/admin/faq/*`）、**原 PDF 预览**（`GET /qa/documents/{id}/file`）已在运行时 API 与 `API.md` 中说明；`/monitor/metrics` 为 Prometheus 别名（隐藏于 schema）。若需写入 `openapi.json`，请在生成脚本中补充后重跑。
 
 ## 契约要点
 

@@ -10,6 +10,12 @@ import { api, clearDemoFlags } from "/assets/js/api.js?v=upload-progress-0806a";
 import { isLoggedIn, getUser, clearAuth, hasPermission, canAccessAdmin, getRoleLabel, isSuperAdmin, isAdminUser } from "/assets/js/auth.js?v=gap-opt-0721s";
 import { escapeHtml, formatDateTime, formatDateTimeHtml, toast, confirmDialog, pollUntil, openChangePasswordModal } from "/assets/js/utils.js?v=bug-ui-palette-0721ea";
 import { renderMarkdownSafe } from "/assets/js/markdown-render.js?v=2.1.13-md";
+import {
+  attachInlineCitationUx,
+  attachCitationPdfOpenButtons,
+  citationPrimaryPage,
+  citationSnippet,
+} from "/assets/js/citation-pdf.js?v=cite-pdf-4c";
 import { initMotion, runCountUps, formatStatNumber } from "/assets/js/motion.js?v=stat-num-0727b";
 import { initTheme, applyTheme, getTheme } from "/assets/js/theme.js?v=gap-opt-0721s";
 import { getBrandMarkSvg } from "/assets/js/brand-mark.js?v=brand-mark-0727a";
@@ -36,6 +42,30 @@ function formatStoredAnswerHtml(text) {
     return `<div style="white-space:pre-wrap">${escapeHtml(raw)}</div>`;
   }
   return `<div class="msg-answer msg-answer--md">${renderMarkdownSafe(raw)}</div>`;
+}
+
+function renderAdminCitationsHtml(citations) {
+  const items = Array.isArray(citations) ? citations : [];
+  if (!items.length) return `<div class="text-muted">无引用来源</div>`;
+  return items
+    .map((c) => {
+      const idx = Number(c.cite_index) || 0;
+      const label = idx > 0 ? `[${idx}] ` : "";
+      const docName = escapeHtml(c.doc_name || "未知文档");
+      const page = citationPrimaryPage(c);
+      const docId = String(c.doc_id || "").trim();
+      const pageMeta = page > 0 ? ` · 第 ${page} 页` : "";
+      const pdfBtn =
+        docId && page > 0
+          ? ` <button type="button" class="btn btn-secondary btn-sm" data-open-pdf data-doc-id="${escapeHtml(docId)}" data-doc-name="${escapeHtml(c.doc_name || "")}" data-page="${page}">打开 PDF</button>`
+          : "";
+      const snippet = escapeHtml(citationSnippet(c, 160));
+      return `<div class="admin-cite-item" ${idx > 0 ? `id="citation-${idx}" data-citation-index="${idx}"` : ""} data-doc-id="${escapeHtml(docId)}" data-doc-name="${escapeHtml(c.doc_name || "")}" data-page="${page || ""}" data-snippet="${snippet}">
+        <div><strong>${escapeHtml(label)}${docName}</strong>${escapeHtml(pageMeta)}${pdfBtn}</div>
+        <div class="text-muted" style="margin-top:4px;white-space:pre-wrap">${escapeHtml(c.content || "").slice(0, 280)}</div>
+      </div>`;
+    })
+    .join("");
 }
 
 /** 将 0~1 置信度安全格式化为百分比文案；非法则 -- */
@@ -5511,10 +5541,17 @@ async function pageDocuments(kbId, opts = {}) {
           const level = result.root.querySelector("#docSensLevel")?.value || "normal";
           result.root.remove();
           try {
-            await api.put(`/knowledge-bases/${kbId}/documents/${docId}/sensitivity`, {
+            const res = await api.put(`/knowledge-bases/${kbId}/documents/${docId}/sensitivity`, {
               sensitivity_level: level,
             });
-            toast("文档密级已更新（分段与关联 FAQ 已同步）", "success");
+            const sync = res?.sync || {};
+            const chunks = Number(sync.chunks_updated || 0);
+            const faqUp = Number(sync.faq_updated || 0);
+            const faqRel = Number(sync.faq_related || 0);
+            toast(
+              `文档密级已更新：同步分段 ${chunks}，关联 FAQ ${faqRel}（更新 ${faqUp}），已清缓存`,
+              "success",
+            );
             await renderList();
           } catch (e) {
             toast(e.message || "更新失败", "error");
@@ -8229,8 +8266,9 @@ async function openQaSessionDetail(sessionId) {
             const fbLabel =
               fb.rating === "useful" ? "有用" : fb.rating === "useless" ? "无用" : "未反馈";
             const fbComment = fb.comment ? String(fb.comment) : "";
+            const cites = Array.isArray(turn.answer?.citations) ? turn.answer.citations : [];
             return `
-              <div class="card" style="margin-bottom:12px;background:var(--color-bg-tint,#f8f9fa)">
+              <div class="card admin-qa-turn" style="margin-bottom:12px;background:var(--color-bg-tint,#f8f9fa)" data-turn-index="${index}">
                 <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
                   <strong>第 ${index + 1} 轮</strong>
                   <span class="badge">${processing.applied ? "已执行预处理" : processing.error ? "已回退原 Query" : "历史记录未包含预处理"}</span>
@@ -8244,7 +8282,8 @@ async function openQaSessionDetail(sessionId) {
                   <span class="text-muted">检索结果</span><div>命中 ${escapeHtml(fmtCount(meta.hit_count ?? 0))} 段；扩展 Query ${escapeHtml(fmtCount(meta.expanded_query_count ?? expansions.length))} 条；HyDE ${meta.hyde_used ? "已参与向量检索" : "未参与"}</div>
                   <span class="text-muted">Rerank</span><div>${rerank.applied ? `${escapeHtml(rerank.provider || "-")} / ${escapeHtml(rerank.model || "-")}` : `未应用${rerank.error ? `（${escapeHtml(rerank.error)}）` : ""}`}</div>
                   <span class="text-muted">用户反馈</span><div>${escapeHtml(fbLabel)}${fbComment ? ` · ${escapeHtml(fbComment)}` : ""}</div>
-                  <span class="text-muted">最终回答</span><div>${formatStoredAnswerHtml(turn.answer?.content || "-")}</div>
+                  <span class="text-muted">最终回答</span><div class="admin-turn-answer msg-row assistant">${formatStoredAnswerHtml(turn.answer?.content || "-")}</div>
+                  <span class="text-muted">引用来源</span><div class="admin-turn-citations">${renderAdminCitationsHtml(cites)}</div>
                 </div>
               </div>`;
           })
@@ -8266,6 +8305,14 @@ async function openQaSessionDetail(sessionId) {
     mask.querySelector("[data-close]").onclick = () => mask.remove();
     mask.addEventListener("click", (event) => {
       if (event.target === mask) mask.remove();
+    });
+    turns.forEach((turn, index) => {
+      const card = mask.querySelector(`.admin-qa-turn[data-turn-index="${index}"]`);
+      if (!card) return;
+      const cites = Array.isArray(turn.answer?.citations) ? turn.answer.citations : [];
+      card._qaCitations = cites;
+      attachInlineCitationUx(card, { citations: cites, toast });
+      attachCitationPdfOpenButtons(card, { toast });
     });
   } catch (error) {
     toast(`加载会话详情失败：${error.message}`, "error");

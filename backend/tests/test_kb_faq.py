@@ -43,9 +43,16 @@ def test_classify_compound_question_tiers() -> None:
     assert is_c2 is True and status == "pending_review"
 
 
-def test_sensitive_pattern_flags_phone() -> None:
+def test_sensitive_pattern_flags_phone_salary_and_reimburse() -> None:
+    """敏感闸门：手机号、薪资/工资、报销额度进 pending_review；普通制度文案不误伤。"""
     svc = KBFaqService()
     assert svc._contains_sensitive("联系电话13812345678")
+    assert svc._contains_sensitive("张三的薪资是多少")
+    assert svc._contains_sensitive("张三的工资")
+    assert svc._contains_sensitive("个人报销额度上限是多少")
+    assert svc._contains_sensitive("个税专项扣除怎么填")
+    assert not svc._contains_sensitive("差旅费用报销制度是什么")
+    assert not svc._contains_sensitive("年假有几天")
 
 
 @pytest.mark.asyncio

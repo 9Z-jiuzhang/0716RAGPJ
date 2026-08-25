@@ -104,8 +104,8 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = ""
     LLM_TIMEOUT_SECONDS: int = 120
     LLM_MAX_TOKENS: int = 2048
-    # 千问等混合思考模型：主回答流式开启思考；推理写入 reasoning_content，由 LLMService 包装为 <think> 供前端气泡展示
-    LLM_ENABLE_THINKING: bool = True
+    # 混合思考总开关；仅固定超管账号 super 会开启并下发 thinking（访客/普通用户协议层剥离）
+    LLM_ENABLE_THINKING: bool = False
     # 思考 token 上限（厂商 extra_body.thinking_budget）；0 表示不传该字段
     LLM_THINKING_BUDGET: int = 2048
 
@@ -321,10 +321,14 @@ class Settings(BaseSettings):
     FAQ_DOCUMENT_CHARS_PER_CHUNK: int = 800
     FAQ_LLM_MAX_TOKENS: int = 4096
     FAQ_TENANT_ID: str = "default"
+    # FAQ 生成命中则 status=pending_review（仅闸门，不自动升密级）。可用环境变量 JSON 数组覆盖。
     FAQ_SENSITIVE_PATTERNS: list[str] = [
         r"\d{15,18}",
         r"1[3-9]\d{9}",
         r"[\u4e00-\u9fa5]{2,4}薪[资酬]",
+        r"工资|月薪|年薪|底薪",
+        r"报销额度|报销上限|差旅标准",
+        r"个税|社保号|银行卡",
     ]
     # 二期：FAQ 语义命中（写入 embedding + 近义命中）
     FAQ_SEMANTIC_HIT_ENABLED: bool = True

@@ -7,7 +7,10 @@
 - **统一入口（本机 Docker 默认）**：`http://localhost:9080`（Nginx 反向代理；容器与宿主机均为 9080）
 - **云端部署**：见 [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md)（`docker-compose.prod.yml` + `docker-compose.langfuse.yml`）
 - **接入第三方 / App**：见 [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md)
-- **知识库 FAQ**：见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md) 与 [`docs/API.md`](docs/API.md) §12.1（精确命中 / 语义命中 / 热门点选 / 密级门控）
+- **知识库 FAQ**：见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md) 与 [`docs/API.md`](docs/API.md) §12.1（精确命中 / 语义命中 / 热门点选 / 密级门控 / 敏感闸门）
+- **敏感等级**：三档密级门控 FAQ / 检索 / 缓存；改文档密级同步分段与关联 FAQ；见 [`docs/API.md`](docs/API.md) §12.2
+- **思考态**：仅固定超管账号 `super` 可接收模型 `reasoning`（`LLM_ENABLE_THINKING`）；访客与其他账号协议层剥离
+- **PDF 原件预览**：`GET /qa/documents/{id}/file`（鉴权同 ask；前端 `#page=N`）
 
 ---
 
@@ -203,15 +206,15 @@ app/
 | 角色与权限 | `/api/v1/roles` | — | 角色 CRUD、权限清单；**配置权限仅超管** |
 | 部门管理 | `/api/v1/departments` | `department.py`、`kb_departments.py` | 部门 CRUD、成员；知识库关联为**追加**，解除仅影响本部门 |
 | 大模型管理 | `/api/v1/models` | `model_config.py`、`model_usage.py` | LLM/Embedding/Rerank 配置、Langfuse 用量 |
-| 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py`、`kb_departments.py` | KB CRUD、`departments[]` 多部门访问范围、重向量化；`KBPermission` API（管理端不下发 ACL 编辑卡） |
-| 文档管理 | `/api/v1/knowledge-bases/{kb_id}/documents` | `document_service.py`、`document_pipeline.py` | 上传、解析、分段、规范化、chunk 编辑、重试 |
-| 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`conversation_router.py`、`qa_cache.py`、`llm_guard.py` | SSE 流式问答（Guard + 业务路由 + 多级缓存）、会话、反馈；默认检索 TopK=5；访客端引用区展开相关度最高 3 段、其余折叠 |
-| 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 用例、执行、多策略对比；默认 TopK=3；得分=命中片段相关度均值 |
-| 快照管理 | `/api/v1/knowledge-bases/{kb_id}/snapshots` | `snapshot.py` | 快照创建、回退预览与回退；**含 FAQ 快照**（`snapshot_faqs`） |
+| 知识库管理 | `/api/v1/knowledge-bases` | `knowledge_base.py`、`kb_departments.py` | KB CRUD（删库需 `kb:write`）、`departments[]` 多部门访问范围、重向量化、密级同步；`KBPermission` API（管理端不下发 ACL 编辑卡） |
+| 文档管理 | `/api/v1/knowledge-bases/{kb_id}/documents` | `document_service.py`、`document_pipeline.py` | 上传、解析、分段、规范化、chunk 编辑、重试、**文档密级** |
+| 智能问答 | `/api/v1/qa` | `qa_pipeline.py`、`conversation_router.py`、`qa_cache.py`、`llm_guard.py` | SSE 流式问答（Guard + 业务路由 + 多级缓存）、会话、反馈；默认检索 TopK=5；原 PDF `GET .../file`；思考态仅 `super`；访客端引用区展开相关度最高 3 段、其余折叠 |
+| 命中率测试 | `/api/v1/hit-tests` | `hit_test_service.py` | 正式用例按期望文档/分段计命中；无期望的临时题为「有召回即命中」冒烟；得分=命中片段相关度均值；见 [`docs/API.md`](docs/API.md) §11 |
+| 快照管理 | `/api/v1/knowledge-bases/{kb_id}/snapshots` | `snapshot.py` | 快照创建、回退预览与回退；**含 FAQ 快照**（`snapshot_faqs`）；**不能**复活已软删知识库 |
 | RAGAS 评估 | `/api/v1/ragas` | `ragas_evaluation.py` | 样本预览/生成、评估运行与详情 |
 | 角色缓存（过渡期只读） | `/api/v1/role-caches` | `role_cache.py` | 写入已关闭，命中仍可只读回退 |
-| 知识库 FAQ | `/api/v1/faq/*`、`/api/v1/admin/faq/*` | `kb_faq_service.py`、`faq_verify_service.py` | 库级自动生成 / 精确+语义命中 / 热门 / 密级 / 答案校验告警；见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md)、[`docs/API.md`](docs/API.md) §12.1 |
-| 敏感等级 | `/api/v1/sensitivity/*` 等 | `sensitivity_service.py` | 角色/用户密级上限；FAQ/检索侧门控 |
+| 知识库 FAQ | `/api/v1/faq/*`、`/api/v1/admin/faq/*` | `kb_faq_service.py`、`faq_verify_service.py` | 库级自动生成 / 精确+语义命中 / 热门 / 密级 / 敏感闸门 / 答案校验告警；见 [`docs/KB_FAQ.md`](docs/KB_FAQ.md)、[`docs/API.md`](docs/API.md) §12.1 |
+| 敏感等级 | `/api/v1/admin/sensitivity/*`、文档 `.../sensitivity` | `sensitivity_service.py` | 角色/用户密级上限；FAQ/检索/缓存门控；改密级同步与缓存失效；见 [`docs/API.md`](docs/API.md) §12.2 |
 | Query 预处理 | `/api/v1/query-processing` | — | 改写/扩展/HyDE 策略配置（默认改写关闭） |
 | 审计日志 | `/api/v1/audit` | `audit.py` | 操作审计查询、详情与批量删除 |
 | 系统监控 | `/api/v1/monitor` | `monitor.py` | 健康检查、统计、Guard 事件、**问答分析**（反馈/主题）；`/metrics` |
@@ -284,15 +287,17 @@ uploaded → parsing → processing → pending_segment → vectorizing → read
 
 检索命中后的 **citations.chart_refs**（P1）：仅含懒加载元数据（`kind=page` 或 `kind=asset`，**无 URL**）；`images` 在 ask 路径恒为 `[]`（向后兼容）。前端 P2：引用区「相关图表」默认折叠，展开后按需 `GET /qa/documents/{id}/charts/page-NN.png` 或 `GET /qa/documents/{id}/assets/{asset_id}`；lightbox 大图与 UI 埋点 `POST /qa/chart-ui/event`；消息行从 DOM 移除时回收 blob URL。对象存储不可用时图表/asset 接口返回 **503**（`StorageUnavailable`）。`GET /qa/accessible-kbs` 下发 `max_charts` 控制展示上限。旧文档无页码元数据时不展示图表，需重解析/重分段。回滚：`CHART_CITATION_USE_LEGACY_LOGIC=true`（恢复旧 citations.images 逻辑）。
 
-**图表与 asset**：整页 PNG `GET /qa/documents/{id}/charts/page-NN.png`；PDF 内嵌图 `GET /qa/documents/{id}/assets/{asset_id}`（鉴权同 `/qa/ask`，禁止 presigned）。`ASSET_CITATION_ENABLED` 控制引用区 `kind=asset`。
+**图表与 asset**：整页 PNG `GET /qa/documents/{id}/charts/page-NN.png`；PDF 内嵌图 `GET /qa/documents/{id}/assets/{asset_id}`；原 PDF `GET /qa/documents/{id}/file`（`Content-Disposition: inline`，前端可用 `#page=N`）。鉴权同 `/qa/ask`，禁止 MinIO presigned。`ASSET_CITATION_ENABLED` 控制引用区 `kind=asset`。
+
+**密级与思考态**：问答侧按用户密级上限过滤；缓存命中回查 DB。SSE 模型思考内容仅固定账号 `super` 可见（见 `.env.example` `LLM_ENABLE_THINKING`）。
 
 ### 2.6 前端
 
 无构建步骤的**原生 ES Module SPA**（哈希路由），由 Nginx 静态托管，全部 API 同源走 `/api/v1`。JWT `access/refresh` 存 localStorage，访客请求携带 `X-Guest-Id`；401 时自动单飞刷新一次。
 
-- **访客端** `frontend/guest/`（挂载 `/`）：营销落地页（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答）；智能问答（SSE、流式中止、**知识库下拉**、**Query 改写开关**、输入上限 **2000 字**提示、引用相关度 Top-3 展开/其余折叠、**相关图表折叠 + 懒加载 + lightbox**、内联 `[N]` 与侧栏联动、推荐追问 chips、`done` 后 SSE `suggested_questions`、置信提示）；欢迎区展示**热门 FAQ**，点选/同题粘贴可秒答（无思考态）；对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（含**字节上传进度** + 管道状态轮询，员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
-- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页 KPI（含 FAQ 数、7/30 天趋势、错误分桶、近 14 日问答反馈 KPI/趋势）与安全窗口；知识库卡片（封面显示库名、可置顶/删除的更多菜单仅管理员·超管·库管理者可见）；知识库/文档/FAQ/快照工作台（「访问范围」多选部门，含「除访客外全选」；上传列表展示上传百分比；FAQ 可标过时待审；快照含 FAQ 数且回退可还原 FAQ）；用户/角色/部门、大模型与用量、命中率测试、RAGAS、问答统计、会话分析、角色缓存、审计、LLM Guard 拦截、系统监控（健康/Grafana）、API 接入指南。
-- **共享** `frontend/shared/`：`api.js`（含 `upload` 的 `onProgress` 字节进度）、`auth.js`、`router.js`、`brand-mark.js`、`env-particle-field.js`、主题/动效、公共 CSS、接入指南与 Swagger 静态资源。
+- **访客端** `frontend/guest/`（挂载 `/`）：营销落地页（左右分栏、打字机动效、环境粒子场；「立即登录」弹层 / 「访客登录」进问答并**清除本地登录态**）；智能问答（SSE、流式中止、**知识库下拉**、**Query 改写开关**、输入上限 **2000 字**提示、流水线步骤条：检索→证据→组织回答，结束后保留「知识库检索完毕 / 找到 N 段证据 / 以下是完整回答」，落库与点赞点踩静默启用；无正文则隐藏步骤条；引用相关度 Top-3 展开/其余折叠、**相关图表折叠 + 懒加载 + lightbox**、内联 `[N]` 悬停/点开 PDF `#page=N`、推荐追问 chips、`done` 后 SSE `suggested_questions`、置信提示）；欢迎区展示**热门 FAQ**，点选/同题粘贴可秒答（无思考态）；对话历史与本机收藏、个人中心（含改密）、**多文件批量上传**（含**字节上传进度** + 管道状态轮询，员工/管理员）；`#/login` / `#/register` 仍打开登录弹层；`askStream` 遇 401 自动 refresh 后重试。
+- **管理端** `frontend/admin/`（挂载 `/admin/`）：首页 KPI（含 FAQ 数、7/30 天趋势、错误分桶、近 14 日问答反馈 KPI/趋势）与安全窗口；知识库卡片（封面显示库名、可置顶/删除的更多菜单仅管理员·超管·库管理者可见；**删库需 `kb:write`**）；知识库/文档/FAQ/快照/密级工作台（「访问范围」多选部门，含「除访客外全选」；文档可改密级并展示同步结果；上传列表展示上传百分比；FAQ 可标过时待审；快照含 FAQ 数且回退可还原 FAQ）；用户/角色/部门、大模型与用量、命中率测试（正式用例 vs 冒烟口径见 [`docs/API.md`](docs/API.md) §11）、RAGAS、问答统计、会话分析、角色缓存、审计、LLM Guard 拦截、系统监控（健康/Grafana）、API 接入指南。管理端问答预览直接展示推理过程（若策略允许），**不使用**访客端三步流水线步骤条。
+- **共享** `frontend/shared/`：`api.js`（含 `upload` 的 `onProgress` 字节进度）、`auth.js`、`router.js`、`brand-mark.js`、`env-particle-field.js`、`citation-pdf.js` / `citation-urls.js`、主题/动效、公共 CSS、接入指南与 Swagger 静态资源。
 
 ### 2.7 可观测性
 
@@ -436,7 +441,7 @@ docker compose ps
 | 文件 | 说明 |
 |------|------|
 | [`docs/openapi.json`](docs/openapi.json) | OpenAPI 3.0.3 机器可读契约 |
-| [`docs/API.md`](docs/API.md) | 中文接口详解（字段、权限、约束；含 FAQ §12.1） |
+| [`docs/API.md`](docs/API.md) | 中文接口详解（字段、权限、约束；含 FAQ §12.1、敏感等级 §12.2） |
 | [`docs/KB_FAQ.md`](docs/KB_FAQ.md) | 知识库 FAQ 产品说明（精确/语义命中、校验、配置） |
 | [`docs/API_INTEGRATION_GUIDE.md`](docs/API_INTEGRATION_GUIDE.md) | 第三方 / Android 等接入指南 |
 | [`docs/CLOUD_DEPLOY.md`](docs/CLOUD_DEPLOY.md) | 云端生产部署与安全加固 |

@@ -14,6 +14,13 @@ export function buildChartPageUrl(docId, page) {
   return `/api/v1/qa/documents/${id}/charts/page-${String(Math.floor(p)).padStart(2, "0")}.png`;
 }
 
+/** 原 PDF 预览（鉴权拉取；前端自行加 #page=N）。 */
+export function buildQaDocumentFileUrl(docId) {
+  const id = String(docId || "").trim();
+  if (!id) return "";
+  return `/api/v1/qa/documents/${id}/file`;
+}
+
 /** 兼容旧 citations 里已拼好的 path 或相对 path。 */
 export function resolveChartFetchUrl(path) {
   const raw = String(path || "").trim();

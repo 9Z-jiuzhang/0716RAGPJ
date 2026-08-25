@@ -540,8 +540,11 @@ async def update_document_sensitivity(
     doc_id: uuid.UUID,
     level: str,
     user: User,
-) -> Document:
-    """更新文档密级并同步到全部分段，并重算关联 FAQ 密级（取全部来源文档最高档）。"""
+) -> tuple[Document, dict[str, Any]]:
+    """更新文档密级并同步到全部分段，并重算关联 FAQ 密级（取全部来源文档最高档）。
+
+    返回 (文档, sync 统计)；授权只信 DB，并强制失效 FAQ Redis / L2 缓存。
+    """
     from sqlalchemy import update as sa_update
 
     from app.models.sensitivity import LEVEL_ORDER, normalize_sensitivity_level
@@ -554,7 +557,10 @@ async def update_document_sensitivity(
     if sens == "restricted" and not is_platform_admin_user(user):
         raise DocumentError("仅管理员可将文档密级设为极高密", http_status=403)
     doc.sensitivity_level = sens
-    await db.execute(sa_update(DocumentChunk).where(DocumentChunk.document_id == doc_id).values(sensitivity_level=sens))
+    chunk_result = await db.execute(
+        sa_update(DocumentChunk).where(DocumentChunk.document_id == doc_id).values(sensitivity_level=sens)
+    )
+    chunks_updated = int(getattr(chunk_result, "rowcount", 0) or 0)
 
     # 联动：凡引用该文档的 FAQ，按全部来源文档重算最高密级
     related_faqs = list(
@@ -567,6 +573,7 @@ async def update_document_sensitivity(
             )
         ).all()
     )
+    faq_related = len(related_faqs)
     faq_updated = 0
     if related_faqs:
         all_source_ids: set[uuid.UUID] = set()
@@ -599,16 +606,39 @@ async def update_document_sensitivity(
         action="doc.sensitivity",
         resource_type="document",
         resource_id=str(doc_id),
-        detail={"sensitivity_level": sens, "faq_updated": faq_updated},
+        detail={
+            "sensitivity_level": sens,
+            "chunks_updated": chunks_updated,
+            "faq_related": faq_related,
+            "faq_updated": faq_updated,
+        },
     )
     await db.commit()
     await db.refresh(doc)
-    await kb_faq_service.invalidate_kb_faq_redis(tenant_id=settings.FAQ_TENANT_ID, kb_id=kb_id)
+    faq_redis_deleted = await kb_faq_service.invalidate_kb_faq_redis(
+        tenant_id=settings.FAQ_TENANT_ID, kb_id=kb_id
+    )
+    qa_cache_deleted = 0
     try:
-        await qa_cache_service.invalidate_by_kb(tenant_id=settings.FAQ_TENANT_ID, kb_ids=[kb_id])
+        qa_cache_deleted = await qa_cache_service.invalidate_by_kb(
+            tenant_id=settings.FAQ_TENANT_ID, kb_ids=[kb_id]
+        )
     except Exception:  # noqa: BLE001
-        pass
-    return doc
+        logger.warning(
+            "qa cache invalidate failed after sensitivity update doc=%s kb=%s",
+            doc_id,
+            kb_id,
+            exc_info=True,
+        )
+    sync = {
+        "sensitivity_level": sens,
+        "chunks_updated": chunks_updated,
+        "faq_related": faq_related,
+        "faq_updated": faq_updated,
+        "faq_redis_deleted": int(faq_redis_deleted or 0),
+        "qa_cache_deleted": int(qa_cache_deleted or 0),
+    }
+    return doc, sync
 
 
 async def update_segment_rules(

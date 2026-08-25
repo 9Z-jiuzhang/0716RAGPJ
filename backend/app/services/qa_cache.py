@@ -43,6 +43,9 @@ class _TTLCache:
     def clear(self) -> None:
         self._data.clear()
 
+    def delete(self, key: str) -> None:
+        self._data.pop(key, None)
+
 
 class QACacheService:
     """精确/检索缓存 + 语义直答门控（语义命中依赖外部候选注入）。"""
@@ -277,6 +280,23 @@ class QACacheService:
         except Exception:  # noqa: BLE001
             logger.debug("exact inflight release failed", exc_info=True)
 
+    async def drop_exact(
+        self,
+        req: CacheLookupRequest,
+        *,
+        redis_client: Any | None = None,
+    ) -> None:
+        """丢弃单题 L1/L2 精确缓存（密级复核失败时用）。"""
+        qh = self._question_hash(req.normalized_question)
+        self._l1.delete(self._l1_key(req, qh))
+        client = redis_client
+        if client is None:
+            return
+        try:
+            await client.delete(self._exact_key(req))
+        except Exception:  # noqa: BLE001
+            logger.debug("exact cache drop failed", exc_info=True)
+
     async def invalidate_by_kb(
         self,
         *,
@@ -295,6 +315,7 @@ class QACacheService:
 
                 client = get_redis_client()
             except Exception:  # noqa: BLE001
+                logger.warning("qa cache invalidate skipped: redis unavailable")
                 return 0
         deleted = 0
         self._l1.clear()

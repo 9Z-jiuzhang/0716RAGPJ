@@ -132,7 +132,18 @@ class MonitorService:
         except Exception:
             kb_count = 0
         try:
-            document_count = int(await self.db.scalar(select(func.count()).select_from(Document)) or 0)
+            document_count = int(
+                await self.db.scalar(
+                    select(func.count())
+                    .select_from(Document)
+                    .join(KnowledgeBase, Document.kb_id == KnowledgeBase.id)
+                    .where(
+                        KnowledgeBase.status != "deleted",
+                        Document.status != "archived",
+                    )
+                )
+                or 0
+            )
         except Exception:
             document_count = 0
         try:

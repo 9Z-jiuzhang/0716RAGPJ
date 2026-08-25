@@ -40,6 +40,12 @@ import {
   buildCitationChartsHtml,
   wireCitationChartInteractions,
 } from "/assets/js/citation-charts.js?v=chart-p2c";
+import {
+  attachInlineCitationUx,
+  attachCitationPdfOpenButtons,
+  citationPrimaryPage,
+  citationSnippet,
+} from "/assets/js/citation-pdf.js?v=cite-pdf-4c";
 import { imageLightbox } from "/assets/js/lightbox.js?v=chart-p2c";
 
 clearDemoFlags();
@@ -116,7 +122,7 @@ function resetLocalChatContext() {
  * 拆分模型推理标签与最终回答。
  *
  * 「推理过程」= 模型 think 正文（要展示）
- * 「处理步骤」= 意图/检索等流水线（不展示，已在 SSE 层忽略）
+ * 「处理步骤」= 意图/检索等流水线（PR-A.4b 步骤条展示；raw thinking 仍不展示）
  *
  * 推理过程与最终答案分开渲染；同时兼容流式输出尚未闭合的标签。
  */
@@ -144,7 +150,15 @@ function splitModelReasoning(raw) {
   return { reasoning: reasoning.trim(), answer, reasoningOpen: false };
 }
 
-/** 渲染助手气泡：模型「推理过程」；生成中展开，结束后可折叠。 */
+/** 仅固定超管账号 super 可展示 raw thinking（与后端策略 A 对齐） */
+function canShowModelReasoning() {
+  if (!isLoggedIn()) return false;
+  const user = getUser();
+  if (!user) return false;
+  return user.is_super_admin === true || String(user.username || "") === "super";
+}
+
+/** 渲染助手气泡：超管可看模型「推理过程」；其余仅最终回答 + 步骤条。 */
 function renderAssistantBubbleHtml(
   rawText,
   extrasHtml = "",
@@ -156,6 +170,7 @@ function renderAssistantBubbleHtml(
   const useInline = qaInlineCitationEnabled && !streaming && answerTrim;
   const useMarkdown = qaMarkdownRenderEnabled && !streaming && answerTrim;
   const answerClass = useMarkdown || useInline ? "msg-answer msg-answer--md" : "msg-answer";
+  const streamCursor = streaming ? `<span class="stream-cursor" aria-hidden="true"></span>` : "";
   let answerInner;
   if (useMarkdown) {
     answerInner = renderMarkdownSafe(answerTrim, { inlineCitations: useInline });
@@ -164,9 +179,9 @@ function renderAssistantBubbleHtml(
   } else {
     answerInner = escapeHtml(answerTrim || placeholder);
   }
-  const answerHtml = `<div class="${answerClass}">${answerInner}</div>`;
+  const answerHtml = `<div class="${answerClass}">${answerInner}${streamCursor}</div>`;
   let reasoningHtml = "";
-  if (reasoning) {
+  if (canShowModelReasoning() && reasoning) {
     const expanded = reasoningOpen && !forceCollapseReasoning;
     const label = expanded ? "推理过程（生成中）" : "推理过程";
     reasoningHtml = `<details class="model-reasoning model-reasoning-think"${expanded ? " open" : ""}>
@@ -571,6 +586,9 @@ function pageLanding({ openAuth = false, mode = "login" } = {}) {
   });
   document.getElementById("btnLandingGuest")?.addEventListener("click", (e) => {
     e.stopPropagation();
+    // 必须清登录态：否则仍带超管/员工 token，「访客」只是进了 /chat，推理与权限仍按原账号
+    clearAuth();
+    resetLocalChatContext();
     navigate("/chat");
     dispatchRender();
   });
@@ -597,6 +615,9 @@ function pageLanding({ openAuth = false, mode = "login" } = {}) {
     btn.addEventListener("click", () => showLandingAuthTab(btn.dataset.tab));
   });
   document.getElementById("btnGuestEnter")?.addEventListener("click", () => {
+    clearAuth();
+    resetLocalChatContext();
+    closeAuthModal();
     navigate("/chat");
     dispatchRender();
   });
@@ -807,9 +828,8 @@ async function loadQaComposerOptions() {
     if (typeof data?.inline_citation_enabled === "boolean") {
       qaInlineCitationEnabled = data.inline_citation_enabled;
     }
-    if (typeof data?.suggested_questions_enabled === "boolean") {
-      qaSuggestedQuestionsEnabled = data.suggested_questions_enabled;
-    }
+    // 推荐追问 UI 暂缓：忽略服务端开关，保持不展示
+    qaSuggestedQuestionsEnabled = false;
     const opts = [`<option value="">全部可访问知识库</option>`];
     for (const kb of items) {
       opts.push(
@@ -1721,15 +1741,31 @@ function renderCitationItemHtml(c) {
   const docName = escapeHtml(c.doc_name || "未知文档");
   const chunkIndex = escapeHtml(c.chunk_index);
   const scoreLabel = formatRetrievalRelevance(c.score);
+  const page = citationPrimaryPage(c);
+  const docId = String(c.doc_id || "").trim();
+  const snippet = citationSnippet(c, 180);
   const idAttr = citeIdx > 0 ? ` id="citation-${citeIdx}" data-citation-index="${citeIdx}"` : "";
+  const dataAttrs = [
+    docId ? `data-doc-id="${escapeHtml(docId)}"` : "",
+    `data-doc-name="${escapeHtml(c.doc_name || "未知文档")}"`,
+    page > 0 ? `data-page="${page}"` : "",
+    snippet ? `data-snippet="${escapeHtml(snippet)}"` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const sheetMeta =
     c.sheet_name ? ` · 表 ${escapeHtml(String(c.sheet_name))}` : "";
+  const pageMeta = page > 0 ? ` · 第 ${page} 页` : "";
+  const pdfBtn =
+    docId && page > 0
+      ? `<button type="button" class="citation-pdf-link" data-open-pdf data-doc-id="${escapeHtml(docId)}" data-doc-name="${escapeHtml(c.doc_name || "")}" data-page="${page}">打开 PDF</button>`
+      : "";
   const tablePreview =
     c.block_type === "table" && c.structure_html
       ? `<div class="citation-table-preview">${c.structure_html}</div>`
       : "";
-  return `<details class="citation-item"${idAttr}>
-    <summary class="citation-meta">${citeLabel}${docName}${sheetMeta} · 分段 #${chunkIndex} · 检索相关度 ${scoreLabel}</summary>
+  return `<details class="citation-item"${idAttr} ${dataAttrs}>
+    <summary class="citation-meta">${citeLabel}${docName}${sheetMeta}${pageMeta} · 分段 #${chunkIndex} · 检索相关度 ${scoreLabel}${pdfBtn ? ` · ${pdfBtn}` : ""}</summary>
     <div class="citation-content">${escapeHtml(c.content || "")}</div>
     ${tablePreview}
   </details>`;
@@ -1741,36 +1777,32 @@ let qaMaxCitationCharts = 8;
 let qaMarkdownRenderEnabled = true;
 /** 内联 [N] 引用（GET /qa/accessible-kbs.inline_citation_enabled） */
 let qaInlineCitationEnabled = true;
-/** 推荐追问（GET /qa/accessible-kbs.suggested_questions_enabled） */
-let qaSuggestedQuestionsEnabled = true;
+/** 推荐追问：暂缓展示（后端可仍下发 SSE，前端一律不渲染） */
+let qaSuggestedQuestionsEnabled = false;
 
-function attachInlineCitationHandlers(root) {
+function attachInlineCitationHandlers(root, citations = null) {
   if (!root || !qaInlineCitationEnabled) return;
-  root.querySelectorAll(".inline-citation").forEach((btn) => {
-    if (btn.dataset.inlineBound === "1") return;
-    btn.dataset.inlineBound = "1";
-    btn.addEventListener("click", (event) => {
-      event.preventDefault();
-      const idx = String(btn.dataset.citeIndex || "").trim();
-      if (!idx) return;
-      const row = root.closest(".msg-row") || root;
-      const target = row.querySelector(`#citation-${idx}, .citation-item[data-citation-index="${idx}"]`);
-      if (!target) return;
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      if (target.tagName === "DETAILS") target.open = true;
-      target.classList.add("citation-item--highlight");
-      window.setTimeout(() => target.classList.remove("citation-item--highlight"), 2200);
-    });
-  });
+  const list =
+    citations ||
+    root.closest?.(".msg-row")?._qaCitations ||
+    root._qaCitations ||
+    null;
+  attachInlineCitationUx(root, { citations: list, toast });
+  attachCitationPdfOpenButtons(root, { toast });
 }
 
 function recordChartUiEvent(action) {
   void api.post("/qa/chart-ui/event", { action }).catch(() => {});
 }
 
-function finalizeAssistantBubbleContent(bubble) {
+function finalizeAssistantBubbleContent(bubble, citations = null) {
   if (!bubble) return;
-  attachInlineCitationHandlers(bubble);
+  const row = bubble.closest(".msg-row");
+  if (citations) {
+    if (row) row._qaCitations = citations;
+    bubble._qaCitations = citations;
+  }
+  attachInlineCitationHandlers(bubble, citations || row?._qaCitations || null);
   wireCitationChartInteractions(bubble, {
     lightbox: imageLightbox,
     onHydrate: () => recordChartUiEvent("hydrate"),
@@ -1781,6 +1813,98 @@ function finalizeAssistantBubbleContent(bubble) {
 
 function renderCitationChartsHtml(citations) {
   return buildCitationChartsHtml(citations, qaMaxCitationCharts, escapeHtml);
+}
+
+/** PR-A.4b：问答流水线步骤（动作型文案，非 raw thinking）
+ * phase: search → found → writing → complete（保留完成态）| hidden
+ * 落库 / 点赞启用等在 complete 之后静默进行，不再显示「正在组织回答…」
+ */
+function createAskProgressState({ enabled = true } = {}) {
+  return {
+    visible: enabled,
+    phase: enabled ? "search" : "hidden",
+    citationCount: 0,
+    noCitations: false,
+  };
+}
+
+function askProgressPhaseIndex(phase) {
+  if (phase === "search") return 0;
+  if (phase === "found") return 1;
+  if (phase === "writing") return 2;
+  if (phase === "complete") return 3; // 三步均完成，无 active
+  return -1;
+}
+
+function askProgressFoundStepTitle(state, { done = false } = {}) {
+  if (state.citationCount > 0) {
+    return done
+      ? `找到 ${state.citationCount} 段证据`
+      : `找到 ${state.citationCount} 段相关证据`;
+  }
+  if (state.noCitations) return "未找到可引用分段";
+  return done ? "检索结果已整理" : "整理检索结果";
+}
+
+function askProgressStepTitles(state) {
+  const done = state.phase === "complete";
+  return [
+    done ? "知识库检索完毕" : "正在检索知识库…",
+    askProgressFoundStepTitle(state, { done }),
+    done ? "以下是完整回答" : "正在组织回答…",
+  ];
+}
+
+function askProgressCitationHeading(state) {
+  if (!state.visible) return "引用来源";
+  if (state.phase === "complete") return "引用来源";
+  if (state.phase === "search") return "正在检索知识库…";
+  if (state.phase === "found") return askProgressFoundStepTitle(state);
+  if (state.phase === "writing") {
+    if (state.citationCount > 0) return askProgressFoundStepTitle(state);
+    return "正在组织回答…";
+  }
+  return "引用来源";
+}
+
+function msgThinkingDotsHtml() {
+  return `<span class="msg-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>`;
+}
+
+function buildAskProgressStepsInner(state) {
+  if (!state.visible || askProgressPhaseIndex(state.phase) < 0) return "";
+  const phaseIdx = askProgressPhaseIndex(state.phase);
+  const steps = askProgressStepTitles(state);
+  return steps
+    .map((title, index) => {
+      let status = "pending";
+      if (index < phaseIdx) status = "completed";
+      else if (index === phaseIdx) status = "active";
+      const rowClass = ["msg-thinking"];
+      if (status === "active") rowClass.push("is-active");
+      if (status === "completed") rowClass.push("is-done");
+      if (status === "pending") rowClass.push("is-pending");
+      const dots = status === "active" ? msgThinkingDotsHtml() : "";
+      return `<div class="${rowClass.join(" ")}"><span class="msg-thinking-text">${escapeHtml(title)}</span>${dots}</div>`;
+    })
+    .join("");
+}
+
+function setAskProgressPanel(bubble, stepsInnerHtml) {
+  initAssistantBubbleShell(bubble);
+  const panel = bubble?.querySelector(".msg-pipeline-reasoning");
+  if (!panel) return;
+  if (stepsInnerHtml) {
+    panel.innerHTML = `<div class="ask-progress-steps">${stepsInnerHtml}</div>`;
+    panel.hidden = false;
+  } else {
+    panel.innerHTML = "";
+    panel.hidden = true;
+  }
+}
+
+function hideAskProgressPanel(bubble) {
+  setAskProgressPanel(bubble, "");
 }
 
 function buildCitationsHtml(citations) {
@@ -1806,6 +1930,28 @@ function buildCitationsHtml(citations) {
       : `引用来源（共 ${items.length} 段，点击展开原文）`;
   const chartsHtml = renderCitationChartsHtml(items);
   return `<div class="citations"><div class="citation-heading">${hint}</div>${chartsHtml}${primaryHtml}${restHtml}</div>`;
+}
+
+/** 引用区等待态：标题与步骤条同源，活跃步骤用「文字 + …」 */
+function buildCitationsPendingHtml(progressState) {
+  const heading = askProgressCitationHeading(progressState || { visible: false, phase: "hidden" });
+  const showDots =
+    progressState?.visible &&
+    (progressState.phase === "search" || progressState.phase === "writing");
+  const dots = showDots ? msgThinkingDotsHtml() : "";
+  return `<div class="citations citations--pending" aria-live="polite" aria-busy="true" aria-label="${escapeHtml(heading)}">
+    <div class="citation-heading msg-thinking is-active"><span class="msg-thinking-text">${escapeHtml(heading)}</span>${dots}</div>
+  </div>`;
+}
+
+function composeAssistantExtras({
+  citationsHtml = "",
+  confidenceTip = "",
+  citationsPending = false,
+  progressState = null,
+} = {}) {
+  const body = citationsHtml || (citationsPending ? buildCitationsPendingHtml(progressState) : "");
+  return `${body}${confidenceTip || ""}`;
 }
 
 function buildSuggestedQuestionsHtml(questions) {
@@ -1841,6 +1987,8 @@ function attachSuggestedQuestionHandlers(root) {
 }
 
 function mountSuggestedQuestions(row, questions) {
+  // 推荐追问 UI 暂缓：收到 SSE 也不挂载
+  if (!qaSuggestedQuestionsEnabled) return;
   if (!row || !questions?.length) return;
   row.querySelectorAll(".suggested-questions").forEach((el) => el.remove());
   const html = buildSuggestedQuestionsHtml(questions);
@@ -1863,12 +2011,15 @@ function buildMessageRowFromApi(m) {
   const row = buildMessageRow(role, html);
   if (role === "assistant") {
     if (m.id) row.dataset.messageId = String(m.id);
+    const cites = Array.isArray(m.citations) ? m.citations : [];
+    row._qaCitations = cites;
     attachAssistantActions(row);
     const rating = m.retrieval_meta?.feedback?.rating;
     if (rating === "useful" || rating === "useless") {
       row.dataset.rating = rating;
       applyMsgRatingUi(row, rating);
     }
+    attachInlineCitationHandlers(row, cites);
     wireCitationChartInteractions(row, {
       lightbox: imageLightbox,
       onHydrate: () => recordChartUiEvent("hydrate"),
@@ -2001,30 +2152,16 @@ function appendMessage(role, contentHtml, { scroll = true } = {}) {
   return row.querySelector(".msg-bubble");
 }
 
-/** 助手气泡「正在思考中」占位（单行，避免 pre-wrap 把换行变成留白） */
-function thinkingPlaceholderHtml() {
-  return `<span class="msg-thinking" aria-live="polite"><span class="msg-thinking-text">正在思考中</span><span class="msg-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>`;
-}
-
-/** 助手气泡外壳：仅流式正文区（不展示处理步骤） */
+/** 助手气泡外壳：流水线步骤条 + 流式正文区 */
 function initAssistantBubbleShell(bubble) {
   if (!bubble) return;
   if (bubble.querySelector(".msg-stream-body")) return;
-  bubble.innerHTML = `<div class="msg-stream-body"></div>`;
+  bubble.innerHTML = `<div class="msg-pipeline-reasoning" hidden aria-live="polite"></div><div class="msg-stream-body"></div>`;
 }
 
 function getStreamBody(bubble) {
   initAssistantBubbleShell(bubble);
   return bubble.querySelector(".msg-stream-body");
-}
-
-function showThinkingPlaceholder(bubble) {
-  if (!bubble) return;
-  initAssistantBubbleShell(bubble);
-  bubble.classList.add("is-thinking");
-  bubble.classList.remove("streaming-cursor");
-  const body = getStreamBody(bubble);
-  if (body) body.innerHTML = thinkingPlaceholderHtml();
 }
 
 function setAssistantStreamHtml(bubble, html) {
@@ -2033,10 +2170,6 @@ function setAssistantStreamHtml(bubble, html) {
   bubble.classList.remove("is-thinking");
   const body = getStreamBody(bubble);
   if (body) body.innerHTML = html;
-}
-
-function clearThinkingState(bubble) {
-  bubble?.classList.remove("is-thinking");
 }
 
 /** 发送 / 中止按钮切换 */
@@ -2073,7 +2206,8 @@ function stopAskStream() {
 /** 中止后收尾气泡：保留已生成内容，并标注已中止 */
 function finalizeAbortedAsk(bubble, partialText) {
   if (!bubble || !bubble.isConnected) return;
-  clearThinkingState(bubble);
+  hideAskProgressPanel(bubble);
+  bubble.classList.remove("is-thinking");
   bubble.classList.remove("streaming-cursor");
   const text = String(partialText || "").trim();
   if (!text) {
@@ -2115,7 +2249,7 @@ async function sendQuestion(presetQuestion, options = {}) {
   }
   const input = document.getElementById("questionInput");
   const question = String(presetQuestion ?? input?.value ?? "").trim();
-  // 点选热门，或复制粘贴热门同题：走秒答体验（不闪「思考中」）
+  // 点选热门，或复制粘贴热门同题：走秒答体验（不展示流水线步骤）
   const explicitFaqClick =
     options.explicit_faq_click === true || matchHotFaqExactQuestion(question);
   // 空问题拦截
@@ -2134,38 +2268,49 @@ async function sendQuestion(presetQuestion, options = {}) {
   const charCount = document.getElementById("qaCharCount");
   if (charCount) charCount.textContent = "0";
   resetComposerHeight();
-  // 创建助手气泡（思考中占位，再流式写入）
+  // 创建助手气泡（步骤条 + 流式正文）
   const bubble = appendMessage("assistant", "");
   initAssistantBubbleShell(bubble);
-  // 精确同题 / 点选：不立刻展示思考态；普通提问延迟展示，FAQ 命中则永不闪思考
-  let thinkingTimer = null;
+  const askProgress = createAskProgressState({ enabled: !explicitFaqClick });
   let citationsHtml = "";
+  let citationsList = [];
+  let citationsReceived = false;
   let confidenceTip = "";
   let rawAssistantText = "";
   let cacheHit = false;
-  const armThinking = () => {
-    if (explicitFaqClick) return;
-    if (thinkingTimer != null) {
-      window.clearTimeout(thinkingTimer);
-      thinkingTimer = null;
-    }
-    thinkingTimer = window.setTimeout(() => {
-      if (!cacheHit && !rawAssistantText && bubble.isConnected) {
-        showThinkingPlaceholder(bubble);
-      }
-    }, 220);
+
+  const hideAskProgress = () => {
+    askProgress.visible = false;
+    askProgress.phase = "hidden";
+    hideAskProgressPanel(bubble);
   };
+
+  const refreshAskProgressPanel = () => {
+    if (!askProgress.visible) {
+      hideAskProgressPanel(bubble);
+      return;
+    }
+    setAskProgressPanel(bubble, buildAskProgressStepsInner(askProgress));
+  };
+
+  /** 有正文 → 三步完成态并保留；无正文 → 隐藏（落库/点赞静默，不再显示「正在组织」） */
+  const settleAskProgress = () => {
+    if (!askProgress.visible && askProgress.phase === "hidden") return;
+    if (String(rawAssistantText || "").trim()) {
+      askProgress.visible = true;
+      askProgress.phase = "complete";
+      refreshAskProgressPanel();
+      return;
+    }
+    hideAskProgress();
+  };
+
+  if (askProgress.visible) {
+    refreshAskProgressPanel();
+  }
+
   askAbort = new AbortController();
   setAskStreaming(true);
-  armThinking();
-
-  const clearThinkingArmed = () => {
-    if (thinkingTimer != null) {
-      window.clearTimeout(thinkingTimer);
-      thinkingTimer = null;
-    }
-    clearThinkingState(bubble);
-  };
 
   const kbSelect = document.getElementById("qaKbSelect");
   const kbId = (kbSelect?.value || "").trim();
@@ -2174,11 +2319,82 @@ async function sendQuestion(presetQuestion, options = {}) {
 
   const runAsk = async (sessionId) => {
     citationsHtml = "";
+    citationsList = [];
+    citationsReceived = false;
     confidenceTip = "";
     rawAssistantText = "";
     cacheHit = false;
+    let streamPhaseComplete = false;
+    let streamIdleTimer = null;
+
+    const clearStreamIdleTimer = () => {
+      if (streamIdleTimer != null) {
+        window.clearTimeout(streamIdleTimer);
+        streamIdleTimer = null;
+      }
+    };
+
+    /** 统一刷新助手气泡；streamPhaseComplete 后启用 Markdown（不必等 done） */
+    const refreshAssistantBubble = (opts = {}) => {
+      if (!bubble.isConnected) return;
+      const { finalizeCharts = false } = opts;
+      const streaming = !streamPhaseComplete && !cacheHit;
+      refreshAskProgressPanel();
+      setAssistantStreamHtml(
+        bubble,
+        renderAssistantBubbleHtml(
+          rawAssistantText,
+          composeAssistantExtras({
+            citationsHtml,
+            confidenceTip,
+            citationsPending: !citationsReceived && !cacheHit && askProgress.visible,
+            progressState: askProgress,
+          }),
+          {
+            streaming,
+            forceCollapseReasoning: streamPhaseComplete || cacheHit,
+          }
+        )
+      );
+      if (finalizeCharts || ((streamPhaseComplete || cacheHit) && citationsHtml)) {
+        finalizeAssistantBubbleContent(bubble, citationsList);
+      }
+    };
+
+    /** chunk 空闲一段时间后视为流式结束：步骤条转完成态；点赞等 done 后静默启用 */
+    const markAnswerVisuallyComplete = (opts = {}) => {
+      const { finalizeCharts = true, unlockSend = true } = opts;
+      if (!bubble.isConnected || !rawAssistantText.trim()) return;
+      streamPhaseComplete = true;
+      settleAskProgress();
+      refreshAssistantBubble({ finalizeCharts });
+      const row = bubble.closest(".msg-row");
+      if (row) {
+        attachAssistantActions(row, { ready: false });
+      }
+      if (unlockSend) {
+        bubble.classList.remove("streaming-cursor");
+        setAskStreaming(false);
+      }
+    };
+
+    const armStreamIdleFinalize = () => {
+      if (cacheHit || streamPhaseComplete) return;
+      clearStreamIdleTimer();
+      streamIdleTimer = window.setTimeout(() => {
+        streamIdleTimer = null;
+        markAnswerVisuallyComplete();
+      }, 350);
+    };
+
     initAssistantBubbleShell(bubble);
-    armThinking();
+    if (askProgress.visible) {
+      askProgress.phase = "search";
+      askProgress.citationCount = 0;
+      askProgress.noCitations = false;
+      refreshAskProgressPanel();
+      refreshAssistantBubble();
+    }
     await askStream(
       {
         question,
@@ -2193,17 +2409,21 @@ async function sendQuestion(presetQuestion, options = {}) {
         onEvent: (event, data) => {
           // LLM Guard 拒绝：显示固定安全提示，不继续等待回答或引用。
           if (event === "guard_blocked") {
-            clearThinkingArmed();
+            hideAskProgress();
+            clearStreamIdleTimer();
             bubble.classList.remove("streaming-cursor");
+            citationsReceived = true;
             rawAssistantText = data.message || "该请求未通过安全检查，系统已拒绝处理。";
             setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(rawAssistantText)}</span>`);
             return;
           }
-          // 敏感话题无权：明确提示，不展示思考
+          // 敏感话题无权：明确提示，不展示流水线步骤
           if (event === "access_denied") {
             cacheHit = true;
-            clearThinkingArmed();
+            hideAskProgress();
+            clearStreamIdleTimer();
             bubble.classList.remove("streaming-cursor");
+            citationsReceived = true;
             rawAssistantText = data.message || data.reason || "该内容需要更高权限访问";
             setAssistantStreamHtml(
               bubble,
@@ -2211,16 +2431,21 @@ async function sendQuestion(presetQuestion, options = {}) {
             );
             return;
           }
-          // 缓存命中：立即取消思考态；FAQ/缓存直答置信度默认满分，不等落库 done
+          // 缓存命中：FAQ/缓存直答置信度默认满分；有正文后步骤条转完成态，不等落库
           if (event === "cache_hit") {
             cacheHit = true;
-            clearThinkingArmed();
             bubble.classList.remove("is-thinking");
             confidenceTip = formatConfidenceTip({ confidence: "high", confidence_score: 1.0 });
             const tipHost = bubble.closest(".msg-row")?.querySelector(".msg-meta") || null;
             if (tipHost) {
               tipHost.dataset.routeTip = "FAQ 秒答";
               tipHost.setAttribute("title", "FAQ 秒答");
+            }
+            if (rawAssistantText.trim()) {
+              settleAskProgress();
+              streamPhaseComplete = true;
+              clearStreamIdleTimer();
+              refreshAssistantBubble({ finalizeCharts: citationsReceived });
             }
             attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
             return;
@@ -2229,14 +2454,10 @@ async function sendQuestion(presetQuestion, options = {}) {
           if (event === "confidence") {
             confidenceTip = formatConfidenceTip(data);
             if (cacheHit && rawAssistantText) {
-              clearThinkingArmed();
-              setAssistantStreamHtml(
-                bubble,
-                renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}`, {
-                  forceCollapseReasoning: true,
-                })
-              );
-              finalizeAssistantBubbleContent(bubble);
+              settleAskProgress();
+              streamPhaseComplete = true;
+              clearStreamIdleTimer();
+              refreshAssistantBubble({ finalizeCharts: true });
               attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
             }
             return;
@@ -2260,24 +2481,48 @@ async function sendQuestion(presetQuestion, options = {}) {
             event === "reasoning" ||
             event === "trace" ||
             event === "traces" ||
-            event === "intent" ||
-            event === "query_processing"
+            event === "intent"
           ) {
             return;
           }
-          // 增量文本：推理标签由前端分开展示，正文中仅显示最终回答。
+          if (event === "query_processing") {
+            if (askProgress.visible && askProgress.phase === "search") {
+              refreshAskProgressPanel();
+            }
+            return;
+          }
+          // 增量文本：正文中仅显示最终回答
           if (event === "chunk") {
-            clearThinkingArmed();
-            bubble.classList.add("streaming-cursor");
+            if (askProgress.visible && askProgress.phase !== "writing") {
+              askProgress.phase = "writing";
+            }
+            if (streamPhaseComplete && !cacheHit) {
+              streamPhaseComplete = false;
+            }
             rawAssistantText += data.content || data || "";
-            setAssistantStreamHtml(bubble, renderAssistantBubbleHtml(rawAssistantText, "", { streaming: true }));
+            if (cacheHit) {
+              streamPhaseComplete = true;
+              clearStreamIdleTimer();
+              settleAskProgress();
+            }
+            refreshAssistantBubble({ finalizeCharts: cacheHit && citationsReceived });
+            if (!cacheHit) armStreamIdleFinalize();
             scrollMessagesToBottom();
           }
           // 引用来源：按相关度排序，默认展示 Top-3，其余折叠
           // FAQ/缓存秒答路径：收到 citations 立即渲染，不等 done（done 前还有落库）
           if (event === "citations") {
+            citationsReceived = true;
             const items = data.items || data.citations || data || [];
             const list = Array.isArray(items) ? items : [];
+            citationsList = list;
+            if (askProgress.visible) {
+              askProgress.citationCount = list.length;
+              askProgress.noCitations = list.length === 0;
+              if (askProgress.phase === "search") {
+                askProgress.phase = "found";
+              }
+            }
             if (!list.length) {
               citationsHtml = cacheHit
                 ? ""
@@ -2285,37 +2530,45 @@ async function sendQuestion(presetQuestion, options = {}) {
             } else {
               citationsHtml = buildCitationsHtml(list);
             }
-            if (cacheHit && rawAssistantText) {
-              clearThinkingArmed();
-              setAssistantStreamHtml(
-                bubble,
-                renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}`, {
-                  forceCollapseReasoning: true,
-                })
-              );
-              finalizeAssistantBubbleContent(bubble);
+            const row = bubble.closest(".msg-row");
+            if (row) row._qaCitations = list;
+            if (rawAssistantText) {
+              if (cacheHit) {
+                settleAskProgress();
+                streamPhaseComplete = true;
+                clearStreamIdleTimer();
+              }
+              refreshAssistantBubble({ finalizeCharts: true });
+              if (cacheHit) {
+                attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
+              }
+            } else if (cacheHit) {
+              streamPhaseComplete = true;
+              clearStreamIdleTimer();
+              refreshAssistantBubble({ finalizeCharts: true });
               attachAssistantActions(bubble.closest(".msg-row"), { ready: false });
+            } else {
+              refreshAssistantBubble();
             }
           }
-          // 结束
+          // 结束：有正文保留步骤完成态；无正文隐藏。点赞随 message_id 静默启用
           if (event === "done") {
-            clearThinkingArmed();
+            clearStreamIdleTimer();
+            streamPhaseComplete = true;
+            citationsReceived = true;
             bubble.classList.remove("streaming-cursor");
             currentSessionId = data.session_id || currentSessionId;
             confidenceTip = formatConfidenceTip(data);
-            setAssistantStreamHtml(
-              bubble,
-              renderAssistantBubbleHtml(rawAssistantText, `${citationsHtml}${confidenceTip}`, {
-                forceCollapseReasoning: true,
-              })
-            );
-            finalizeAssistantBubbleContent(bubble);
+            settleAskProgress();
+            refreshAssistantBubble({ finalizeCharts: true });
             const row = bubble.closest(".msg-row");
             if (row && data.message_id) {
-              row.dataset.messageId = data.message_id;
+              row.dataset.messageId = String(data.message_id);
             }
-            attachAssistantActions(row, { ready: true });
-            // 收到 done 立刻解锁发送，不等流尾部埋点
+            if (row) {
+              attachAssistantActions(row, { ready: true });
+            }
+            // 收到 done 立刻解锁发送（流式空闲时可能已解锁，此处兜底）
             setAskStreaming(false);
             highlightSidebarSession(currentSessionId);
             loadChatSidebar();
@@ -2327,7 +2580,8 @@ async function sendQuestion(presetQuestion, options = {}) {
           }
           // 错误
           if (event === "error") {
-            clearThinkingArmed();
+            hideAskProgress();
+            clearStreamIdleTimer();
             const msg = data.message || data || "问答失败";
             // 身份切换后沿用旧会话时后端返回无权访问：清会话并新建一次
             if (typeof msg === "string" && msg.includes("无权访问") && sessionId) {
@@ -2343,7 +2597,7 @@ async function sendQuestion(presetQuestion, options = {}) {
   try {
     await runAsk(currentSessionId);
   } catch (err) {
-    clearThinkingArmed();
+    hideAskProgress();
     if (err.name === "AbortError") {
       if (bubble.isConnected) {
         finalizeAbortedAsk(bubble, rawAssistantText);
@@ -2357,7 +2611,7 @@ async function sendQuestion(presetQuestion, options = {}) {
         await runAsk(null);
         return;
       } catch (retryErr) {
-        clearThinkingArmed();
+        hideAskProgress();
         if (retryErr.name === "AbortError") {
           if (bubble.isConnected) {
             finalizeAbortedAsk(bubble, rawAssistantText);
@@ -2373,7 +2627,10 @@ async function sendQuestion(presetQuestion, options = {}) {
       err.message === "UNAUTHORIZED" ? "登录已失效，请重新登录后再试" : err.message || "问答失败";
     setAssistantStreamHtml(bubble, `<span class="text-danger">${escapeHtml(failMsg)}</span>`);
   } finally {
-    clearThinkingArmed();
+    // 成功路径保留完成态；失败/中止/无正文已在上方 hide
+    if (askProgress.phase !== "complete") {
+      hideAskProgress();
+    }
     askAbort = null;
     setAskStreaming(false);
   }

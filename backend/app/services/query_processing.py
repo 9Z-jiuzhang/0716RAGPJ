@@ -42,14 +42,14 @@ _QUERY_PROCESSING_SYSTEM_PROMPT = """你是企业知识库检索 Query 预处理
 def _strip_model_reasoning(text: str) -> str:
     """移除常见推理标签，防止模型内部推理污染检索文本。"""
     cleaned = re.sub(
-        r"<(?:redacted_thinking|think|thinking)>[\s\S]*?</(?:redacted_thinking|think|thinking)>",
+        r"<(?:redacted_thinking|think|thinking|思考)>[\s\S]*?</(?:redacted_thinking|think|thinking|思考)>",
         "",
         text or "",
         flags=re.IGNORECASE,
     )
     # 兼容上游返回未闭合推理标签的情况，标签之后的内容全部丢弃。
     cleaned = re.sub(
-        r"<(?:redacted_thinking|think|thinking)>[\s\S]*$",
+        r"<(?:redacted_thinking|think|thinking|思考)>[\s\S]*$",
         "",
         cleaned,
         flags=re.IGNORECASE,

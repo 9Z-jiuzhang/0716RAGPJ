@@ -9,7 +9,13 @@ from urllib.parse import quote
 from app.core.database import get_db
 from app.core.dependencies import require_kb_access
 from app.models import User
-from app.schemas.document import DocumentSensitivityUpdate, UpdateChunkRequest, UpdateSegmentRulesRequest
+from app.schemas.document import (
+    DocumentSensitivityUpdate,
+    DocumentSensitivityUpdateResponse,
+    DocumentSensitivitySyncStats,
+    UpdateChunkRequest,
+    UpdateSegmentRulesRequest,
+)
 from app.schemas.response import ok
 from app.services import document_pipeline, document_service
 from app.utils.exceptions import DocumentError
@@ -371,9 +377,9 @@ async def update_document_sensitivity(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_kb_access("doc:write")),
 ):
-    """更新文档敏感等级，并同步到分段。"""
+    """更新文档敏感等级，同步分段与关联 FAQ，并失效 FAQ Redis / QA 精确缓存。"""
     try:
-        doc = await document_service.update_document_sensitivity(
+        doc, sync = await document_service.update_document_sensitivity(
             db,
             kb_id,
             _uuid(doc_id, "doc_id"),
@@ -382,7 +388,11 @@ async def update_document_sensitivity(
         )
     except DocumentError as exc:
         _raise_doc_error(exc)
-    return ok(document_service.to_document_response(doc).model_dump())
+    payload = DocumentSensitivityUpdateResponse(
+        document=document_service.to_document_response(doc),
+        sync=DocumentSensitivitySyncStats(**sync),
+    )
+    return ok(payload.model_dump())
 
 
 @router.put("/{doc_id}/chunks/{chunk_id}")
